@@ -30,7 +30,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.common.outbox.model.DomainEventEnvelopeJson;
-import com.app.modules.mail.service.MailSender;
+import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.message.messaging.MessageEventTypes;
 import com.app.modules.notification.entity.Notification;
 import com.app.modules.notification.repository.NotificationRepository;
@@ -96,7 +96,12 @@ class MessageNotificationConsumerIT {
     @Autowired private UserRepository userRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
-    @MockitoBean private MailSender mailSender;
+    // Declared at the concrete type rather than at the MailSender interface, because
+    // ModerationMailEventHandler and MailCampaignSenderJob both inject
+    // AbstractTemplateMailSender. An interface-typed override replaces the transport bean with a
+    // proxy that is not assignable to it, and the context then fails to start before any
+    // assertion runs.
+    @MockitoBean private AbstractTemplateMailSender mailSender;
 
     private User sender;
     private User recipient1;
