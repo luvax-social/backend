@@ -163,12 +163,12 @@ app:
   mail:
     consumer:
       enabled: ${MAIL_CONSUMER_ENABLED:false}
-    # Deliberately literal, not an environment placeholder. An APP_MAIL_TRANSPORT environment
-    # variable still outranks this, and MailTransportGuard is what refuses to boot if that
-    # override selected the non-network noop transport outside the dev profile.
-    # The dev profile resolves this from APP_MAIL_TRANSPORT instead (application-dev.yml); this
-    # base literal is what prod inherits unmodified.
-    transport: resend
+    # Resolved from the environment in every profile, defaulting to the network transport.
+    # A real operating-system environment variable always outranked the literal that stood here,
+    # but the .env file application.yaml imports does not, so the documented way to select a
+    # transport locally was inert outside dev and MailTransportGuard only ever observed resend.
+    # The guard, not this default, is what refuses the non-network noop transport outside dev.
+    transport: ${APP_MAIL_TRANSPORT:resend}
     resend:
       # Defaulted to empty so a developer running the noop transport needs no Resend credential.
       # ResendMailConfig rejects a blank key, so selecting resend without one still fails at startup.

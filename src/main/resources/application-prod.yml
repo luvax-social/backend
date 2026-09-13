@@ -76,7 +76,11 @@ app:
   mail:
     consumer:
       enabled: true
-    transport: resend
+    # transport is intentionally not set here. It is bound from APP_MAIL_TRANSPORT in
+    # application.yaml, which defaults to resend, and MailTransportGuard refuses the non-network
+    # noop transport outside dev. The literal that stood here shadowed that variable, so the
+    # guard's documented refusal was unreachable under this profile and the safe outcome was an
+    # accident of the literal rather than something enforced.
     app-name: ${MAIL_APP_NAME}
     frontend-base-url: ${FRONTEND_BASE_URL}
   security:
