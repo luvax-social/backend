@@ -479,6 +479,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The pull request check that rejects an over-length commit subject now actually runs; it was invoked in a way that failed with a permission error before the script was ever read, so the gate was red on every pull request for a reason unrelated to commit subjects.
 - A production start now refuses to proceed and names every variable at fault when a required environment variable is unset, instead of binding the unresolved placeholder as literal text and serving traffic with values such as `${JWT_ISSUER}` in every issued token.
 - An appeal or confirmation link is no longer destroyed by a refusal it had nothing to do with; both paths now run every check that can refuse while the token is still spendable, and redeem it only once the write has succeeded.
 - A recipient the deployment was configured never to mail is now recorded as skipped by every mail lane alike, instead of being dead-lettered by one, counted as a delivery failure by another and swallowed by a third.

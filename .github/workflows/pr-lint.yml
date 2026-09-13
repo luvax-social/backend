@@ -24,8 +24,13 @@ jobs:
           fetch-depth: 0
       - name: Reject a commit subject over 80 characters
         shell: bash
+        # Invoked through bash rather than as a command. The script is committed mode 100644 and
+        # actions/checkout restores that mode verbatim, so executing it directly is execve on a
+        # non-executable file: exit 126 before the shebang is even read, on every pull request.
+        # Naming the interpreter is smaller than carrying an executable bit in the index and
+        # cannot be undone by the mode being lost again.
         run: >
-          scripts/check_commit_subjects.sh
+          bash scripts/check_commit_subjects.sh
           "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
 
   lint-pr-title:
