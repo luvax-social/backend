@@ -8,6 +8,26 @@ permissions:
   pull-requests: read
 
 jobs:
+  # This workflow validates the pull request title, and that is all it validated until now, so
+  # nothing mechanically enforced the subject limit on the commits underneath it. Six subjects
+  # over the limit reached develop that way. The job below closes that gap.
+  lint-commit-subjects:
+    name: Lint commit subjects
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The check walks base..head, so the runner needs both commits present rather than the
+          # single-commit default checkout.
+          fetch-depth: 0
+      - name: Reject a commit subject over 80 characters
+        shell: bash
+        run: >
+          scripts/check_commit_subjects.sh
+          "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+
   lint-pr-title:
     name: Lint PR title
     runs-on: ubuntu-latest
