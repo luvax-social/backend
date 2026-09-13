@@ -47,6 +47,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AppException.class)
     public ResponseEntity<ApiResponse<?>> handleAppException(AppException ex) {
+        // DEBUG, not WARN: a domain rejection is an expected outcome, it is already fully
+        // described by the code in the response, and an unauthenticated caller can generate
+        // these at will. The code alone is what a diagnostic needs; the details map can carry
+        // caller-supplied content and is deliberately left out.
+        log.debug("Domain rejection | code: {}", ex.getErrorCode());
         return ResponseEntity.status(ex.getHttpStatus())
                 .body(ApiResponse.failure(ex.getErrorCode(), ex.getMessage(), ex.getDetails()));
     }
@@ -54,9 +59,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<?>> handleValidation(MethodArgumentNotValidException ex) {
         Map<String, String> errors = new LinkedHashMap<>();
+        Map<String, String> violatedConstraints = new LinkedHashMap<>();
         ex.getBindingResult()
                 .getFieldErrors()
-                .forEach(fe -> errors.put(fe.getField(), fe.getDefaultMessage()));
+                .forEach(
+                        fe -> {
+                            errors.put(fe.getField(), fe.getDefaultMessage());
+                            violatedConstraints.put(fe.getField(), fe.getCode());
+                        });
+        // Field names and the constraint each one violated, never the submitted value. This
+        // replaces the diagnostic that logback-spring.xml now silences on
+        // ExceptionHandlerExceptionResolver, which rendered the BindingResult in full and wrote
+        // the rejected password to the log in cleartext.
+        log.warn("Request validation failed | violated constraints: {}", violatedConstraints);
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.getHttpStatus())
                 .body(ApiResponse.failure(ApiErrorCode.VALIDATION_ERROR, null, errors));
     }
@@ -75,6 +90,9 @@ public class GlobalExceptionHandler {
                                                                 result.getMethodParameter()
                                                                         .getParameterName(),
                                                                 error.getDefaultMessage())));
+        // Parameter names only, for the same reason as handleValidation above: the resolved
+        // value is exactly what must not reach the log.
+        log.warn("Request parameter validation failed | parameters: {}", errors.keySet());
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.getHttpStatus())
                 .body(ApiResponse.failure(ApiErrorCode.VALIDATION_ERROR, null, errors));
     }
@@ -89,24 +107,35 @@ public class GlobalExceptionHandler {
                             String path = cv.getPropertyPath().toString();
                             errors.put(path, cv.getMessage());
                         });
+        // Property paths only. ConstraintViolation.toString() carries the invalid value, so the
+        // violation object itself is never handed to the logger.
+        log.warn("Constraint violation | properties: {}", errors.keySet());
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.getHttpStatus())
                 .body(ApiResponse.failure(ApiErrorCode.VALIDATION_ERROR, null, errors));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<?>> handleAccessDenied(AccessDeniedException ex) {
+        // An authorization denial is worth a retained record; it carries no caller payload.
+        log.warn("Access denied on an authenticated request");
         return ResponseEntity.status(ApiErrorCode.FORBIDDEN.getHttpStatus())
                 .body(ApiResponse.failure(ApiErrorCode.FORBIDDEN));
     }
 
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiResponse<?>> handleAuthentication(AuthenticationException ex) {
+        // DEBUG: every expired access token produces one of these, so WARN would bury the
+        // authorization denials above under routine session expiry.
+        log.debug("Authentication failed on a protected route");
         return ResponseEntity.status(ApiErrorCode.UNAUTHORIZED.getHttpStatus())
                 .body(ApiResponse.failure(ApiErrorCode.UNAUTHORIZED));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ApiResponse<?>> handleNoResource(NoResourceFoundException ex) {
+        // DEBUG: scanners and browser prefetches generate these continuously against any public
+        // deployment, and the path is caller-controlled.
+        log.debug("No handler for the requested path");
         return ResponseEntity.status(ApiErrorCode.NOT_FOUND.getHttpStatus())
                 .body(ApiResponse.failure(ApiErrorCode.NOT_FOUND));
     }

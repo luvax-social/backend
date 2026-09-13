@@ -700,6 +700,7 @@ Existing group conversations are deleted by the upgrade, after being copied into
 - `ErrorResponse` record and the legacy `common/exception/` token and mail exception classes superseded by `ApiException` and the relocated domain exceptions
 
 ### Security
+- A password rejected by validation is no longer written to the application log in cleartext. The framework logged the whole validation result, rejected value included, before the application produced its response, so every failed password attempt accumulated a near-miss of a live credential in a file operators read and log shippers forward; the application now records the field and the constraint it violated and never the value.
 - `/actuator/prometheus` is no longer served to unauthenticated callers by default; it falls through to the ADMIN rule that covers the rest of `/actuator/**`, and `APP_SECURITY_PUBLIC_METRICS_ENDPOINT` reopens it, with a startup warning, only where the port is reachable from the monitoring network alone.
 - A staff member cannot act on a ticket appealing a decision they made themselves.
 - Only an administrator can decide an appeal; a moderator may read and escalate one but cannot record a verdict they have no capability to execute.
