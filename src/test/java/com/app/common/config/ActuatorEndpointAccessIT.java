@@ -32,7 +32,15 @@ import org.testcontainers.utility.DockerImageName;
             "spring.profiles.active=dev",
             "spring.docker.compose.enabled=false",
             "spring.autoconfigure.exclude="
-                    + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration"
+                    + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration",
+            // This class declares PostgreSQL and Redis and nothing else, but application.yaml
+            // enables the Elasticsearch health indicator, which then probes whatever
+            // ELASTICSEARCH_URIS resolves to on the developer's machine. With no broker there the
+            // aggregate health is DOWN and the anonymous probe below answers 503, so whether this
+            // class passed depended on which containers the developer happened to have running.
+            // The subject here is who may reach each actuator endpoint, not whether the search
+            // tier is up; ElasticsearchHealthIT covers that against a container it declares.
+            "management.health.elasticsearch.enabled=false"
         })
 @Testcontainers
 @AutoConfigureTestRestTemplate
