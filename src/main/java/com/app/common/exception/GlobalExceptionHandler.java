@@ -53,6 +53,7 @@ public class GlobalExceptionHandler {
         // caller-supplied content and is deliberately left out.
         log.debug("Domain rejection | code: {}", ex.getErrorCode());
         return ResponseEntity.status(ex.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ex.getErrorCode(), ex.getMessage(), ex.getDetails()));
     }
 
@@ -73,6 +74,7 @@ public class GlobalExceptionHandler {
         // the rejected password to the log in cleartext.
         log.warn("Request validation failed | violated constraints: {}", violatedConstraints);
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.VALIDATION_ERROR, null, errors));
     }
 
@@ -94,6 +96,7 @@ public class GlobalExceptionHandler {
         // value is exactly what must not reach the log.
         log.warn("Request parameter validation failed | parameters: {}", errors.keySet());
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.VALIDATION_ERROR, null, errors));
     }
 
@@ -111,6 +114,7 @@ public class GlobalExceptionHandler {
         // violation object itself is never handed to the logger.
         log.warn("Constraint violation | properties: {}", errors.keySet());
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.VALIDATION_ERROR, null, errors));
     }
 
@@ -119,6 +123,7 @@ public class GlobalExceptionHandler {
         // An authorization denial is worth a retained record; it carries no caller payload.
         log.warn("Access denied on an authenticated request");
         return ResponseEntity.status(ApiErrorCode.FORBIDDEN.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.FORBIDDEN));
     }
 
@@ -128,6 +133,7 @@ public class GlobalExceptionHandler {
         // authorization denials above under routine session expiry.
         log.debug("Authentication failed on a protected route");
         return ResponseEntity.status(ApiErrorCode.UNAUTHORIZED.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.UNAUTHORIZED));
     }
 
@@ -137,6 +143,7 @@ public class GlobalExceptionHandler {
         // deployment, and the path is caller-controlled.
         log.debug("No handler for the requested path");
         return ResponseEntity.status(ApiErrorCode.NOT_FOUND.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.NOT_FOUND));
     }
 
@@ -145,6 +152,7 @@ public class GlobalExceptionHandler {
             HttpRequestMethodNotSupportedException ex) {
         String message = "HTTP method not supported: " + ex.getMethod();
         return ResponseEntity.status(ApiErrorCode.BAD_REQUEST.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.BAD_REQUEST, message, null));
     }
 
@@ -156,6 +164,7 @@ public class GlobalExceptionHandler {
         // echoed back.
         log.warn("Type mismatch on request parameter '{}'", ex.getName());
         return ResponseEntity.status(ApiErrorCode.BAD_REQUEST.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.BAD_REQUEST));
     }
 
@@ -190,6 +199,7 @@ public class GlobalExceptionHandler {
         // Client input error, not a server fault: WARN without a stack trace.
         log.warn("Missing required request parameter '{}'", ex.getParameterName());
         return ResponseEntity.status(ApiErrorCode.MISSING_REQUIRED_PARAMETER.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.MISSING_REQUIRED_PARAMETER));
     }
 
@@ -207,6 +217,7 @@ public class GlobalExceptionHandler {
                 "Malformed request body, cause: {}",
                 cause == null ? "none" : cause.getClass().getSimpleName());
         return ResponseEntity.status(ApiErrorCode.MALFORMED_REQUEST_BODY.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.MALFORMED_REQUEST_BODY));
     }
 
@@ -245,9 +256,12 @@ public class GlobalExceptionHandler {
 
         ApiErrorCode mapped = mappedConstraintCode(constraintNameOf(ex, cause));
         if (mapped != null) {
-            return ResponseEntity.status(mapped.getHttpStatus()).body(ApiResponse.failure(mapped));
+            return ResponseEntity.status(mapped.getHttpStatus())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(ApiResponse.failure(mapped));
         }
         return ResponseEntity.status(HttpStatus.CONFLICT)
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(
                         ApiResponse.failure(
                                 ApiErrorCode.BAD_REQUEST,
@@ -317,6 +331,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleUnknown(Exception ex) {
         log.error("Unhandled exception reached global handler", ex);
         return ResponseEntity.status(ApiErrorCode.INTERNAL_ERROR.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.INTERNAL_ERROR));
     }
 }
