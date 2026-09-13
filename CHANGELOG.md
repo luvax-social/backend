@@ -480,6 +480,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Addressing a route with a method it does not support now answers `405` with an `Allow` header naming the methods it does, and the generated API document declares that response on every operation. It previously answered a generic `400`, which a client could not tell from a malformed request.
 - Every error response now declares its own JSON content type instead of negotiating one, so a request carrying an `Accept` header the API cannot satisfy receives its real status rather than an empty `500`. An unauthenticated call asking for XML returned `500` with no body.
 - The pull request check that rejects an over-length commit subject now actually runs; it was invoked in a way that failed with a permission error before the script was ever read, so the gate was red on every pull request for a reason unrelated to commit subjects.
 - A production start now refuses to proceed and names every variable at fault when a required environment variable is unset, instead of binding the unresolved placeholder as literal text and serving traffic with values such as `${JWT_ISSUER}` in every issued token.

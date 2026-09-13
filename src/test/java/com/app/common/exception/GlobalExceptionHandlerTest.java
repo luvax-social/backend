@@ -137,14 +137,26 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void httpMethodNotSupportedException_returnsBadRequest() {
+    void httpMethodNotSupportedException_returnsMethodNotAllowed() {
         ResponseEntity<ApiResponse<?>> response =
                 handler.handleMethodNotSupported(
                         new HttpRequestMethodNotSupportedException("DELETE"));
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(response.getBody().getCode()).isEqualTo("BAD_REQUEST");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+        assertThat(response.getBody().getCode()).isEqualTo("METHOD_NOT_ALLOWED");
         assertThat(response.getBody().getMessage()).contains("DELETE");
+    }
+
+    @Test
+    void httpMethodNotSupportedException_withKnownAlternatives_namesThemInTheAllowHeader() {
+        ResponseEntity<ApiResponse<?>> response =
+                handler.handleMethodNotSupported(
+                        new HttpRequestMethodNotSupportedException(
+                                "DELETE", java.util.List.of("GET", "PATCH")));
+
+        // RFC 9110 makes Allow mandatory on a 405; without it a client cannot correct itself.
+        assertThat(response.getHeaders().getAllow())
+                .containsExactlyInAnyOrder(HttpMethod.GET, HttpMethod.PATCH);
     }
 
     @Test

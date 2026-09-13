@@ -2,12 +2,14 @@ package com.app.common.exception;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import jakarta.validation.ConstraintViolationException;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -150,10 +152,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiResponse<?>> handleMethodNotSupported(
             HttpRequestMethodNotSupportedException ex) {
+        // Client input error, not a server fault: WARN without a stack trace. The method is one of
+        // a fixed set, so echoing it back leaks nothing.
+        log.warn("HTTP method {} is not supported for this route", ex.getMethod());
         String message = "HTTP method not supported: " + ex.getMethod();
-        return ResponseEntity.status(ApiErrorCode.BAD_REQUEST.getHttpStatus())
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(ApiResponse.failure(ApiErrorCode.BAD_REQUEST, message, null));
+        ResponseEntity.BodyBuilder response =
+                ResponseEntity.status(ApiErrorCode.METHOD_NOT_ALLOWED.getHttpStatus())
+                        .contentType(MediaType.APPLICATION_JSON);
+        // RFC 9110 requires a 405 to name the methods the route does support, and a client cannot
+        // correct itself without it. Absent only when the dispatcher could not determine them.
+        Set<HttpMethod> supported = ex.getSupportedHttpMethods();
+        if (supported != null && !supported.isEmpty()) {
+            response.allow(supported.toArray(new HttpMethod[0]));
+        }
+        return response.body(ApiResponse.failure(ApiErrorCode.METHOD_NOT_ALLOWED, message, null));
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
