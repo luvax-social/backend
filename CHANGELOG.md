@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A database constraint violation is now mapped by the constraint's own name rather than by finding that name anywhere in the driver's message, which could answer with a different constraint's error.
 
 ### Tests
+- The production-profile activation test loads its context again; its mail sender stand-in was declared at the interface rather than at the type two production beans inject, so the context failed before any assertion ran.
 - The people-you-may-know affinity bound is now covered by tests that pin what it costs the ranking, so a future change to its depth is a measured decision rather than a guess.
 - Both mail consumers now cover the suppressed-recipient branch, which is the gap that let the three mail lanes drift into three different answers for the same refusal.
 - A newly opened support ticket now answers with the time it was created rather than a null, because the ticket timestamps are read back after the insert that sets them.

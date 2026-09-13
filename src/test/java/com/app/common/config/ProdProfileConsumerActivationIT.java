@@ -17,7 +17,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.comment.consumer.CommentNotificationConsumer;
-import com.app.modules.mail.service.MailSender;
+import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.story.consumer.StoryNotificationConsumer;
 
 @SpringBootTest(
@@ -81,7 +81,12 @@ class ProdProfileConsumerActivationIT {
 
     @Autowired private ApplicationContext applicationContext;
 
-    @MockitoBean private MailSender mailSender;
+    // Overridden at AbstractTemplateMailSender, not at the MailSender interface. Under this
+    // profile the transport is resend, so resendMailSender is the only candidate, and both
+    // ModerationMailEventHandler and MailCampaignSenderJob inject the abstract class rather than
+    // the interface. A mock typed as the interface replaces the same bean with something neither
+    // can accept, and the context fails to load before any assertion here runs.
+    @MockitoBean private AbstractTemplateMailSender resendMailSender;
 
     @Test
     void prodProfile_activatesCommentAndStoryNotificationConsumerBeans() {
