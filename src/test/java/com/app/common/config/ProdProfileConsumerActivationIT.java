@@ -30,7 +30,15 @@ import com.app.modules.story.consumer.StoryNotificationConsumer;
             "app.post.seed.enabled=false",
             "spring.rabbitmq.publisher-confirm-type=correlated",
             "spring.rabbitmq.publisher-returns=true",
-            "spring.rabbitmq.template.mandatory=true"
+            "spring.rabbitmq.template.mandatory=true",
+            // Surefire pins APP_MAIL_TRANSPORT=noop for the whole suite so no test reaches the
+            // real provider. This is the one prod-profile context, and MailTransportGuard refuses
+            // noop outside dev, so it has to name its own transport. It previously inherited
+            // application-prod.yml's literal transport: resend, which shadowed the pin by
+            // accident; that literal is gone now that the variable is the configured input, so
+            // the requirement is stated here instead. Nothing is sent: RESEND_API_KEY below is a
+            // dummy and the outbox publisher is disabled, so no mail path runs.
+            "app.mail.transport=resend"
         })
 @Testcontainers
 class ProdProfileConsumerActivationIT {
