@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An appeal link can be checked for validity without being redeemed, so the appeal screen can show a dead link before the reader writes their appeal rather than after.
 
 ### Fixed
+- A production start now refuses to proceed and names every variable at fault when a required environment variable is unset, instead of binding the unresolved placeholder as literal text and serving traffic with values such as `${JWT_ISSUER}` in every issued token.
 - An appeal or confirmation link is no longer destroyed by a refusal it had nothing to do with; both paths now run every check that can refuse while the token is still spendable, and redeem it only once the write has succeeded.
 - A recipient the deployment was configured never to mail is now recorded as skipped by every mail lane alike, instead of being dead-lettered by one, counted as a delivery failure by another and swallowed by a third.
 - The public support form now advertises and accepts exactly the same category set, because both read the category configuration table; disabling a category previously hid it from the form while the server kept accepting it.
