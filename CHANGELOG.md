@@ -317,6 +317,7 @@ A write into an uncovered month never failed; it was absorbed silently and made 
 - The error code for a missing report resolution note, which no path had been able to raise since the requirement moved behind a mandatory field. An error code nothing can produce is a promise the API cannot keep.
 
 ### Security
+- `/actuator/prometheus` is no longer served to unauthenticated callers by default; it falls through to the ADMIN rule that covers the rest of `/actuator/**`, and `APP_SECURITY_PUBLIC_METRICS_ENDPOINT` reopens it, with a startup warning, only where the port is reachable from the monitoring network alone.
 - A staff member cannot act on a ticket appealing a decision they made themselves.
 - Only an administrator can decide an appeal; a moderator may read and escalate one but cannot record a verdict they have no capability to execute.
 - The eleven administrator-only endpoints now enforce the administrator role in the service layer as well as in their endpoint annotations, so removing an annotation no longer opens an endpoint.
