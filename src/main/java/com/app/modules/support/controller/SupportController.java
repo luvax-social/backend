@@ -27,6 +27,7 @@ import com.app.common.security.util.SecurityUtils;
 import com.app.common.vocabulary.dto.response.SupportCategoryVocabularyResponse;
 import com.app.common.vocabulary.service.VocabularyService;
 import com.app.common.web.StrictQueryParameters;
+import com.app.modules.support.api.SupportApi;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
@@ -48,7 +49,7 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
  * <p>None of the anonymous paths issues a session, a token pair or a refresh token row.
  */
 @RestController
-public class SupportController extends BaseController {
+public class SupportController extends BaseController implements SupportApi {
 
     private final SupportTicketService supportTicketService;
     private final IpExtractor ipExtractor;
@@ -65,7 +66,8 @@ public class SupportController extends BaseController {
 
     /** Opens a support ticket for the authenticated account. */
     @PreAuthorize("isAuthenticated()")
-    @PostMapping(ApiConstants.Support.ROOT + ApiConstants.Support.TICKETS)
+    @Override
+    @PostMapping(ApiConstants.Support.TICKETS)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<SupportTicketResponse>> createTicket(
             @Valid @RequestBody CreateSupportTicketRequest request) {
@@ -78,7 +80,8 @@ public class SupportController extends BaseController {
 
     /** Lists the authenticated account's own support tickets, newest first. */
     @PreAuthorize("isAuthenticated()")
-    @GetMapping(ApiConstants.Support.ROOT + ApiConstants.Support.TICKETS)
+    @Override
+    @GetMapping(ApiConstants.Support.TICKETS)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<List<SupportTicketResponse>>> listOwnTickets(
@@ -91,7 +94,8 @@ public class SupportController extends BaseController {
 
     /** Reads one of the authenticated account's own support tickets. */
     @PreAuthorize("isAuthenticated()")
-    @GetMapping(ApiConstants.Support.ROOT + ApiConstants.Support.TICKET_BY_ID)
+    @Override
+    @GetMapping(ApiConstants.Support.TICKET_BY_ID)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<SupportTicketResponse>> getOwnTicket(
@@ -108,7 +112,8 @@ public class SupportController extends BaseController {
      * <p>Anonymous by necessity: the account this authorises is banned or suspended and cannot
      * authenticate. Redeeming the token creates exactly one ticket and mints no session.
      */
-    @PostMapping(ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL)
+    @Override
+    @PostMapping(ApiConstants.Support.APPEAL)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<SupportTicketResponse>> createAppeal(
             @Valid @RequestBody SignedAppealRequest request) {
@@ -124,7 +129,8 @@ public class SupportController extends BaseController {
      * <p>Returns no ticket. Echoing one back would tell an anonymous caller that a submission
      * succeeded for an address they may not own, and the ticket is not real until confirmed.
      */
-    @PostMapping(ApiConstants.Support.ROOT + ApiConstants.Support.PUBLIC_TICKET)
+    @Override
+    @PostMapping(ApiConstants.Support.PUBLIC_TICKET)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<Void>> createPublicTicket(
             @Valid @RequestBody PublicSupportTicketRequest request,
@@ -144,7 +150,8 @@ public class SupportController extends BaseController {
      * the form was going to tell them anyway; a caller without one learns nothing, because the
      * token is 32 random bytes and this route carries its own per-client rate limit.
      */
-    @GetMapping(ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL_VALIDATE)
+    @Override
+    @GetMapping(ApiConstants.Support.APPEAL_VALIDATE)
     @StrictQueryParameters
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<AppealLinkResponse>> validateAppealLink(
@@ -164,7 +171,8 @@ public class SupportController extends BaseController {
      * <p>Returns strictly less than the authenticated vocabulary: support categories only, and only
      * those flagged enabled and public-form. It exposes display metadata and no account data.
      */
-    @GetMapping(ApiConstants.Support.ROOT + ApiConstants.Support.PUBLIC_CATEGORIES)
+    @Override
+    @GetMapping(ApiConstants.Support.PUBLIC_CATEGORIES)
     @StrictQueryParameters
     @RateLimiter(name = "highTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<List<SupportCategoryVocabularyResponse>>>
@@ -175,7 +183,8 @@ public class SupportController extends BaseController {
     }
 
     /** Confirms a public submission and moves it into the staff queue. */
-    @PostMapping(ApiConstants.Support.ROOT + ApiConstants.Support.CONFIRM)
+    @Override
+    @PostMapping(ApiConstants.Support.CONFIRM)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<Void>> confirmPublicTicket(
             @RequestParam("token") @NotBlank String token) {
