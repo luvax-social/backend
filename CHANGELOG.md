@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Suggestions can be dismissed permanently, which changes no other surface, and an account can opt out of being suggested to other people.
 
 ### Changed
+- The index rule now states how to swap one index for another without either losing the guarantee it enforces or taking a write lock, and the report module records why its duplicate guard was swapped inside a transaction.
 - The published OpenAPI document now declares the authentication, authorization, malformed-body and unsupported-media-type responses that the support, verification, mail-campaign, suggestion and hashtag-pin operations already returned, and groups them under curated tags instead of springdoc's class-derived defaults.
 - `.env.example` documents `APP_SECURITY_TRUSTED_PROXY_CIDRS`, the ingress CIDR list a deployment behind a proxy must supply before every per-IP rate limit collapses onto one shared bucket.
 - `database/schema.sql` is regenerated from the V01-V111 migration set and carries the nine tables it was missing, including the mail campaign, verification and suggestion tables; its header states that it is generated, from what, and at which migration version.
