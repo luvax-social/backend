@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Suggestions can be dismissed permanently, which changes no other surface, and an account can opt out of being suggested to other people.
 
 ### Changed
+- `.env.example` documents `APP_SECURITY_TRUSTED_PROXY_CIDRS`, the ingress CIDR list a deployment behind a proxy must supply before every per-IP rate limit collapses onto one shared bucket.
 - `database/schema.sql` is regenerated from the V01-V111 migration set and carries the nine tables it was missing, including the mail campaign, verification and suggestion tables; its header states that it is generated, from what, and at which migration version.
 - The structure document's migration table, enum table, test-class table, RabbitMQ topology and Redis key table are generated from the tree rather than maintained by hand, and it no longer cites a regeneration script that does not exist.
 - The backend now carries the same single-line commit rule the frontend had, and the scope block in `git_workflow.md` states what `pr-lint` actually checks - the pull request title, not commit messages - in place of a dated audit snapshot.
