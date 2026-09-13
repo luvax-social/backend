@@ -806,6 +806,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- The unrouted-constant guard now recognises the hashtag by-name lookup and posts-by-hashtag listing as routed, pinning both to their handlers instead of asserting they had been removed.
 - Nine integration test classes now declare their mail sender stand-in at the type the moderation and campaign senders inject, rather than at the interface; an interface-typed override left the transport bean unassignable and their contexts failed to start before any assertion ran.
 - The mail transport selection tests now assert what they were written to assert; both cases covering the network transport failed to build their context for a missing bean, so neither assertion had ever run.
 - Refresh-token theft detection is now covered by an integration test that asserts committed database state and the end-to-end rejection of the successor token, rather than that a mocked repository method was called; the previous assertions stayed green against code whose revocation was being rolled back.

@@ -11,7 +11,9 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 
+import com.app.modules.hashtag.controller.HashtagController;
 import com.app.modules.message.controller.MessageController;
+import com.app.modules.post.controller.HashtagPostController;
 import com.app.modules.users.controller.UserController;
 
 /**
@@ -23,12 +25,13 @@ class ApiConstantsUnroutedFieldsTest {
     @Test
     void unroutedConstants_noLongerExist() {
         // SEARCH was removed here as unrouted and deliberately reinstated by P5, which added
-        // GET /api/v1/users/search. The other two remain unrouted. The four Messages constants
-        // were removed here as unrouted and deliberately reinstated by the send/history/delete/
-        // read-state endpoints; see reinstatedMessageConstants_areRoutedByAController below.
+        // GET /api/v1/users/search. The four Messages constants were removed here as unrouted and
+        // deliberately reinstated by the send/history/delete/read-state endpoints; see
+        // reinstatedMessageConstants_areRoutedByAController below. The two Hashtags constants went
+        // the same way when the by-name lookup and the posts-by-hashtag listing landed; see
+        // reinstatedHashtagConstants_areRoutedByAController.
         assertThat(fieldNames(ApiConstants.Users.class)).doesNotContain("SUGGESTIONS", "ME_AVATAR");
         assertThat(fieldNames(ApiConstants.Posts.class)).doesNotContain("EXPLORE", "MEDIA");
-        assertThat(fieldNames(ApiConstants.Hashtags.class)).doesNotContain("BY_NAME", "POSTS");
         assertThat(fieldNames(ApiConstants.Media.class)).doesNotContain("BY_ID");
         assertThat(fieldNames(ApiConstants.Auth.class))
                 .doesNotContain("OAUTH2_CALLBACK", "CHANGE_PASSWORD");
@@ -61,6 +64,17 @@ class ApiConstantsUnroutedFieldsTest {
                 .contains(conversationMessages, unreadCount);
         assertThat(postRoutedPaths(MessageController.class)).contains(conversationMessages, read);
         assertThat(deleteRoutedPaths(MessageController.class)).contains(messageById);
+    }
+
+    @Test
+    void reinstatedHashtagConstants_areRoutedByAController() {
+        // Same contract as the two above. The handlers sit in different modules: the by-name
+        // lookup is served by the hashtag module, and the posts-by-hashtag listing by the post
+        // module, which is why POSTS is declared as an absolute path rather than as a suffix.
+        assertThat(fieldNames(ApiConstants.Hashtags.class)).contains("BY_NAME", "POSTS");
+
+        assertThat(routedPaths(HashtagController.class)).contains(ApiConstants.Hashtags.BY_NAME);
+        assertThat(routedPaths(HashtagPostController.class)).contains(ApiConstants.Hashtags.POSTS);
     }
 
     private static List<String> routedPaths(Class<?> controller) {
