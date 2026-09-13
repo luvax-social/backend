@@ -798,6 +798,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- Refresh-token theft detection is now covered by an integration test that asserts committed database state and the end-to-end rejection of the successor token, rather than that a mocked repository method was called; the previous assertions stayed green against code whose revocation was being rolled back.
 - The production-profile activation test loads its context again; its mail sender stand-in was declared at the interface rather than at the type two production beans inject, so the context failed before any assertion ran.
 - The people-you-may-know affinity bound is now covered by tests that pin what it costs the ranking, so a future change to its depth is a measured decision rather than a guess.
 - Both mail consumers now cover the suppressed-recipient branch, which is the gap that let the three mail lanes drift into three different answers for the same refusal.
