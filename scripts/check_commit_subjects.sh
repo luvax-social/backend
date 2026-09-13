@@ -27,6 +27,16 @@ status=0
 offenders=0
 checked=0
 
+# Read the log into a variable and check git's exit status before trusting the result. Reading it
+# through process substitution discarded that status, so an unresolvable range - a force-push race,
+# a fork pull request whose base was never fetched, a shallow checkout - produced zero lines and
+# was reported as "All 0 commit subjects are within the limit" with exit 0. The gate passed in
+# exactly the situations where it could not do its job.
+if ! log=$(git log --no-merges --format='%h|%s' "$RANGE"); then
+    echo "::error::cannot resolve the revision range $RANGE" >&2
+    exit 2
+fi
+
 while IFS='|' read -r sha subject; do
     [ -n "$sha" ] || continue
     checked=$((checked + 1))
@@ -37,7 +47,9 @@ while IFS='|' read -r sha subject; do
         # ::error:: renders as an annotation on the GitHub Actions run and as plain text elsewhere.
         echo "::error::$sha subject is $length characters; the limit is $LIMIT (target 72): $subject"
     fi
-done < <(git log --no-merges --format='%h|%s' "$RANGE")
+done <<EOF
+$log
+EOF
 
 if [ "$status" -ne 0 ]; then
     echo "$offenders of $checked commit subjects in $RANGE exceed $LIMIT characters." >&2
