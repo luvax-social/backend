@@ -29,7 +29,7 @@ This table cannot be rebuilt from any other source if lost.
 
 | Rule | Enforced By |
 |------|-------------|
-| `type` must be one of the 11 values in `notification_type` enum | `notification_type` enum |
+| `type` must be one of the 16 values in `notification_type` enum | `notification_type` enum |
 | `is_read` defaults to `FALSE` | `DEFAULT FALSE NOT NULL` |
 | `actor_id` becomes NULL if the acting user deletes their account | `ON DELETE SET NULL` on `actor_id` FK |
 | Deleting a recipient user cascades to all their notifications | `ON DELETE CASCADE` on `recipient_id` FK |
@@ -50,10 +50,10 @@ This table cannot be rebuilt from any other source if lost.
 | A `warning` notification is created with a null `actor_id`, is never suppressed by a user setting, and is never suppressed by a block | `AdminNotificationConsumer`, `NotificationServiceImpl.isTypeEnabled` - a warning comes from the platform rather than a person, and an account that had blocked the moderator would otherwise never learn it had been warned. `notification_type_configs` records it as `is_user_toggleable = FALSE` |
 | Stale notifications (e.g., for a deleted post) must be handled gracefully on read — `entity_id` may reference a soft-deleted or hard-deleted entity | `[NOT YET IMPLEMENTED]` |
 
-**Failure Mode** `[KNOWN GAP — no retry/DLQ implemented]`:
-- Notifications are created as a result of domain events. If event delivery via RabbitMQ fails, the notification is not created.
-- There is currently no retry mechanism or dead-letter queue for failed notification events.
-- This means some notifications may be silently dropped under failure conditions.
+**Failure Mode**:
+- Notifications are created as a result of domain events delivered over RabbitMQ.
+- A failed delivery is retried on the ladder in `app.messaging.consumer.*` and then dead-lettered: `notification.dlq` is declared and bound, as are the per-domain `comment.notification.dlq`, `story.notification.dlq`, `message.notification.dlq` and `admin.notification.dlq`.
+- A message that exhausts its attempts is therefore held for inspection rather than silently dropped, which is what the earlier text here described.
 
 ### C. Scope Simplifications
 

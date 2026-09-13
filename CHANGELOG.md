@@ -303,6 +303,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- The story, notification and admin module data rules now match the shipped schema: administrative story takedown is documented rather than denied, the notification enum is recorded as sixteen values with its dead-letter queues, and the administrative action enum as thirty-six.
 - `.env.example` now states that the thirteen consumer and live-tier switches are profile-controlled rather than deployment inputs; both profiles pin each one as a literal, so a value set in the environment file never reached them.
 - The `[Unreleased]` changelog block carries one of each permitted section instead of 119 repeated heading blocks, with the documentation and continuous-integration entries folded into Changed; every entry is preserved and the rule now says to merge into the existing section rather than prepend a new one.
 - The index rule now states how to swap one index for another without either losing the guarantee it enforces or taking a write lock, and the report module records why its duplicate guard was swapped inside a transaction.
