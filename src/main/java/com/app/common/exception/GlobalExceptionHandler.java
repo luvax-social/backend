@@ -2,12 +2,14 @@ package com.app.common.exception;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import jakarta.validation.ConstraintViolationException;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -47,17 +49,34 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AppException.class)
     public ResponseEntity<ApiResponse<?>> handleAppException(AppException ex) {
+        // DEBUG, not WARN: a domain rejection is an expected outcome, it is already fully
+        // described by the code in the response, and an unauthenticated caller can generate
+        // these at will. The code alone is what a diagnostic needs; the details map can carry
+        // caller-supplied content and is deliberately left out.
+        log.debug("Domain rejection | code: {}", ex.getErrorCode());
         return ResponseEntity.status(ex.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ex.getErrorCode(), ex.getMessage(), ex.getDetails()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<?>> handleValidation(MethodArgumentNotValidException ex) {
         Map<String, String> errors = new LinkedHashMap<>();
+        Map<String, String> violatedConstraints = new LinkedHashMap<>();
         ex.getBindingResult()
                 .getFieldErrors()
-                .forEach(fe -> errors.put(fe.getField(), fe.getDefaultMessage()));
+                .forEach(
+                        fe -> {
+                            errors.put(fe.getField(), fe.getDefaultMessage());
+                            violatedConstraints.put(fe.getField(), fe.getCode());
+                        });
+        // Field names and the constraint each one violated, never the submitted value. This
+        // replaces the diagnostic that logback-spring.xml now silences on
+        // ExceptionHandlerExceptionResolver, which rendered the BindingResult in full and wrote
+        // the rejected password to the log in cleartext.
+        log.warn("Request validation failed | violated constraints: {}", violatedConstraints);
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.VALIDATION_ERROR, null, errors));
     }
 
@@ -75,7 +94,11 @@ public class GlobalExceptionHandler {
                                                                 result.getMethodParameter()
                                                                         .getParameterName(),
                                                                 error.getDefaultMessage())));
+        // Parameter names only, for the same reason as handleValidation above: the resolved
+        // value is exactly what must not reach the log.
+        log.warn("Request parameter validation failed | parameters: {}", errors.keySet());
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.VALIDATION_ERROR, null, errors));
     }
 
@@ -89,34 +112,60 @@ public class GlobalExceptionHandler {
                             String path = cv.getPropertyPath().toString();
                             errors.put(path, cv.getMessage());
                         });
+        // Property paths only. ConstraintViolation.toString() carries the invalid value, so the
+        // violation object itself is never handed to the logger.
+        log.warn("Constraint violation | properties: {}", errors.keySet());
         return ResponseEntity.status(ApiErrorCode.VALIDATION_ERROR.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.VALIDATION_ERROR, null, errors));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<?>> handleAccessDenied(AccessDeniedException ex) {
+        // An authorization denial is worth a retained record; it carries no caller payload.
+        log.warn("Access denied on an authenticated request");
         return ResponseEntity.status(ApiErrorCode.FORBIDDEN.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.FORBIDDEN));
     }
 
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiResponse<?>> handleAuthentication(AuthenticationException ex) {
+        // DEBUG: every expired access token produces one of these, so WARN would bury the
+        // authorization denials above under routine session expiry.
+        log.debug("Authentication failed on a protected route");
         return ResponseEntity.status(ApiErrorCode.UNAUTHORIZED.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.UNAUTHORIZED));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ApiResponse<?>> handleNoResource(NoResourceFoundException ex) {
+        // DEBUG: scanners and browser prefetches generate these continuously against any public
+        // deployment, and the path is caller-controlled.
+        log.debug("No handler for the requested path");
         return ResponseEntity.status(ApiErrorCode.NOT_FOUND.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.NOT_FOUND));
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiResponse<?>> handleMethodNotSupported(
             HttpRequestMethodNotSupportedException ex) {
+        // Client input error, not a server fault: WARN without a stack trace. The method is one of
+        // a fixed set, so echoing it back leaks nothing.
+        log.warn("HTTP method {} is not supported for this route", ex.getMethod());
         String message = "HTTP method not supported: " + ex.getMethod();
-        return ResponseEntity.status(ApiErrorCode.BAD_REQUEST.getHttpStatus())
-                .body(ApiResponse.failure(ApiErrorCode.BAD_REQUEST, message, null));
+        ResponseEntity.BodyBuilder response =
+                ResponseEntity.status(ApiErrorCode.METHOD_NOT_ALLOWED.getHttpStatus())
+                        .contentType(MediaType.APPLICATION_JSON);
+        // RFC 9110 requires a 405 to name the methods the route does support, and a client cannot
+        // correct itself without it. Absent only when the dispatcher could not determine them.
+        Set<HttpMethod> supported = ex.getSupportedHttpMethods();
+        if (supported != null && !supported.isEmpty()) {
+            response.allow(supported.toArray(new HttpMethod[0]));
+        }
+        return response.body(ApiResponse.failure(ApiErrorCode.METHOD_NOT_ALLOWED, message, null));
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -127,6 +176,7 @@ public class GlobalExceptionHandler {
         // echoed back.
         log.warn("Type mismatch on request parameter '{}'", ex.getName());
         return ResponseEntity.status(ApiErrorCode.BAD_REQUEST.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.BAD_REQUEST));
     }
 
@@ -161,6 +211,7 @@ public class GlobalExceptionHandler {
         // Client input error, not a server fault: WARN without a stack trace.
         log.warn("Missing required request parameter '{}'", ex.getParameterName());
         return ResponseEntity.status(ApiErrorCode.MISSING_REQUIRED_PARAMETER.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.MISSING_REQUIRED_PARAMETER));
     }
 
@@ -178,6 +229,7 @@ public class GlobalExceptionHandler {
                 "Malformed request body, cause: {}",
                 cause == null ? "none" : cause.getClass().getSimpleName());
         return ResponseEntity.status(ApiErrorCode.MALFORMED_REQUEST_BODY.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.MALFORMED_REQUEST_BODY));
     }
 
@@ -216,9 +268,12 @@ public class GlobalExceptionHandler {
 
         ApiErrorCode mapped = mappedConstraintCode(constraintNameOf(ex, cause));
         if (mapped != null) {
-            return ResponseEntity.status(mapped.getHttpStatus()).body(ApiResponse.failure(mapped));
+            return ResponseEntity.status(mapped.getHttpStatus())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(ApiResponse.failure(mapped));
         }
         return ResponseEntity.status(HttpStatus.CONFLICT)
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(
                         ApiResponse.failure(
                                 ApiErrorCode.BAD_REQUEST,
@@ -288,6 +343,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleUnknown(Exception ex) {
         log.error("Unhandled exception reached global handler", ex);
         return ResponseEntity.status(ApiErrorCode.INTERNAL_ERROR.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ApiResponse.failure(ApiErrorCode.INTERNAL_ERROR));
     }
 }

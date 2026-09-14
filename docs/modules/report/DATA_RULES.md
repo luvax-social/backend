@@ -42,6 +42,16 @@ This table cannot be rebuilt from any other source if lost.
 | Rule | Service / Component |
 |------|---------------------|
 | A user may not report the same entity more than once | `ReportServiceImpl.validateDuplicateReport` — enforced via `ReportRepository.existsByReporterIdAndReportTypeAndEntityId`, with the unique index `uq_reports_reporter_type_entity` (V30) as the authoritative guard against a concurrent double-submit |
+
+> **Why V89's index swap runs in a transaction.**
+> V89 narrowed `uq_reports_reporter_type_entity` to active reports only, so a viewer can report the same target again once the previous report is closed.
+> It did so as a `DROP INDEX` followed by a plain `CREATE UNIQUE INDEX` in one transaction, which reads as a violation of the project rule that index-creating migrations must build `CONCURRENTLY` and run non-transactionally.
+> It is not one: holding both statements in a single transaction is what keeps the uniqueness guarantee unbroken across the swap, and `CREATE INDEX CONCURRENTLY` cannot participate in a transaction at all.
+> The cost is a write lock on `reports` for the duration of the build, which was momentary at the 180 rows the table held when V89 was written.
+> The reasoning was never recorded in the migration, and it can no longer be added there: editing an applied migration fails Flyway's checksum validation and the application refuses to start until an operator runs a repair.
+> It is recorded here instead.
+> A future swap should follow V107 rather than V89 - build the replacement `CONCURRENTLY` under a second name, then `DROP INDEX CONCURRENTLY` the original, so both guards are live in between.
+
 | A user may not report their own content | `ReportServiceImpl.submitReport` — throws `REPORT_SELF_NOT_ALLOWED` when `reporterId` equals the entity owner |
 | `entity_id` must correspond to an existing entity of the declared `report_type`; validate before insert | `ReportServiceImpl.validateEntityExists` — resolves owner via `ReportRepository.findOwnerId`; throws `REPORT_TARGET_NOT_FOUND` if absent |
 | `PATCH /reports/{reportId}/status` performs exactly one transition, `pending` to `reviewing`, and records `reviewed_by` and `reviewed_at` | `ReportServiceImpl.validateTransition`, `ReportServiceImpl.updateStatus` |

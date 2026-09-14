@@ -127,6 +127,22 @@ app:
         - ${RABBIT_CONSUMER_RETRY_BACKOFF_3:PT60S}
   security:
     cookie-signing-secret: ${APP_COOKIE_SIGNING_SECRET}
+    # The ingress CIDRs whose X-Forwarded-For IpExtractor is allowed to believe. Bound here as a
+    # defaulted placeholder rather than as a literal in each profile: application-prod.yml carried
+    # a bare [] instead, and a profile document outranks the .env file application.yaml imports,
+    # so setting APP_SECURITY_TRUSTED_PROXY_CIDRS the way every other deployment variable in this
+    # repository is set had no effect at all. A real operating-system environment variable did
+    # outrank it, which is why the only symptom was the IpExtractor startup warning. Empty by
+    # default, which fails closed: no proxy is trusted until one is named.
+    trusted-proxy-cidrs: ${APP_SECURITY_TRUSTED_PROXY_CIDRS:}
+    # Serves /actuator/prometheus to callers presenting no credentials. Defaulted fail-closed,
+    # so the endpoint falls through to the ADMIN rule that covers the rest of /actuator/**.
+    # It publishes every routed URI template, per-endpoint request counts and latencies, and JVM,
+    # pool and broker internals, so enabling it on a port reachable from outside the monitoring
+    # network hands that to anyone. A separate management port or an ingress rule is safer than
+    # this switch; it exists so a deployment whose port is already private is not forced into a
+    # topology change to keep scraping.
+    public-metrics-endpoint: ${APP_SECURITY_PUBLIC_METRICS_ENDPOINT:false}
     refresh-cookie:
       name: ${REFRESH_COOKIE_NAME:luvax_refresh}
       path: ${REFRESH_COOKIE_PATH:/api/v1/auth}
@@ -147,12 +163,12 @@ app:
   mail:
     consumer:
       enabled: ${MAIL_CONSUMER_ENABLED:false}
-    # Deliberately literal, not an environment placeholder. An APP_MAIL_TRANSPORT environment
-    # variable still outranks this, and MailTransportGuard is what refuses to boot if that
-    # override selected the non-network noop transport outside the dev profile.
-    # The dev profile resolves this from APP_MAIL_TRANSPORT instead (application-dev.yml); this
-    # base literal is what prod inherits unmodified.
-    transport: resend
+    # Resolved from the environment in every profile, defaulting to the network transport.
+    # A real operating-system environment variable always outranked the literal that stood here,
+    # but the .env file application.yaml imports does not, so the documented way to select a
+    # transport locally was inert outside dev and MailTransportGuard only ever observed resend.
+    # The guard, not this default, is what refuses the non-network noop transport outside dev.
+    transport: ${APP_MAIL_TRANSPORT:resend}
     resend:
       # Defaulted to empty so a developer running the noop transport needs no Resend credential.
       # ResendMailConfig rejects a blank key, so selecting resend without one still fails at startup.

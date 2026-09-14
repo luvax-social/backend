@@ -21,13 +21,14 @@ import com.app.common.response.ApiResponse;
 import com.app.common.response.UserListItemResponse;
 import com.app.common.security.util.SecurityUtils;
 import com.app.common.web.StrictQueryParameters;
+import com.app.modules.recommendation.api.SuggestionApi;
 import com.app.modules.recommendation.service.SuggestionService;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 
 /** People you may know. */
 @RestController
-public class SuggestionController extends BaseController {
+public class SuggestionController extends BaseController implements SuggestionApi {
 
     private final SuggestionService suggestionService;
 
@@ -41,8 +42,9 @@ public class SuggestionController extends BaseController {
      * <p>Answers the verified cold-start list when nothing personalised survives the filters, so a
      * brand new account is never shown an empty rail.
      */
+    @Override
     @PreAuthorize("isAuthenticated()")
-    @GetMapping(ApiConstants.Recommendations.ROOT + ApiConstants.Recommendations.SUGGESTIONS)
+    @GetMapping(ApiConstants.Recommendations.SUGGESTIONS)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<List<UserListItemResponse>>> suggestions(
@@ -59,9 +61,9 @@ public class SuggestionController extends BaseController {
      * <p>Not a block: the dismissed account keeps appearing in search, on profiles and everywhere
      * else, and is never told. Idempotent, so a repeated dismissal is not an error.
      */
+    @Override
     @PreAuthorize("isAuthenticated()")
-    @PostMapping(
-            ApiConstants.Recommendations.ROOT + ApiConstants.Recommendations.SUGGESTION_DISMISS)
+    @PostMapping(ApiConstants.Recommendations.SUGGESTION_DISMISS)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<Void>> dismiss(@PathVariable UUID userId) {
         suggestionService.dismiss(SecurityUtils.getCurrentUserId(), userId);

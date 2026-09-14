@@ -11,6 +11,7 @@ import com.app.common.ApiConstants;
 import com.app.common.base.BaseController;
 import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
+import com.app.modules.mail.api.MailUnsubscribeApi;
 import com.app.modules.mail.service.MailUnsubscribeService;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
@@ -27,7 +28,7 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
  * been banned.
  */
 @RestController
-public class MailUnsubscribeController extends BaseController {
+public class MailUnsubscribeController extends BaseController implements MailUnsubscribeApi {
 
     private final MailUnsubscribeService mailUnsubscribeService;
 
@@ -36,7 +37,8 @@ public class MailUnsubscribeController extends BaseController {
     }
 
     /** Opts the account behind the token out of campaign mail. Idempotent. */
-    @PostMapping(ApiConstants.Support.ROOT + ApiConstants.Support.UNSUBSCRIBE)
+    @Override
+    @PostMapping(ApiConstants.Support.UNSUBSCRIBE)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<Void>> unsubscribe(
             @RequestParam("token") @NotBlank String token) {

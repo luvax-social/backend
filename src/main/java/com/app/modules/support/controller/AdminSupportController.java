@@ -23,6 +23,7 @@ import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
 import com.app.common.security.util.SecurityUtils;
 import com.app.common.web.StrictQueryParameters;
+import com.app.modules.support.api.AdminSupportApi;
 import com.app.modules.support.dto.request.EscalateSupportTicketRequest;
 import com.app.modules.support.dto.request.RespondSupportTicketRequest;
 import com.app.modules.support.dto.response.SupportTicketStaffResponse;
@@ -46,7 +47,7 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
  */
 @RestController
 @PreAuthorize("hasAnyRole('MODERATOR', 'ADMIN')")
-public class AdminSupportController extends BaseController {
+public class AdminSupportController extends BaseController implements AdminSupportApi {
 
     private final SupportTicketService supportTicketService;
 
@@ -57,7 +58,8 @@ public class AdminSupportController extends BaseController {
     /**
      * Lists the staff queue, optionally filtered by status; never shows unconfirmed submissions.
      */
-    @GetMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.SUPPORT_TICKETS)
+    @Override
+    @GetMapping(ApiConstants.Admin.SUPPORT_TICKETS)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<List<SupportTicketStaffResponse>>> listTickets(
@@ -71,7 +73,8 @@ public class AdminSupportController extends BaseController {
     }
 
     /** Reads one ticket as staff, including its internal note. */
-    @GetMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.SUPPORT_TICKET_BY_ID)
+    @Override
+    @GetMapping(ApiConstants.Admin.SUPPORT_TICKET_BY_ID)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<SupportTicketStaffResponse>> getTicket(
@@ -84,7 +87,8 @@ public class AdminSupportController extends BaseController {
     }
 
     /** Claims an unassigned ticket for the authenticated staff member. */
-    @PostMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.SUPPORT_TICKET_CLAIM)
+    @Override
+    @PostMapping(ApiConstants.Admin.SUPPORT_TICKET_CLAIM)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<SupportTicketStaffResponse>> claimTicket(
             @PathVariable("ticketId") UUID ticketId) {
@@ -100,7 +104,8 @@ public class AdminSupportController extends BaseController {
      * <p>Refused with {@code SUPPORT_APPEAL_REQUIRES_ADMIN} when a moderator attempts either on an
      * appeal.
      */
-    @PostMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.SUPPORT_TICKET_RESPOND)
+    @Override
+    @PostMapping(ApiConstants.Admin.SUPPORT_TICKET_RESPOND)
     @StrictQueryParameters
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<SupportTicketStaffResponse>> respondToTicket(
@@ -115,7 +120,8 @@ public class AdminSupportController extends BaseController {
     }
 
     /** Hands a ticket up to an administrator. Permitted to both staff roles. */
-    @PatchMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.SUPPORT_TICKET_ESCALATE)
+    @Override
+    @PatchMapping(ApiConstants.Admin.SUPPORT_TICKET_ESCALATE)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<SupportTicketStaffResponse>> escalateTicket(
             @PathVariable("ticketId") UUID ticketId,

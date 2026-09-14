@@ -22,6 +22,7 @@ import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
 import com.app.common.security.util.SecurityUtils;
 import com.app.common.web.StrictQueryParameters;
+import com.app.modules.support.api.AdminVerificationApi;
 import com.app.modules.support.dto.request.VerificationDecisionRequest;
 import com.app.modules.support.dto.response.VerificationQueueItemResponse;
 import com.app.modules.support.enums.SupportTicketStatus;
@@ -40,7 +41,7 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
  */
 @RestController
 @PreAuthorize("hasAnyRole('MODERATOR', 'ADMIN')")
-public class AdminVerificationController extends BaseController {
+public class AdminVerificationController extends BaseController implements AdminVerificationApi {
 
     private final VerificationService verificationService;
 
@@ -49,7 +50,8 @@ public class AdminVerificationController extends BaseController {
     }
 
     /** Lists verification requests for review, newest first, optionally filtered by status. */
-    @GetMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.VERIFICATION_QUEUE)
+    @Override
+    @GetMapping(ApiConstants.Admin.VERIFICATION_QUEUE)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<List<VerificationQueueItemResponse>>> queue(
@@ -63,7 +65,8 @@ public class AdminVerificationController extends BaseController {
     }
 
     /** Returns one verification request with the requester's full grant history. */
-    @GetMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.VERIFICATION_REQUEST_BY_ID)
+    @Override
+    @GetMapping(ApiConstants.Admin.VERIFICATION_REQUEST_BY_ID)
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<VerificationQueueItemResponse>> getRequest(
             @PathVariable UUID ticketId) {
@@ -75,7 +78,8 @@ public class AdminVerificationController extends BaseController {
     }
 
     /** Approves a verification request, granting the badge and mailing the requester. */
-    @PostMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.VERIFICATION_APPROVE)
+    @Override
+    @PostMapping(ApiConstants.Admin.VERIFICATION_APPROVE)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<VerificationQueueItemResponse>> approve(
             @PathVariable UUID ticketId, @Valid @RequestBody VerificationDecisionRequest request) {
@@ -87,7 +91,8 @@ public class AdminVerificationController extends BaseController {
     }
 
     /** Rejects a verification request, granting nothing and mailing the requester the reason. */
-    @PostMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.VERIFICATION_REJECT)
+    @Override
+    @PostMapping(ApiConstants.Admin.VERIFICATION_REJECT)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<VerificationQueueItemResponse>> reject(
             @PathVariable UUID ticketId, @Valid @RequestBody VerificationDecisionRequest request) {
@@ -105,7 +110,8 @@ public class AdminVerificationController extends BaseController {
      * than an answer to a request. The grant row is kept with its revocation recorded, so the next
      * reviewer can see what was granted and why it was taken back.
      */
-    @PostMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.VERIFICATION_REVOKE)
+    @Override
+    @PostMapping(ApiConstants.Admin.VERIFICATION_REVOKE)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<Void>> revoke(
             @PathVariable UUID userId, @Valid @RequestBody VerificationDecisionRequest request) {

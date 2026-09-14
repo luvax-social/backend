@@ -37,7 +37,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.auth.service.WebSocketTicketService;
-import com.app.modules.mail.service.MailSender;
+import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.post.entity.Post;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.enums.PostType;
@@ -122,7 +122,12 @@ class CommentWebSocketLiveDeliveryIT {
     // real socket mints one the same way the client does.
     @Autowired private WebSocketTicketService webSocketTicketService;
 
-    @MockitoBean private MailSender mailSender;
+    // Declared at the concrete type rather than at the MailSender interface, because
+    // ModerationMailEventHandler and MailCampaignSenderJob both inject
+    // AbstractTemplateMailSender. An interface-typed override replaces the transport bean with a
+    // proxy that is not assignable to it, and the context then fails to start before any
+    // assertion runs.
+    @MockitoBean private AbstractTemplateMailSender mailSender;
 
     private WebSocketStompClient stompClient;
     private StompSession session;

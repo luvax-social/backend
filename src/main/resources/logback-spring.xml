@@ -31,6 +31,17 @@
         </encoder>
     </appender>
 
+    <!-- This resolver logs every exception it resolves at WARN, rendering the exception's own
+         toString(). For MethodArgumentNotValidException that is the whole BindingResult, and
+         FieldError.toString() carries "rejected value [...]" - the submitted password in
+         cleartext whenever a password policy check rejects one. The root logger is INFO, so the
+         line was written in every profile, into a 500MB rolling file operators read and log
+         shippers forward. GlobalExceptionHandler answers each of these exceptions itself and
+         logs the field and constraint code without the value, so the framework's copy is
+         redundant as well as unsafe. Pinned to ERROR rather than OFF so the resolver can still
+         report a genuine failure; only its WARN tier renders the payload. -->
+    <logger name="org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver" level="ERROR"/>
+
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>

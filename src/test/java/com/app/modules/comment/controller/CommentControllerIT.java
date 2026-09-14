@@ -733,7 +733,10 @@ class CommentControllerIT {
                         new HttpEntity<>(Map.of("reason", "test"), authHeaders(admin)),
                         Map.class);
         assertThat(removed.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(deletedAt(commentId)).isNotNull();
+        // The moderation tombstone, not the owner's. V95 split the two so that a restore cannot
+        // undo an author's own deletion, so an administrative removal must leave deleted_at alone.
+        assertThat(adminRemovedAt(commentId)).isNotNull();
+        assertThat(deletedAt(commentId)).isNull();
         assertThat(editedAt(commentId)).isNull();
 
         ResponseEntity<Map> restored =
@@ -743,6 +746,7 @@ class CommentControllerIT {
                         new HttpEntity<>(Map.of("reason", "test"), authHeaders(admin)),
                         Map.class);
         assertThat(restored.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(adminRemovedAt(commentId)).isNull();
         assertThat(deletedAt(commentId)).isNull();
         assertThat(editedAt(commentId)).isNull();
         assertThat(contentOf(commentId)).isEqualTo("flagged content");
@@ -800,6 +804,13 @@ class CommentControllerIT {
     private OffsetDateTime deletedAt(UUID commentId) {
         return jdbcTemplate.queryForObject(
                 "SELECT deleted_at FROM comments WHERE id = ?", OffsetDateTime.class, commentId);
+    }
+
+    private OffsetDateTime adminRemovedAt(UUID commentId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT admin_removed_at FROM comments WHERE id = ?",
+                OffsetDateTime.class,
+                commentId);
     }
 
     private String contentOf(UUID commentId) {

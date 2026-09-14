@@ -64,7 +64,7 @@ These tables cannot be rebuilt from any other source if lost.
 - No story highlights (saving stories beyond 24 hours).
 - No story polls, questions, or interactive stickers.
 - Story replies are direct messages (`message_type = 'story_share'`); the `message` module has no implementation yet, so this rule and `user_settings.allow_story_replies` stay unenforced until that module lands.
-- No admin takedown action for stories (`admin_action_type` has no `remove_story`/`restore_story`); moderation currently happens only via the report flow plus owner or account-level actions.
+- Administrative story takedown exists and this list no longer covers it. V75 added `remove_story` and `restore_story` to `admin_action_type`, V95 added `stories.admin_removed_at` as a moderation tombstone independent of the owner's own `deleted_at`, and `PATCH /api/v1/admin/stories/{storyId}/remove` and `/restore` are live routes. A restore clears only `admin_removed_at`, never the owner's deletion, and expiry keeps deciding visibility independently of both, so a story that expired while removed does not return to a feed when restored.
 
 ---
 

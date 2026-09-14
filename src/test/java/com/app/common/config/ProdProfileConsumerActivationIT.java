@@ -17,7 +17,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.comment.consumer.CommentNotificationConsumer;
-import com.app.modules.mail.service.MailSender;
+import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.story.consumer.StoryNotificationConsumer;
 
 @SpringBootTest(
@@ -30,7 +30,15 @@ import com.app.modules.story.consumer.StoryNotificationConsumer;
             "app.post.seed.enabled=false",
             "spring.rabbitmq.publisher-confirm-type=correlated",
             "spring.rabbitmq.publisher-returns=true",
-            "spring.rabbitmq.template.mandatory=true"
+            "spring.rabbitmq.template.mandatory=true",
+            // Surefire pins APP_MAIL_TRANSPORT=noop for the whole suite so no test reaches the
+            // real provider. This is the one prod-profile context, and MailTransportGuard refuses
+            // noop outside dev, so it has to name its own transport. It previously inherited
+            // application-prod.yml's literal transport: resend, which shadowed the pin by
+            // accident; that literal is gone now that the variable is the configured input, so
+            // the requirement is stated here instead. Nothing is sent: RESEND_API_KEY below is a
+            // dummy and the outbox publisher is disabled, so no mail path runs.
+            "app.mail.transport=resend"
         })
 @Testcontainers
 class ProdProfileConsumerActivationIT {
@@ -81,7 +89,12 @@ class ProdProfileConsumerActivationIT {
 
     @Autowired private ApplicationContext applicationContext;
 
-    @MockitoBean private MailSender mailSender;
+    // Overridden at AbstractTemplateMailSender, not at the MailSender interface. Under this
+    // profile the transport is resend, so resendMailSender is the only candidate, and both
+    // ModerationMailEventHandler and MailCampaignSenderJob inject the abstract class rather than
+    // the interface. A mock typed as the interface replaces the same bean with something neither
+    // can accept, and the context fails to load before any assertion here runs.
+    @MockitoBean private AbstractTemplateMailSender resendMailSender;
 
     @Test
     void prodProfile_activatesCommentAndStoryNotificationConsumerBeans() {

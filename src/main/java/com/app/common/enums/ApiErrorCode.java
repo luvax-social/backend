@@ -20,6 +20,7 @@ public enum ApiErrorCode {
     PAGINATION_DEPTH_EXCEEDED("PAGINATION_DEPTH_EXCEEDED", "Requested pagination depth is beyond the maximum this endpoint serves", HttpStatus.BAD_REQUEST),
     MALFORMED_REQUEST_BODY("MALFORMED_REQUEST_BODY", "Request body could not be read", HttpStatus.BAD_REQUEST),
     MISSING_REQUIRED_PARAMETER("MISSING_REQUIRED_PARAMETER", "A required request parameter is missing", HttpStatus.BAD_REQUEST),
+    METHOD_NOT_ALLOWED("METHOD_NOT_ALLOWED", "This HTTP method is not supported for this route", HttpStatus.METHOD_NOT_ALLOWED),
     UNSUPPORTED_MEDIA_TYPE("UNSUPPORTED_MEDIA_TYPE", "Content-Type is not supported", HttpStatus.UNSUPPORTED_MEDIA_TYPE),
     NOT_ACCEPTABLE("NOT_ACCEPTABLE", "None of the Accept header's media types are supported", HttpStatus.NOT_ACCEPTABLE),
     NOT_FOUND("NOT_FOUND", "Requested resource was not found", HttpStatus.NOT_FOUND),

@@ -311,6 +311,41 @@ public interface AdminHashtagApi {
                             + " pin promotes a term and a term out of circulation must not be"
                             + " promoted. Rejected with ADMIN_INVALID_TRANSITION when it is already"
                             + " pinned. Banning a pinned hashtag clears the pin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Hashtag pinned; the audit row is returned"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "403",
+                description = "Administrator role required",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "Hashtag not found, or banned or deleted and so not promotable",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "409",
+                description = "The hashtag is already pinned",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "429",
+                description = "Rate limit exceeded",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @MalformedBodyErrorResponses
     @PostMapping(ApiConstants.Admin.HASHTAG_PIN)
     ResponseEntity<ApiResponse<AdminActionResponse>> pinHashtag(
             @PathVariable("hashtagId") UUID hashtagId,
@@ -321,6 +356,41 @@ public interface AdminHashtagApi {
             description =
                     "Removes a platform-wide pin. Rejected with ADMIN_INVALID_TRANSITION when the"
                             + " hashtag is not pinned.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Pin removed; the audit row is returned"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "403",
+                description = "Administrator role required",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "Hashtag not found",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "409",
+                description = "The hashtag is not pinned",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "429",
+                description = "Rate limit exceeded",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @MalformedBodyErrorResponses
     @DeleteMapping(ApiConstants.Admin.HASHTAG_PIN)
     ResponseEntity<ApiResponse<AdminActionResponse>> unpinHashtag(
             @PathVariable("hashtagId") UUID hashtagId,

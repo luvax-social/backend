@@ -25,6 +25,7 @@ import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
 import com.app.common.security.util.SecurityUtils;
 import com.app.common.web.StrictQueryParameters;
+import com.app.modules.mail.api.AdminMailCampaignApi;
 import com.app.modules.mail.dto.request.PreviewMailCampaignRequest;
 import com.app.modules.mail.dto.request.SaveMailCampaignRequest;
 import com.app.modules.mail.dto.response.MailCampaignDetailResponse;
@@ -44,7 +45,7 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
  */
 @RestController
 @PreAuthorize("hasRole('ADMIN')")
-public class AdminMailCampaignController extends BaseController {
+public class AdminMailCampaignController extends BaseController implements AdminMailCampaignApi {
 
     private final MailCampaignService mailCampaignService;
 
@@ -53,7 +54,8 @@ public class AdminMailCampaignController extends BaseController {
     }
 
     /** Lists the read-only samples an administrator can start a campaign from. */
-    @GetMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.MAIL_TEMPLATES)
+    @Override
+    @GetMapping(ApiConstants.Admin.MAIL_TEMPLATES)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<List<MailCampaignTemplateResponse>>> listTemplates() {
@@ -67,7 +69,8 @@ public class AdminMailCampaignController extends BaseController {
      * <p>Server-side deliberately. One implementation means the preview cannot diverge from the
      * mail that is actually sent, and there is no second sanitization surface in the browser.
      */
-    @PostMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.CAMPAIGN_PREVIEW)
+    @Override
+    @PostMapping(ApiConstants.Admin.CAMPAIGN_PREVIEW)
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<Map<String, String>>> preview(
             @Valid @RequestBody PreviewMailCampaignRequest request) {
@@ -78,7 +81,8 @@ public class AdminMailCampaignController extends BaseController {
     }
 
     /** Creates a draft campaign. */
-    @PostMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.CAMPAIGNS)
+    @Override
+    @PostMapping(ApiConstants.Admin.CAMPAIGNS)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<MailCampaignDetailResponse>> createCampaign(
             @Valid @RequestBody SaveMailCampaignRequest request) {
@@ -90,7 +94,8 @@ public class AdminMailCampaignController extends BaseController {
     }
 
     /** Updates a draft campaign; refused once the campaign has left draft. */
-    @PutMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.CAMPAIGN_BY_ID)
+    @Override
+    @PutMapping(ApiConstants.Admin.CAMPAIGN_BY_ID)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<MailCampaignDetailResponse>> updateCampaign(
             @PathVariable("campaignId") UUID campaignId,
@@ -103,7 +108,8 @@ public class AdminMailCampaignController extends BaseController {
     }
 
     /** Moves a draft to scheduled, after which the sender job claims and sends it. */
-    @PatchMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.CAMPAIGN_SCHEDULE)
+    @Override
+    @PatchMapping(ApiConstants.Admin.CAMPAIGN_SCHEDULE)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<MailCampaignDetailResponse>> scheduleCampaign(
             @PathVariable("campaignId") UUID campaignId) {
@@ -115,7 +121,8 @@ public class AdminMailCampaignController extends BaseController {
     }
 
     /** Campaign history, newest first. */
-    @GetMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.CAMPAIGNS)
+    @Override
+    @GetMapping(ApiConstants.Admin.CAMPAIGNS)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<List<MailCampaignSummaryResponse>>> listCampaigns(
@@ -128,7 +135,8 @@ public class AdminMailCampaignController extends BaseController {
     }
 
     /** One campaign with every recipient and their outcome, including opt-out skips. */
-    @GetMapping(ApiConstants.Admin.ROOT + ApiConstants.Admin.CAMPAIGN_BY_ID)
+    @Override
+    @GetMapping(ApiConstants.Admin.CAMPAIGN_BY_ID)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<MailCampaignDetailResponse>> getCampaign(

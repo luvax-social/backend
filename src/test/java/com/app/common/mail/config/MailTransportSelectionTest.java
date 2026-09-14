@@ -9,6 +9,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import com.app.modules.mail.config.MailProperties;
 import com.app.modules.mail.config.MailTransportGuard;
 import com.app.modules.mail.config.noop.SentMailRecorder;
+import com.app.modules.mail.config.resend.ResendProperties;
 import com.app.modules.mail.service.MailSender;
 import com.app.modules.mail.service.impl.MailServiceImpl;
 import com.app.modules.mail.service.impl.NoopMailSender;
@@ -21,6 +22,10 @@ class MailTransportSelectionTest {
     private final ApplicationContextRunner runner =
             new ApplicationContextRunner()
                     .withBean(MailProperties.class)
+                    // ResendMailSender takes this in its constructor. Without it the context failed
+                    // to start on every transport=resend case, so the two assertions below never
+                    // ran and reported a missing-bean error instead of what they were checking.
+                    .withBean(ResendProperties.class)
                     .withBean(MailTemplateRenderer.class, () -> mock(MailTemplateRenderer.class))
                     .withBean(Resend.class, () -> mock(Resend.class))
                     .withBean(SentMailRecorder.class, SentMailRecorder::new)

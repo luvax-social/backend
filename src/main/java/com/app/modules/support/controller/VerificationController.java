@@ -16,6 +16,7 @@ import com.app.common.base.BaseController;
 import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
 import com.app.common.security.util.SecurityUtils;
+import com.app.modules.support.api.VerificationApi;
 import com.app.modules.support.dto.request.CreateVerificationRequest;
 import com.app.modules.support.dto.response.VerificationCategoryResponse;
 import com.app.modules.support.dto.response.VerificationStateResponse;
@@ -31,7 +32,7 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
  * because there is nothing to contest until a decision exists.
  */
 @RestController
-public class VerificationController extends BaseController {
+public class VerificationController extends BaseController implements VerificationApi {
 
     private final VerificationService verificationService;
 
@@ -41,7 +42,8 @@ public class VerificationController extends BaseController {
 
     /** Lists the verification categories a requester can choose, each with its glyph key. */
     @PreAuthorize("isAuthenticated()")
-    @GetMapping(ApiConstants.Support.ROOT + ApiConstants.Support.VERIFICATION_CATEGORIES)
+    @Override
+    @GetMapping(ApiConstants.Support.VERIFICATION_CATEGORIES)
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<List<VerificationCategoryResponse>>> listCategories() {
         return ResponseEntity.ok(
@@ -53,7 +55,8 @@ public class VerificationController extends BaseController {
      * neither.
      */
     @PreAuthorize("isAuthenticated()")
-    @GetMapping(ApiConstants.Support.ROOT + ApiConstants.Support.VERIFICATION_ME)
+    @Override
+    @GetMapping(ApiConstants.Support.VERIFICATION_ME)
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<VerificationStateResponse>> myState() {
         return ResponseEntity.ok(
@@ -70,7 +73,8 @@ public class VerificationController extends BaseController {
      * the round trip.
      */
     @PreAuthorize("isAuthenticated()")
-    @PostMapping(ApiConstants.Support.ROOT + ApiConstants.Support.VERIFICATION_REQUESTS)
+    @Override
+    @PostMapping(ApiConstants.Support.VERIFICATION_REQUESTS)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<VerificationStateResponse>> submit(
             @Valid @RequestBody CreateVerificationRequest request) {

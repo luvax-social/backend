@@ -35,7 +35,7 @@ These tables cannot be rebuilt from any other source if lost. `platform_stats` i
 
 | Rule | Enforced By |
 |------|-------------|
-| `action_type` must be one of the 22 values in `admin_action_type` enum | `admin_action_type` enum |
+| `action_type` must be one of the 36 values in `admin_action_type` enum | `admin_action_type` enum |
 | `admin_actions` is an append-only log; there is no `updated_at` and no soft delete | Schema design — no such columns |
 | `target_user_id` becomes NULL if the target user's account is deleted | `ON DELETE SET NULL` on `target_user_id` FK |
 | `report_id` becomes NULL if the associated report is deleted | `ON DELETE SET NULL` on `report_id` FK |

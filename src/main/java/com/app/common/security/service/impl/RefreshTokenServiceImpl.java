@@ -64,7 +64,13 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     @Override
     // Rotation must commit independently so the old token is always durably revoked even if the
     // outer refresh transaction rolls back after a subsequent account-status check.
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    //
+    // noRollbackFor is what makes the revocations below durable. Every AppException this method
+    // throws is a business rejection raised *after* a revoking UPDATE that has to outlive it, so
+    // the default rollback-on-unchecked-exception silently undid the write while the log line
+    // above it survived, reporting a remediation that never happened. Any future branch that
+    // throws AppException here must be one whose writes are also meant to commit.
+    @Transactional(propagation = Propagation.REQUIRES_NEW, noRollbackFor = AppException.class)
     public RotationResult rotate(String rawToken, String ipAddress) {
         String hash = sha256(rawToken);
         RefreshToken existing = repository.findByTokenHash(hash).orElse(null);

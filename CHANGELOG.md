@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- A pull request check that rejects any commit whose subject exceeds the 80-character limit, closing the gap that let six over-length subjects reach develop while only pull request titles were validated.
 - `scripts/regenerate_schema_sql.sh`, which rebuilds `database/schema.sql` from a clean Flyway run and proves the result by replaying it into a second database and comparing both catalogs.
 - `scripts/regenerate_struct_figures.sh`, which regenerates the migration table, the module list, the test-class table, the RabbitMQ topology, the Redis key prefixes and the declared versions from `git ls-files`.
 - Accounts can request a verified badge in one of eight categories, choosing a category and the name they claim and supplying at least three pieces of evidence; the request is refused with its own error code below that floor. No identity documents are collected and the form has no file upload, deliberately.
@@ -14,38 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A verified badge is withdrawn automatically when an account is suspended or banned, and retained when it is deactivated. An automatic withdrawal is recorded as a system action so the audit log distinguishes it from a decision a moderator made, and it never creates a support ticket.
 - People you may know, blending the follow graph, the recommender's user-to-user neighbours and hashtag interest overlap on rank rather than on scores. An account with no follows and no history is served verified accounts instead of an empty list.
 - Suggestions can be dismissed permanently, which changes no other surface, and an account can opt out of being suggested to other people.
-
-### Changed
-- `database/schema.sql` is regenerated from the V01-V111 migration set and carries the nine tables it was missing, including the mail campaign, verification and suggestion tables; its header states that it is generated, from what, and at which migration version.
-- The structure document's migration table, enum table, test-class table, RabbitMQ topology and Redis key table are generated from the tree rather than maintained by hand, and it no longer cites a regeneration script that does not exist.
-- The backend now carries the same single-line commit rule the frontend had, and the scope block in `git_workflow.md` states what `pr-lint` actually checks - the pull request title, not commit messages - in place of a dated audit snapshot.
-- `comment_style.md` drops an "AI Module Specifics" section describing cache keys for a module this project does not have, and names GitHub issues as the `TODO` reference format in place of an unused `VR-NNN` tracker prefix.
-- `CONTRIBUTING.md` describes what the `pr-size` workflow does, which is label a pull request and warn on it, rather than claiming it blocks above 1000 changed lines.
-- The Flyway comments in `application.yaml` name the V01-V111 range and all sixteen migrations that build indexes concurrently, while still pointing at the V57 incident the lock setting exists for.
-- A pending verification request no longer blocks an account from opening a support ticket, and an open support ticket no longer blocks a verification request; the one-open-ticket guard now holds one ticket per lane instead of one across both.
-- The public identity summary embedded in every response that names an account now carries the account's verification category, so a client can render which category a badge is for.
-- The support and moderation mail schema changes now apply after the hashtag interest work rather than colliding with it; the full migration set applies cleanly to an empty database and the application starts against it under schema validation.
-
-### Added
 - An appeal link can be checked for validity without being redeemed, so the appeal screen can show a dead link before the reader writes their appeal rather than after.
-
-### Fixed
-- An appeal or confirmation link is no longer destroyed by a refusal it had nothing to do with; both paths now run every check that can refuse while the token is still spendable, and redeem it only once the write has succeeded.
-- A recipient the deployment was configured never to mail is now recorded as skipped by every mail lane alike, instead of being dead-lettered by one, counted as a delivery failure by another and swallowed by a third.
-- The public support form now advertises and accepts exactly the same category set, because both read the category configuration table; disabling a category previously hid it from the form while the server kept accepting it.
-- A provider error is no longer misread as permanent because a three-digit run appeared in a request id, which dead-lettered a retryable failure on its first attempt.
-- The mail provider's own error text no longer carries a recipient address into the delivery log or the dead-letter reason.
-- The anonymous category list is now rate limited per client and served from a short-lived cache, so a signed-out read no longer reaches the database on every call.
-- Story expiry and suspension expiry are now decided by one clock rather than two, so whether a story is live or a suspension is over no longer depends on which of the application and the database is ahead.
-- A database constraint violation is now mapped by the constraint's own name rather than by finding that name anywhere in the driver's message, which could answer with a different constraint's error.
-
-### Tests
-- The people-you-may-know affinity bound is now covered by tests that pin what it costs the ranking, so a future change to its depth is a measured decision rather than a guess.
-- Both mail consumers now cover the suppressed-recipient branch, which is the gap that let the three mail lanes drift into three different answers for the same refusal.
-- A newly opened support ticket now answers with the time it was created rather than a null, because the ticket timestamps are read back after the insert that sets them.
-
-<!-- p1 -->
-### Added
 - Support ticket categories are now published through the shared vocabulary endpoint alongside report reasons, notification types and moderation actions, so a client no longer has to hardcode the list.
 - An email opt-out that suppresses campaign mail only; account and security mail ignore it, and the send path records who was skipped and why.
 - Campaign bodies are rendered by one server-side pipeline and filtered against an allowlist, so a body carrying a script tag, an event handler or a javascript link is neutralised before it reaches anyone.
@@ -54,38 +24,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A public support form gated by Cloudflare Turnstile and an email confirmation step, so a submission reaches staff only after the submitter proves control of the address.
 - An appeal opened from a moderation notice redeems a single-use link that authorises exactly one ticket and mints no session.
 - A support centre with three entry paths, so a banned or suspended account - which cannot reach any authenticated endpoint - now has a route to contest a decision, which it previously did not.
-
-### Fixed
-- The unsubscribe token column is now varchar rather than char, which is what the entity maps to; as char it failed schema validation and the application did not start at all.
-- Campaign personalisation tokens are now substituted correctly; the sanitizer rewrites double braces as a template-injection defence, which would otherwise have left every placeholder visible to recipients.
-- A stalled mail provider can no longer hold a consumer thread indefinitely; each send is bounded by a configurable call timeout, which is the only HTTP bound the Resend SDK permits from outside it.
-- Every read path that reaches comments or stories through native SQL now hides administratively removed rows, including the report target lookup, the platform statistics gauges and the development seed pipeline.
-- Live post fanout is now enabled in production; the /ws/posts endpoint was reachable while nothing published to it.
-
-### Added
 - Posts carrying a hashtag are now readable through a dedicated cursor-paginated endpoint, served from Elasticsearch and degrading to a PostgreSQL join when the search tier is unavailable.
 - A hashtag can be resolved by name, so a shared or deep-linked hashtag address reaches the same record the post write path created.
 - A per-user hashtag affinity model, recomputed on a twelve-hour cycle from bounded reads of the behavioural event log, weighted by intent and decayed over its window.
 - Trending hashtags ranked for the caller, blending the platform snapshot with the caller's own affinity and reserving a share of the list for hashtags adjacent to their interests.
 - Administrators can pin a hashtag platform-wide so it leads the trending list, and unpin it again; both actions are recorded in the moderation audit log.
-
-### Changed
-- The trending response now reports whether a hashtag is pinned and why it appears in the list, and orders pinned hashtags first.
-- Banning or deleting a hashtag now clears any pin it holds.
-
-### Fixed
-- A request for a banned or deleted hashtag now answers `404` with its own error code rather than an empty page, so a client can distinguish an unavailable hashtag from one with no posts yet.
-- Pagination depth on the posts-by-hashtag read is now bounded with its own error code; previously an over-deep request degraded silently and charged a failure to a circuit breaker shared with two other search surfaces.
-- The recommendation feed pipeline now logs a warning and records a counter metric when a batch of recommender candidates resolves to no visible posts, and when a request falls all the way back to the chronological feed; previously this degraded silently behind a normal `200` response.
-
-### Removed
-- The `ci-test.yml` CI workflow, which had been unintentionally disabled and was reporting a permanent failure on every push and pull request; its coverage was already fully subsumed by `sonarcloud.yml`.
-
-### Changed
-- The development seed pipeline can now also run under the `prod` profile when `seed` is explicitly active alongside it, in addition to its existing `dev` activation, for staging-style deployments that require it against a disposable non-production database.
-- `sonarcloud.yml` now runs the duplicate Flyway migration version pre-check before the build, a step formerly unique to `ci-test.yml`.
-
-### Added
 - Each of the nine moderation actions that affect a person now raises its notice inside the same transaction as the moderation write, so an action cannot commit without its notice enqueued nor send one for a change that rolled back.
 - A per-recipient hourly budget now bounds moderation mail, the first send throttle of any kind on this path.
 - Moderation notices now reach banned, suspended and deactivated accounts, which the existing mail path refused by design and which were therefore the only population never told what had happened to them.
@@ -102,8 +45,283 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The development seed dataset now gives the `admin` review account a realistic 25-conversation inbox, spanning every seeded persona and exercising image, video, shared-post, shared-story, administrator-removed, sender-deleted, manually-unread, and private-nickname messaging states.
 - The development seed dataset's image, video, shared-post, and shared-story messages now resolve to real, visible media assets, posts, and stories instead of decorative placeholders.
 - A non-network `noop` mail transport, selectable locally via `APP_MAIL_TRANSPORT=noop`, that captures outbound mail instead of sending it; used automatically for the entire automated test suite so it never reaches the real provider.
+- The development seed dataset's authored content (display names, bios, captions, comments, direct messages, hashtags, and moderation notes) has been rewritten in natural English, replacing the earlier Vietnamese-language authoring pass.
+- The rebuilt development seeder's usage, its fixed QA accounts and shared password, its consumer-activation requirements, and how to re-provision its media are now documented in a dedicated README.
+- The rebuilt development seeder now has a single entry point that runs on application startup behind an explicit opt-in flag: it refuses to run against anything but a local database, wipes and rewrites the full seeded dataset in dependency order, replays the seeded activity through the same event pipeline production traffic uses, and then verifies every status/type/reason value the platform's enums define is actually represented in the data before declaring the run complete.
+- A dedicated configuration profile now holds off the five notification-producing consumers during a development seed run, since the seeder writes their notification rows directly with historically correct timestamps instead.
+- The rebuilt development seeder now emits a bounded set of real domain events (search-index updates for every post and hashtag, and engagement events for every like, save, and comment) through the same transactional outbox every production write path uses, so the real search-index and recommendation consumers index and learn from the seeded dataset. View events are deliberately never emitted, since seeded view counts and view activity are already written directly.
+- The rebuilt development seeder now writes its remaining domain data: stories with a realistic live/expired split and their views and likes; direct-message conversations and messages honoring both the sender and administrative deletion tombstones; notifications standing in for the consumers a seed run holds off; and the moderation history (reports, audit actions, warnings, and strikes) and platform analytics (daily and half-hourly statistics buckets, and behavioral events) that complete the seeded dataset.
+- The rebuilt development seeder now writes its post, comment, and engagement data: every seeded post with its media, hashtag associations, and a plausible view count; the full hashtag registry and its trending snapshot; threaded comments drawn from scripted reply chains and pooled comment text, including several soft-deleted reply threads; and the post likes, post saves, and comment likes connecting seeded accounts to seeded content.
+- The rebuilt development seeder now writes its first domain data: every seeded account (profile, credentials, and settings), every seeded media asset (avatars, banners, and post media, each minted with its own unique storage key), and the follow and block graph connecting the seeded accounts.
+- Foundational infrastructure for the rebuilt development seeder has been added: configuration to gate whether it runs, a loader that reads and validates the seed content files, a deterministic timeline generator for realistic historical timestamps, and a reset step that wipes prior seed data before a fresh run.
+- The development seed dataset's media now sources real, licensed photos and video clips from Pexels and provisions them to the development object storage bucket, replacing the earlier placeholder image and video sources.
+- The development seed dataset's post volume has been expanded to 722 posts with post counts per account following a fixed distribution band, and every user avatar, user banner, and post media reference now points at a real Pexels-sourced asset instead of the earlier generated-avatar and placeholder-media schemes.
+- A complete, realistic content dataset (personas, accounts, posts, hashtags, comments, direct-message conversations, and moderation case histories) has been authored for the upcoming rewrite of the development seeder, replacing the placeholder content the current seeder generates.
+- An account's violation history can now be read including records that have been revoked, which were previously removed from the list entirely, so an account that had been disciplined and then cleared looked identical to one that never was.
+Revoked entries are returned only when asked for, are marked as revoked, and say when and by whom.
+- The account detail an administrator reads now says how many warnings currently count toward the account's next strike, so a reviewer can be told that the warning they are about to issue will be the third and will suspend the account.
+- A single session can now be ended instead of only every session at once.
+The session must belong to the account it is named under, and ending one that has already ended reports success rather than an error.
+Ending one session does not sign the account out everywhere, which ending all of them does.
+- A signed-in client can now ask which session it is using, so a reviewer reading its own account's sessions can tell which row is the one it is sitting on.
+- Several account identifiers can now be resolved to display names in one request, instead of one request per account.
+Queues, audit rows, violation rows and activity rows all show bare identifiers, and this is what turns them into names.
+An identifier that matches no account is returned and marked as such rather than quietly left out.
+- The moderation audit log can now be filtered by a time window and by the account an action was taken against, so an investigation can ask what happened last Tuesday, or everything done to this account.
+A moderator still sees only its own entries.
+- A moderator can now list the reports it escalated.
+Escalating takes a report out of every queue a moderator can read, so until now there was no way to follow what had been handed up.
+- An account's posts now carry their attached images and video when a reviewer reads them, instead of only the caption.
+- The recommender service now starts with the rest of the local development stack.
+It was defined but never started, so every like, save, view and comment was retried against a service that was not running and then discarded.
+Those four kinds of activity now reach the activity log, taking it from three kinds to seven in development.
+This is development only; nothing about a production deployment was set up.
+- A moderator or administrator can now remove and restore a reported story and a reported message, the same way they already could a post or a comment.
+Closing a report about either previously recorded a moderation decision in the audit log while the content stayed up, which was the one place where the record and the reality could disagree.
+Removing a story leaves its expiry alone, so a story that expires while removed does not come back into anyone's feed when it is restored; once a story is both removed and expired the existing cleanup job deletes it and it can no longer be restored.
+Removing a message withholds its text, its media and any post or story it shares from both participants, leaving the same placeholder the thread already shows when a sender deletes their own message.
+The message keeps its content so a restore can return it, and a restore never undoes a deletion the sender performed.
+- Suspension with no end date is now stated as a supported choice in the endpoint documentation rather than only being possible.
+Omitting the duration suspends indefinitely and stores no end time, which the reinstatement sweep never matches, so the account stays suspended until an administrator lifts it.
+- Every display vocabulary the API asks a client to send back is now readable in one call: report reasons, notification types, and moderation action types, each with its label, its behavioural flags, and whether it is currently enabled.
+A disabled row is returned and flagged rather than filtered out, so a client can show it as unavailable instead of offering it and meeting a rejection.
+Readable by any signed-in caller, because a person filing a report needs the same reason list a moderator needs when issuing a warning.
+- A moderator or administrator can now list an account's posts and its comments while investigating it, including drafts, archived posts, and content moderation has already removed, and regardless of whether the account is private or has blocked the reviewer.
+- A moderator or administrator can now open a single post, comment, account, story, or message by its own identifier, so a link from an audit entry or an account's content listing no longer dead-ends.
+- The account detail an administrator reads now says what that administrator is allowed to do to the account and which roles it may be moved to, so a control can be shown or hidden from the payload instead of from a copy of the rules kept in the client.
+- Restoring a post now names the banned hashtags its caption still carries, so a moderator is told the post came back with fewer tags than its text names rather than finding out from a later complaint.
+- A post in the following feed now carries its hashtags, the same field and the same shape the post detail already carried, so one post card renders identically wherever it came from.
+- The bucket width of a statistics chart can now be requested rather than only reported. Asking for half-hourly buckets over a window older than the fine-retention horizon is refused rather than answered with an empty chart, because those rows have been rolled up and deleted.
+- The real-time surface is now documented alongside the REST description: the four endpoints, the ticket handshake, every subscribable destination, the events each carries, and the list of what is pushed against what must still be polled.
+- An administrator can now read what an account did: session starts, searches with the term that was used, and views of another account's profile.
+The read requires a time window of at most thirty days, because the underlying table is partitioned by time and a query without one reads the whole history of the platform.
+- Behavioural events are now recorded at all. Three kinds are written, chosen for what they answer per unit of write volume; every other kind the schema allows for is deliberately still unwritten, and the endpoint's documentation says so, so an administrator seeing three kinds does not report it as a defect.
+Recording a view of one's own profile is skipped, since it would bury the views that matter.
+- An administrator can now see a platform snapshot: accounts by status and by role, totals for posts, comments and stories, reports by status and by reason, and the most used hashtags.
+The snapshot carries the time it was computed, so a client can show how fresh it is rather than implying the numbers are live.
+- An administrator can now chart any of those figures over time. Omitting both bounds gives the last day; the server picks the bucket width from how far back the window reaches and says which it used.
+- An administrator can now manage the hashtag registry: list and search it across every lifecycle state, create a hashtag ahead of any post using it, ban one, return one to circulation, and delete one.
+Every action is recorded in the moderation audit log with who decided and why.
+- A hashtag can now be banned, which takes the term out of discovery and refuses it on new posts, or deleted, which additionally drops it from the hashtag list shown on a post.
+Neither removes anything: the posts that already used the tag, their associations, and the usage counter all survive, so both decisions are reversible.
+- Banning a hashtag now clears it from the trending list immediately rather than at the next snapshot.
+A term is usually banned while it is trending, which is the worst moment to leave it there.
+- A post whose caption names a banned hashtag is now refused, and the response names the offending tags so they can be highlighted in the caption rather than guessed at.
+This covers creating a post, editing a caption, and publishing a post that was drafted or archived before the ban.
+- A post now lists the hashtags it is associated with, so a client knows which parts of a caption to render as links.
+A hashtag an administrator has deleted is left out while the caption keeps its literal text.
+- A hashtag can now be created directly in a banned state, which reserves a term before anyone can use it.
+- A moderator can now warn an account, giving moderation a step between doing nothing and banning.
+Three warnings that still count produce a strike; the first strike suspends for seven days, the second for thirty, the third and any after it ban permanently.
+- A warning counts toward the next strike while it stands, was issued after the account's most recent strike, and is less than ninety days old, so an account that behaves for long enough starts again.
+- A strike never weakens a penalty already in force, so warning an account that is already banned records the strike without shortening the ban, and the response says which happened.
+- An administrator can now reverse a single warning or a single strike. Neither reversal changes the account's status: lifting a suspension or a ban stays a separate, explicit decision.
+- A warned account is now told, and can review its own warnings afterwards. It never sees its strikes, nor who issued anything.
+- The reasons a moderator may cite when warning an account are drawn from the report-reason registry, so retiring a reason is a configuration change rather than a release.
+- A moderator can now hand a report up to an administrator instead of closing it or leaving it, and must say why.
+An escalated report leaves the moderator queue, stays readable to the moderator that escalated it, and can be closed only by an administrator.
+- An administrator can now see how many reports are waiting on them. Escalation pushes no notification, so this count is the only signal one has arrived.
+- A moderator can now see the content a report points at, even when the author's account is private or the author has blocked them.
+The report is the only way in, so a moderator sees what somebody flagged and nothing else.
+- An administrator can now list, search, and inspect accounts, spanning every account status including removed accounts, which no public surface shows.
+- The account detail view shows where an account was created from, where and when it last signed in, its live sessions, and the reports filed against it.
+- An administrator can now end every one of an account's sessions in one action, and the audit entry records how many were ended.
+- An administrator can now change an account's role between user and moderator, and promote a moderator to administrator.
+The change ends the account's sessions in the same operation, so a demotion takes effect immediately rather than when the old session expires.
+- A suspension can now be given a duration in days, after which the account returns to active by itself.
+The first sign-in attempt after the term lapses restores the account, and a periodic sweep does the same for an account nobody signs into, so an expired suspension never lingers.
+- The moderation audit log now records role changes and forced logouts, and the action registry lists every action type the moderation surface is planned to record.
+- A conversation can now be pinned to the top of the caller's own list, muted to suppress its notifications, and given a private nickname visible only to the caller, all independent of the other participant's own view.
+- A conversation can now be deleted from the caller's own inbox only, and marked unread again.
+Deleting only hides it for the caller; the other participant and the message history are untouched, and a new message from them reactivates it for the caller automatically.
+- Two people who follow each other now get a conversation automatically, so writing to someone no longer depends on one of them starting a thread first.
+Pairs who already followed each other before this release are given one by the upgrade.
+- A message that carries an attachment now includes the attachment's URL, dimensions, duration, and blurhash in the message response, so a client can render it without a second request per message.
+- Prometheus metrics are now exposed for scraping at `/actuator/prometheus`, which previously returned 404 despite the registry being present.
+- Local service containers now declare healthchecks and restart policies, and the application image declares a healthcheck.
+- A user can now like and unlike a story, mirroring the existing post-like flow: self-like is permitted, liking an already-liked story is a conflict, and the story response carries the viewer's liked state plus, for the owner, the total like count.
+- Development-only automatic data seeding on startup: with `SEED_DATA=true` under the `dev` profile, the application seeds curated verified accounts, posts with real externally hosted media, comments, likes, and a follow graph a few seconds after startup, and logs a single reviewer account (which follows every seeded user) whose credentials give an immediate full-feed review experience. It is idempotent and never runs in production.
+- Comment, reply, comment-like, and comment-mention notifications now carry the id of the post they concern, alongside the existing comment id, so a client can open the correct post in one response instead of being unable to resolve it. Like-post notifications are unchanged. The field is additive and null for notifications that don't concern a post.
+- A user can now set and clear a banner (cover image), mirroring the existing avatar upload flow: upload through the pre-signed media flow, then save the resulting CDN URL to the profile. Sending an empty string clears it, exactly like the avatar. The banner URL is returned on both the self and public profile responses.
+- Conversations now deliver new and deleted messages to active participants in real time over a WebSocket connection, in addition to the existing REST history endpoint.
+- Sending a message now notifies every other active participant in the conversation.
+- Sending a message (text, image, video, post share, or story share) into a conversation, with a reply reference, idempotent retries, and validation that the payload matches the declared message type.
+- Cursor-paginated message history for a conversation, including a placeholder for a deleted message.
+- Sender-only message deletion that preserves the message as a placeholder instead of removing it.
+- Marking a conversation read, and a total unread message count across all of a user's conversations.
+- The caller's conversation list now includes a preview of each conversation's newest message.
+- Media uploads now accept animated GIF images and QuickTime video, alongside the JPEG, PNG, and WebP images and MP4 and WebM video already supported. Nothing was removed. HEIC and HEIF remain refused: the CDN serves exactly what was stored and nothing transcodes, so an accepted HEIC would upload cleanly and then fail to render for most viewers.
+- `GET /media/constraints` publishes the limits the upload path actually enforces, so a composer can state the accepted formats, the size ceiling, and the video length ceiling instead of hardcoding values that drift. It is served from the same configuration the upload validator reads, so it cannot advertise a rule the server does not apply.
+- `GET /posts/liked` lists the posts the signed-in user has liked, newest like first, so a profile's liked tab has an endpoint behind it instead of a placeholder. It is self-only: the list is always the caller's own, and one user cannot page another's likes. A post that has since been deleted, removed by moderation, unpublished, or hidden by a block or a newly private author is left out, which can return fewer entries than the requested page size while more pages remain.
+- A profile's post list accepts a `type` filter carrying one or more post types, so a photos tab can ask for image, video, and carousel and leave text posts out. Repeat the parameter for several values; a single comma-delimited value also works. Omitting it filters nothing and returns exactly what it returned before. An unrecognised value is refused with a message naming every accepted value, rather than quietly ignored. A cursor is bound to the filter that issued it and is refused under a different one, because the ordering does not depend on the filter and replaying such a cursor would otherwise silently skip every excluded post before that position.
+- A post's like count now updates live. A client watching a post can subscribe to that post's realtime channel and receive a frame whenever anyone likes or unlikes it, so the count no longer sits frozen next to a comment stream that is already updating. Each frame carries the current total rather than a change, so a client that misses one is corrected by the next. Delivery is best-effort and the REST response remains authoritative. A viewer who is blocked by the post's owner stops receiving these frames even if they subscribed before the block was created. The tier is off by default and enabled per environment.
+- Post, comment, and user responses now carry `hasReported`, telling a client whether the viewer has already reported that target so the report control can be disabled rather than offered and then rejected. It is true exactly when a fresh report would be refused as a duplicate, which includes reports a moderator has since resolved or dismissed, since neither permits reporting the same target again. It is false for an anonymous viewer and on the viewer's own content, and it is resolved once per page, so a list costs one additional query regardless of how many items it returns.
+- The comment list accepts a `sort` parameter with two modes. `top`, the default, is the existing behaviour: up to three most-liked comments are pinned above the first page. `newest` suppresses that block and returns pure chronology. Both order the list newest first, so an existing client that sends no parameter sees no change. A cursor is bound to the mode that issued it and is rejected under the other rather than returning a silently wrong page.
+- Comments now carry an `editedAt` timestamp, on both the REST response and the live broadcast payload, which is null until the author changes the content and is never moved by anything else. Comparing `createdAt` against `updatedAt` was the only way to guess at this before, and it never worked: a single like moves `updatedAt`, and the two values are not equal even on a comment that has just been created.
+- `GET /comments/{commentId}/deletion-scope` reports how many comments deleting a comment would remove, so a confirmation dialogue can state the real scope of a subtree removal instead of the direct-reply count. The number is an estimate; the delete's own response is authoritative.
+- A tracked seed script creates a fixed set of local development accounts, a follow graph, and published posts, so a fresh clone no longer produces a running application with no way to log in; it writes only to the local compose database and refuses to run against any other.
+- `CONTRIBUTING.md` now documents how to seed a fresh environment and which accounts that leaves you with.
+- Outbound email can now be delivered over SMTP as well as through the hosted provider, selected by the `app.mail.transport` setting.
+- Local development now sends every message to a Mailpit inbox started by `docker compose`, so a fresh clone can register an account, open the verification link, and log in without a provider credential or a manual database edit.
+- The application refuses to start when the SMTP transport is selected outside the development profile, so an environment variable cannot silently divert production mail into a local sink.
+- Refresh tokens are now also issued as an `HttpOnly`, `SameSite`-scoped cookie on login, email verification, OAuth2 code exchange, and refresh, so browser clients can restore a session after a page reload without persisting a credential to web storage.
+- New `app.security.refresh-cookie` configuration group controls the cookie's name, path, `Secure` flag, and `SameSite` policy per environment.
+- A post view can now be recorded via `POST /api/v1/posts/{postId}/view`; the view is captured as a behavioral event and feeds the recommendation engine as a read signal, without synchronously changing any counter on the post.
+- Liking or saving a post now feeds the recommendation engine: each action is recorded as a behavioral event and forwarded to the recommender asynchronously, so the personalized feed reflects real engagement, not only the seeded interaction history.
+- A personalized "for you" post feed at GET /api/v1/recommendations/feed, ranked by the Gorse recommender with per-post ranking scores, degrading to the popularity ranking and then the chronological following feed whenever the recommender is unavailable.
+- A deterministic synthetic seed tool generates demo users, text posts, a follow graph, and interaction history for the recommendation demo, and can push or rebuild the Gorse dataset from the same source.
+- The Gorse recommender (v0.5.11) now runs as a dedicated service through a compose overlay, storing data in its own PostgreSQL database, secured by an API key and a loopback-bound authenticated dashboard.
+- The first page of a post's comments now begins with up to three pinned top comments, ordered by like count; each comment carries a `pinned` flag so a client can tell them apart from the newest-first list rather than inferring it from position. Only comments with at least one like are eligible, a pinned comment is never repeated in the same page's newest-first body, and the pinned block is additional to the requested page size. Page two onward is unchanged.
+- Notifications are now delivered in real time over a WebSocket connection, in addition to the existing REST endpoints; a client may subscribe only to its own notification stream, and a missed push is always recoverable by re-fetching the notification list.
+- A WebSocket connection is now terminated automatically if the underlying account is banned, suspended, or logged out, rather than remaining open until the access token naturally expires.
+- A WebSocket handshake is now rate limited, and every rejected handshake is logged.
+- User search by username is available to authenticated callers, matching case-insensitively on any part of the username and ordering results by follower count.
+- The users a caller has blocked can now be listed as a paginated page, newest block first.
+- A user's public profile can now be fetched by username as well as by id; the username match is case-insensitive.
+- A shared public user summary object - user id, username, display name, avatar URL, and verified flag - is now available for embedding an author or actor inline in API responses; a soft-deleted or unknown user resolves to a placeholder rather than a missing value.
+- Foundation for the direct messaging module: 1-1 and group conversations, group participant management (add, remove, leave with automatic admin handoff), group renaming, and cursor-paginated conversation listing with per-conversation unread counts.
+- A message request from a user who is blocked, or from a non-follower when the recipient has disabled message requests, is now rejected.
+- Users can now log in with either their email address or their username, supplied through a single login identifier field.
+- Deduplicated story view recording, with the trigger-maintained view count returned on every call and owner views exempted from counting.
+- Owner-only cursor-paginated list of a story's viewers, newest view first.
+- A `story_view` notification is created for the story owner on a viewer's first view of a story.
+- Scheduled hourly cleanup that hard-deletes stories once they are both soft-deleted and past expiry.
+- Story creation backed by an owned media asset, with story type and 24-hour expiry derived automatically.
+- Story reads: a single story, a user's active stories, and a feed tray grouped by author with unseen-first ordering.
+- Owner-only soft delete of a story.
+- Story visibility enforcement: private accounts require an accepted follow, and blocks hide stories in both directions.
+- Admin moderation workflows for user status, post and comment removal/restoration, report closure, and cursor-paginated immutable audit history.
+- Split admin moderation into 13 explicit API operations and added user-specific audit history, summary DTO mapping, append-only repository verification, and transactional rollback coverage.
+- OpenAPI-documented admin endpoints with moderator/administrator role enforcement and structured audit metadata.
+- Admin unit and full-stack integration coverage for authorization, target mutations, audit queries, and actor-deletion retention.
+- Automated `user_events` monthly partition management: a migration backfills the current and next two months' partitions, and a scheduled job pre-creates the partition two months ahead each month so new events no longer accumulate in the default catch-all partition.
+- Report submission and moderation workflow with polymorphic target validation, duplicate and self-report prevention, role-restricted retrieval, and controlled status transitions.
+- Report pending moderation endpoint returning FIFO cursor-paginated queue summaries.
+- Unit and Testcontainers integration coverage for report submission, validation, authorization, retrieval, and status transitions.
+- Comment module: create, edit, soft-delete (subtree), likes, and nested replies up to depth 10, with cursor-paginated listing of top-level comments and replies.
+- Synchronous comment moderation (content normalization plus rule-based rejection for empty, over-length, blocked-word, and spam content).
+- HTTP write idempotency for comment creation via an `Idempotency-Key` header, replaying the original response on a matching retry and rejecting key reuse with a different payload.
+- Optional per-post comment slow-mode rate limiting backed by Redis.
+- Event-driven comment, reply, mention, and like notifications via a dedicated RabbitMQ consumer.
+- Redis recent-comments cache with cache-aside writes, rebuild-on-miss, and fail-open degradation.
+- Real-time comment delivery over WebSocket (STOMP/SockJS) with JWT-authenticated handshake, per-subscription post-visibility authorization, and per-instance RabbitMQ fanout queues.
+- Comment subsystem metrics and a Redis/RabbitMQ health indicator.
+- RabbitMQ topology for Elasticsearch index synchronization: durable `hashtag.index.sync` and `post.index.sync` work queues with dead-letter queues, bound to the shared `social.events` topic exchange with dead-lettering to `social.events.dlx`.
+- Idempotent `hashtag` and `post` index-sync consumers that apply Elasticsearch upsert and delete events with bounded in-process retry and dead-letter routing on permanent or exhausted failures; the post consumer re-checks PostgreSQL and indexes only existing published posts, dropping stale out-of-order events.
+- Post creation, retrieval, caption update, lifecycle transition, and soft-delete endpoints, with per-post append-only caption edit history readable by the owner.
+- Post like and save endpoints with idempotent semantics and cursor-paginated liker and saved-post listings.
+- Post visibility enforcement gating retrieval, listing, liking, and saving by block relationships and private-account follow state.
+- Elasticsearch full-text post search guarded by the `elasticsearchSearch` circuit breaker, degrading to an empty result page when the search tier is unavailable.
+- Posts Elasticsearch index seed runner that batch-loads published posts from PostgreSQL on startup only when the index is empty and `app.post.seed.enabled` is true.
+- `post_edit_history` table (Flyway V22) recording the pre-edit caption and editor for every caption change, append-only and never soft-deleted.
+- Follow and block state read methods on the social service exposing accepted-follow and bidirectional-block checks to other modules.
+- Hashtag-id lookup on the hashtag service returning hashtag associations grouped by post for index seeding.
+- Post API error codes `POST_NOT_FOUND`, `POST_FORBIDDEN`, `POST_ALREADY_LIKED`, and `POST_ALREADY_SAVED`, and post API path constants for status, history, likes, saved, and search.
+- Public hashtag HTTP endpoints `GET /api/v1/hashtags/search` and `GET /api/v1/hashtags/trending`, documented via the `HashtagApi` OpenAPI interface and rate-limited per endpoint.
+- `HashtagIndexSeedRunner` seeding the Elasticsearch `hashtags` index from PostgreSQL on startup only when the index is empty and `app.hashtag.seed.enabled` is true, treating seeding failures as non-fatal so startup never blocks on the rebuildable search tier.
+- `HashtagTrendingService` computing ranked hashtag trending snapshots from a windowed `post_hashtags` aggregation and serving the latest snapshot as an offset-paginated response, driven by a scheduled, transactional snapshot job.
+- `HashtagSearchService` providing fuzzy hashtag name search backed by an Elasticsearch ngram match with automatic degradation to a PostgreSQL `pg_trgm` query, guarded by the `elasticsearchSearch` circuit breaker and returning cursor-paginated results.
+- `HashtagService` with normalization, idempotent post-hashtag association upsert, and a synchronous post-commit Elasticsearch dual-write that never rolls back the source-of-truth write on indexing failure; `hashtags.post_count` remains trigger-owned.
+- Hashtag module scaffolding: `/search` API path constant, `HASHTAG_NOT_FOUND` error code, `app.hashtag` configuration namespace, and a `HashtagProperties` bean binding the trending-job and seed settings.
+- Hashtag module API DTOs (`HashtagResponse`, `HashtagTrendingResponse`, `HashtagSearchRequest`) and a MapStruct `HashtagMapper` converting between entities, the Elasticsearch document, and response DTOs.
+- Hashtag Elasticsearch projection: `HashtagDocument` (`hashtags` index) with an ngram-analyzed `name` sub-field for prefix/fuzzy search alongside a keyword main field, its `hashtags.json` index settings, and a `HashtagSearchRepository`.
+- Hashtag module persistence layer: `Hashtag`, `PostHashtag`, and `HashtagTrending` JPA entities (with composite-key embeddables for the junction and trending tables) plus their Spring Data repositories, including a pg_trgm fuzzy hashtag search query and a bulk post-association deletion query.
+- Elasticsearch service added to `docker-compose.yaml` using image `9.0.3` (upgraded from initial 8.17.3 to align with `elasticsearch-java:9.2.8` used by Spring Data Elasticsearch 6.x; single-node, security disabled, 512 MB JVM heap, named volume for index persistence).
+- `spring-boot-starter-data-elasticsearch` dependency added to `pom.xml`; version resolved by Spring Boot BOM.
+- `ElasticsearchProperties` configuration-properties bean binding `app.elasticsearch.*` (URIs, optional credentials, connect/socket timeouts).
+- `ElasticsearchConfig` wires the Spring Data Elasticsearch client from `ElasticsearchProperties`; basic auth applied only when both username and password are non-blank.
+- `app.elasticsearch` namespace added to `application.yaml` with environment-variable placeholders.
+- `management.health.elasticsearch.enabled` and `management.endpoint.health.show-details` added to `application.yaml`; Spring Boot's auto-configured `elasticsearchHealthIndicator` handles cluster health reporting.
+- `elasticsearchSearch` Resilience4j circuit breaker instance defined in both dev and prod profiles for use by future hashtag and post search services.
+- Elasticsearch environment variable placeholders added to `.env.example`.
+- `UserRepository` exposes table-wide `existsByEmail`, `existsByUsername`, and `findByEmail` methods aligned with the database `UNIQUE` constraints that have no soft-delete partial index.
+- `POST /api/v1/auth/oauth2/exchange` back-channel endpoint: redeems a one-time opaque exchange code for a standard access/refresh token pair; rate-limited via `lowTraffic` Resilience4j instance and Redis sliding-window filter.
+- `OAuth2ExchangeCodeService` with a Redis-backed implementation that stores 32-byte hex exchange codes under `auth:oauth2:exchange:{code}` (TTL 120 s) and consumes them atomically via a GET-then-DEL Lua script.
+- `OAuth2ExchangeRequest` DTO with `@Schema` annotations for the new exchange endpoint.
+- `AUTH_OAUTH2_EXCHANGE_CODE_INVALID` error code (HTTP 400) returned when an exchange code is absent or expired.
+- Users module: `UserService`, `UserController`, and `UserApi` implementing profile view and update, public profile lookup with private-account enforcement, and settings view and update endpoints.
+- SonarCloud static analysis integrated into CI: `sonarcloud.yml` workflow runs on every push to `main` and on every pull request targeting `main`; JaCoCo coverage report at `target/site/jacoco/jacoco.xml` is forwarded to SonarCloud for coverage metrics. **Action required:** disable "Automatic Analysis" in SonarCloud project settings (Administration → Analysis Method) to prevent conflicts with this CI-based analysis.
+- CI workflow `ci-test.yml` runs the Maven test suite on pull requests targeting `main` or `develop`; job is reporting-only and does not block merges.
+- CI secrets audit report saved to `.claude/workspace/ci-secrets-audit.md`; confirmed no GitHub Actions secrets are required — all runtime values are provided by `@ServiceConnection`, `@DynamicPropertySource`, or `@TestPropertySource` in the test classes.
+- `OpenApiConfig` bean updated to source the server URL from `AppProperties.baseUrl()` and produce API title `"App API"`, version `"1.0.0"`, and a global `bearerAuth` Bearer JWT security scheme.
+- `AuthApi` interface (`modules/auth/api`) carrying all `@Tag`, `@Operation`, `@ApiResponses`, and `@Parameter` OpenAPI annotations for the 8 auth endpoints; `AuthController` implements this interface and contains zero documentation annotations.
+- `docs/modules/OPENAPI_GUIDE.md`: developer guide explaining how to document a new module using the Interface Segregation pattern, including step-by-step instructions, rules, a reference endpoint table, and common mistakes.
+- `MailProperties.resetPasswordPath` field (default `/reset-password`) bound to `app.mail.reset-password-path` / `MAIL_RESET_PASSWORD_PATH` environment variable, making the frontend reset-form path configurable.
+- Implementation plan for OpenAPI interface segregation pattern in the `auth` module at `docs/plans/openapi-interface-segregation-plan.md`.
+- Integrated `springdoc-openapi-starter-webmvc-ui` 3.0.3 for interactive API documentation.
+- `OpenApiConfig` bean exposing title, version, server entry from `app.base-url`, and global Bearer JWT security scheme.
+- OpenAPI JSON endpoint at `/api-docs` and Swagger UI at `/swagger-ui` (dev profile only; disabled in prod).
+- Full `@Tag`, `@Operation`, `@ApiResponses`, and `@SecurityRequirement` annotations on all `AuthController` endpoints.
+- `@Schema` annotations with descriptions, examples, and required-mode markers on all `auth` request and response DTOs.
+- Swagger UI paths (`/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html`) added to `SecurityConfig` permit list.
+- `report_reason_configs` table appended to V18 Flyway migration: stores display metadata and per-`report_type` scope control for all 8 `report_reason` enum values, seeded with one row per reason.
+- `GLOBAL_RULES.md`: new `Enum vs. Config Table Relationship` section documenting the contract between PostgreSQL enum columns and config tables (`notification_type_configs`, `moderation_action_configs`, `report_reason_configs`).
+- `media/DATA_RULES.md`: server-side metadata validation rule for `media_assets` insert — specifies that the server must validate all client-submitted metadata before creating the record, and that validation failure must leave no orphaned row.
+- Redis-backed JWT access-token blacklist: logout now records the token's `jti` for its remaining lifetime so it cannot authenticate again before its natural expiry.
+- Redis-backed sliding-window rate limiter on `POST /api/v1/auth/login` (5/15min, IP+email keyed), `/forgot-password` and `/verify-email/resend` (3/hr, IP keyed), executed via an atomic `INCR`+`EXPIRE` Lua script.
+- `app.rate-limit.*` configuration namespace bound to `RateLimitProperties` for per-endpoint limit and window tuning.
+- MapStruct 1.6.3 dependency and annotation processor; `lombok-mapstruct-binding` 0.2.0 wires Lombok before MapStruct in both compile and test-compile phases
+- `AuthMapper` interface in `modules/auth/mapper/` maps `User` + `emailVerified` boolean to `UserSummaryResponse` via MapStruct Spring component model
+- `SecurityMapper` interface in `common/security/` maps `User` entity to `UserPrincipal` security principal via MapStruct Spring component model
+- Google OAuth2 / OIDC sign-in: `OAuthAccount` entity with case-mapping converter, `OAuthAccountRepository`, `CustomOidcUserService` resolving a Google identity to a local user (link by provider id, fall back to email match, otherwise auto-register with `email_verified=true` and no password), `CustomOidcUser` decorator, and JSON `OAuth2AuthenticationSuccessHandler` / `OAuth2AuthenticationFailureHandler` returning the standard `ApiResponse` envelope
+- `spring.security.oauth2.client.registration.google.*` configuration block driven by `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `APP_BASE_URL` (redirect URI is environment-dependent)
+- `SecurityConfig` now installs `oauth2Login(...)` on the existing single `SecurityFilterChain`, mounting authorize/callback under `/api/v1/auth/oauth2/{authorize,callback/*}` with the custom OIDC user service and JSON handlers
+- Stateless JWT authentication module under `common/security/` — `JwtProperties`, `JwtTokenProvider` backed by Spring Security's `NimbusJwtEncoder`/`Decoder`, `JwtAuthenticationFilter`, `UserPrincipal`, `SecurityUtils`, `CorsProperties`, and a single-chain `SecurityConfig` enforcing stateless session policy with BCrypt strength 12
+- `RefreshTokenService` interface and `RefreshTokenServiceImpl` issuing UUID-based opaque refresh tokens persisted as SHA-256 hashes; supports rotation, single-token revoke, and bulk revoke per user
+- `User`, `UserCredential`, `UserSettings`, and `RefreshToken` JPA entities with `UserRole`/`UserStatus` enums and case-mapping `AttributeConverter`s for the lowercase Postgres custom enum types
+- `UserRepository`, `UserCredentialRepository`, `UserSettingsRepository`, and `RefreshTokenRepository` Spring Data JPA repositories
+- `AuthService` and `AuthServiceImpl` covering register, login, refresh, logout, email verification, resend verification, forgot password, and reset password flows; verification and password change emails dispatched via the existing `MailService`
+- `AuthController` exposing `/api/v1/auth/{register,login,refresh,logout,verify-email,verify-email/resend,forgot-password,reset-password}` returning `ApiResponse` envelopes
+- New `ApiErrorCode` entries: `USER_EMAIL_ALREADY_EXISTS`, `USER_USERNAME_ALREADY_EXISTS`, `AUTH_RESET_TOKEN_EXPIRED`, `AUTH_RESET_TOKEN_USED`
+- `GlobalExceptionHandler` now translates `TokenNotFoundException`, `TokenExpiredException`, and `TokenAlreadyUsedException` into typed 4xx `ApiResponse` failures
+- `RedisConfig` in `common/config/` registers a `LettuceClientOptionsBuilderCustomizer` bean that forces RESP2 protocol, resolving `NOAUTH` errors caused by Lettuce 6 sending `HELLO 3` before authentication against a `requirepass`-only Redis server
+- `MailProperties` standard class (`@Component` + `@ConfigurationProperties`) at `common/mail/config/` with `fromAddress`, `fromName`, `appName`, and `frontendBaseUrl` fields
+- `MailTemplate` enum at `common/mail/enums/` consolidating all template paths and default subjects
+- `MailRequest` DTO at `common/mail/dto/` for carrying recipient and template variable data
+- `MailTemplateRenderer` component at `common/mail/util/` isolating Thymeleaf rendering from dispatch logic
+- `MailService` interface and `MailServiceImpl` at `common/mail/service/` replacing the former `modules/mail/` placement; provider errors now surface as `AppException` with `SERVICE_UNAVAILABLE`
+- `app.mail.from-name`, `app.mail.app-name`, and `app.mail.frontend-base-url` properties bound via the new `MailProperties`; `application-prod.yml` reads these from environment variables
+- Unit tests for `MailTemplateRenderer` and `MailServiceImpl` covering variable assembly, template dispatch, and exception wrapping
+- `ApiErrorCode` enum in `common/response/` with typed HTTP status, machine-readable code, and default message for Common and Auth error groups
+- `ApiSuccessCode` enum in `common/response/` with OK, CREATED, ACCEPTED, NO_CONTENT constants
+- `AppException` in `common/exception/` backed by `ApiErrorCode`, replacing raw integer status codes with typed error codes at the service layer
+- `ApiResponse.success()` and `ApiResponse.failure()` factory overloads accepting `ApiSuccessCode`/`ApiErrorCode` enums with optional custom message and data payload
+- `BaseController` resilience fallback methods for rate limiter and circuit breaker using `ApiErrorCode`-backed responses
+- Generic `ApiException(int statusCode, String errorCode, String message)` in `common/exception/` to decouple service-layer errors from any shared enum catalogue
+- Uniform `ApiResponse<T>` envelope under `common/response/` with `ok`, `created`, and `error` static factories and an embedded `Instant` timestamp
+- `PageResponse<T>` (offset-based, built from Spring Data `Page`) and `CursorPageResponse<T>` (Relay-spec cursor pagination with embedded `PageInfo`) under `common/response/`
+- `ApiConstants` central registry of `/api/v1` route constants for auth, users, posts, comments, stories, social, messages, notifications, hashtags, media, reports, and admin endpoints
+- `spring-boot-starter-validation` dependency for `jakarta.validation` support required by the new framework-level exception handler
+- Transactional mail subsystem under `common/mail` backed by the Resend Java SDK with a dedicated `mailTaskExecutor` async pool, exposing email verification, password reset, welcome, and password-changed messages
+- Thymeleaf email templates under `templates/mail/` for verification, password reset, welcome, and password-changed notifications
+- `app.mail.from-address`, `app.mail.from-name`, and `app.base-url` configuration bound via `MailProperties` and `AppProperties`, all sourced from environment variables
+- Single-use, SHA-256-hashed token issuance and consumption in the `auth` module: `EmailVerificationToken` (24h TTL) and `PasswordResetToken` (15min TTL) entities, JPA repositories, and `TokenService` contract
+- `.env.example` template enumerating every environment variable consumed by the application (database, Redis, JWT, app URL, CORS, Resend mail credentials)
+- Unit test coverage for `TokenServiceImpl`, `MailServiceImpl`, and `GlobalExceptionHandler`
+- `CHANGELOG_RULE.md` in `.claude/rules/` defining mandatory post-task changelog requirements following Keep a Changelog 1.1.0
+- Post-Task Requirements section in `.claude/rules/AGENT.md` enforcing the changelog obligation after every completed task
+- `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- The story, notification and admin module data rules now match the shipped schema: administrative story takedown is documented rather than denied, the notification enum is recorded as sixteen values with its dead-letter queues, and the administrative action enum as thirty-six.
+- `.env.example` now states that the thirteen consumer and live-tier switches are profile-controlled rather than deployment inputs; both profiles pin each one as a literal, so a value set in the environment file never reached them.
+- The `[Unreleased]` changelog block carries one of each permitted section instead of 119 repeated heading blocks, with the documentation and continuous-integration entries folded into Changed; every entry is preserved and the rule now says to merge into the existing section rather than prepend a new one.
+- The index rule now states how to swap one index for another without either losing the guarantee it enforces or taking a write lock, and the report module records why its duplicate guard was swapped inside a transaction.
+- The published OpenAPI document now declares the authentication, authorization, malformed-body and unsupported-media-type responses that the support, verification, mail-campaign, suggestion and hashtag-pin operations already returned, and groups them under curated tags instead of springdoc's class-derived defaults.
+- `.env.example` documents `APP_SECURITY_TRUSTED_PROXY_CIDRS`, the ingress CIDR list a deployment behind a proxy must supply before every per-IP rate limit collapses onto one shared bucket.
+- `database/schema.sql` is regenerated from the V01-V111 migration set and carries the nine tables it was missing, including the mail campaign, verification and suggestion tables; its header states that it is generated, from what, and at which migration version.
+- The structure document's migration table, enum table, test-class table, RabbitMQ topology and Redis key table are generated from the tree rather than maintained by hand, and it no longer cites a regeneration script that does not exist.
+- The backend now carries the same single-line commit rule the frontend had, and the scope block in `git_workflow.md` states what `pr-lint` actually checks - the pull request title, not commit messages - in place of a dated audit snapshot.
+- `comment_style.md` drops an "AI Module Specifics" section describing cache keys for a module this project does not have, and names GitHub issues as the `TODO` reference format in place of an unused `VR-NNN` tracker prefix.
+- `CONTRIBUTING.md` describes what the `pr-size` workflow does, which is label a pull request and warn on it, rather than claiming it blocks above 1000 changed lines.
+- The Flyway comments in `application.yaml` name the V01-V111 range and all sixteen migrations that build indexes concurrently, while still pointing at the V57 incident the lock setting exists for.
+- A pending verification request no longer blocks an account from opening a support ticket, and an open support ticket no longer blocks a verification request; the one-open-ticket guard now holds one ticket per lane instead of one across both.
+- The public identity summary embedded in every response that names an account now carries the account's verification category, so a client can render which category a badge is for.
+- The support and moderation mail schema changes now apply after the hashtag interest work rather than colliding with it; the full migration set applies cleanly to an empty database and the application starts against it under schema validation.
+- The trending response now reports whether a hashtag is pinned and why it appears in the list, and orders pinned hashtags first.
+- Banning or deleting a hashtag now clears any pin it holds.
+- The development seed pipeline can now also run under the `prod` profile when `seed` is explicitly active alongside it, in addition to its existing `dev` activation, for staging-style deployments that require it against a disposable non-production database.
+- `sonarcloud.yml` now runs the duplicate Flyway migration version pre-check before the build, a step formerly unique to `ci-test.yml`.
 - The pull request lint allowlist now accepts the support scope, ahead of the support ticket module.
 - Content administratively removed before this release keeps its existing deletion timestamp and now reads as an owner deletion, so it stays hidden but can no longer be restored by an administrator; there is no way to tell those rows apart retrospectively and no backfill was attempted.
 - Personalized recommendations no longer resurface already-seen posts until the unread catalogue is genuinely exhausted, and only at the tail, replacing the previous score-based replacement mechanism.
@@ -112,16 +330,178 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Seeded post shares now reach the recommender, so the share signal is no longer an empty category behind a configured positive-feedback type.
 - Seeded view activity now flows through the durable event path so the recommender has the negative examples its ranker trains on; views are distributed in proportion to each post's engagement band and to viewers whose interests match the post's topics, rather than uniformly at random.
 - Resend is now the mail transport in every environment, including local development; a valid Resend API key is required to run the application at all, and mail-sending flows must only be triggered against real mailboxes you control, since every outbound message now reaches the real provider.
-
-### Removed
-- The local SMTP mail transport and its Mailpit sink.
-
-### Changed
 - Local development's mail transport can now be switched to the real Resend provider by setting `APP_MAIL_TRANSPORT=resend` in `.env` and restarting, instead of always defaulting to the local Mailpit sink; there is no recipient allowlist, so only trigger mail-sending flows against real mailboxes you control while it is set this way.
 - The development seed dataset's usernames, display names, email addresses, bios, cities, business names, and captions are now written entirely in English, replacing content that previously mixed in romanized Vietnamese names and places.
 - Seeded avatars are now sourced from an external portrait-photo service instead of the object storage bucket; cover photos are unaffected and remain hosted there.
+- The development seed's warning and strike volume has been raised well above the enum-coverage minimum, to a level that exercises the discipline ladder's list, filter, pagination, and active/revoked states.
+- The list of hashtags returned when a post is restored is renamed to say what it holds.
+It names the banned tags the caption still carries after the restore, which is the post's present state rather than the set that one call changed, so restoring the same post twice reports the same tags both times.
+The audit metadata key carrying the same set is renamed to match.
+- Refusing to act on an administrator now answers the same status and the same code whether the request was a status change or a role change. It previously answered two different ones for the same cause, which forced a client to keep its own copy of the rule to tell them apart.
+The two genuine conflicts on the role path, a skip-level promotion and a request naming the role the account already holds, keep their own code.
+- An administrator's account detail no longer says only what the account is; it also says what may be done to it.
+- The administrative activity log now also covers engagement: post likes, saves, views, and comments appear alongside session starts, searches, and profile views, and answer to the same event-type filter.
+Both kinds of event are recorded under one vocabulary, so the filter cannot name a value that no writer produces.
+- Statistics that count whole tables are now computed by a background job rather than on the request, which is the difference between milliseconds and seconds once the platform is large.
+Counts of things that happened in an interval are counted directly rather than derived by subtracting two snapshots, so a moderation sweep can never make "new posts this half hour" read as a negative number.
+- Restoring a post whose caption names a banned hashtag now succeeds without that association instead of failing.
+A moderator undoing its own removal is not blocked by an unrelated decision it cannot reverse, and the audit entry records which tags were left off.
+- A moderator reading a single report by identifier now reaches the same reports its queue shows, plus any report it escalated itself.
+Anything else answers as if the report did not exist. The queue already hid closed and escalated reports; reading one by identifier did not.
+- Hashtag search and the trending list now show active hashtags only.
+- A moderator's report list now covers the open part of the review lifecycle only. Asking for closed or escalated reports returns an empty page; an administrator's view is unchanged.
+- Resolving or dismissing a report is no longer possible through the triage endpoint, which now only claims a report for review.
+Both closures already had audited endpoints of their own, and the triage path wrote nothing, so a report could previously be closed with no record of who closed it.
+- Restoring a post removed by moderation now returns it to the status it held before the removal, instead of publishing everything it touches.
+A post that was a draft when it was removed comes back a draft, and the response says where it landed.
+- Removing a post by moderation now does everything removing it as its owner does: its hashtag associations are detached and it leaves the search index.
+Previously a moderated post kept contributing to trending counts and kept answering searches.
+- The error code for a refused role change is renamed to match the status it answers with. Behaviour is unchanged.
+- A moderator reading the moderation audit log now sees only the entries it wrote; an administrator still sees everything.
+Requesting another actor's entries returns nothing rather than their contents, and requesting one by identifier reports it as not found.
+- Moderation requests no longer accept a caller-supplied metadata object.
+The audit log records server-derived facts only, and a request that still sends one is rejected rather than silently stripped.
+- The application now takes its schema-migration lock without holding a transaction open, which is what allows an index to be built without blocking writes to the table.
+- Real-time direct-message delivery is now enabled in the production profile. The setting was absent there, so it fell back to off and messages were delivered only on refresh.
+- Real-time comment and like delivery is now enabled in the production profile. It was disabled, which left the only realtime endpoint the client opens absent in production and the feature silently inert.
+- `/actuator/prometheus` is reachable without authentication and should be restricted at the ingress.
+- The local database, cache, broker, and search ports are now published on the loopback interface only, matching the treatment the mail sink already documented.
+- The local database now uses a named volume, so its contents survive container recreation.
+- Refusing a media upload for its format now names every accepted type for that media kind instead of only saying the type is not allowed, so a client can word the error without keeping its own copy of the list. The message is generated from the same allowlist the check reads, so it cannot describe a rule the server does not enforce.
+- A video upload declaring a duration longer than 180 seconds is now refused. This limit is advisory and is documented as such: duration is supplied by the client and the server never opens the file, so it bounds an honest client and nothing more. File size is different and genuinely verified against the stored object, and the two should not be assumed equally strong.
+- The profile post list now refuses a query parameter it does not support instead of ignoring it. Every other endpoint keeps accepting unknown parameters, so nothing else changes; this one endpoint is closed because a filter that is silently dropped is indistinguishable from a filter that matched everything.
+- Deleting a comment is no longer slower on a busy database than on an empty one. The delete scanned the entire comments table once per level of the subtree it was removing, so its cost grew with the total number of comments in the system rather than with the number being deleted; measured against 210,000 comments it took 320 ms, and now takes under 2 ms. The set of comments removed is unchanged.
+- The OpenAPI authoring guide instructed that every response declare an explicit body schema. On a success response that is wrong, because the server always wraps the payload in a standard envelope, and the contract test rejects it. The guide now states the rule separately for success and error responses.
+- Deleting a comment now returns how many comments were removed, counting the comment itself plus every descendant at any depth. The response body previously carried no data at all, so a client had no way to tell that deleting a comment with one visible reply had removed eleven.
+- `comment.deleted.v1` now carries the same count, so a live subscriber can remove the whole subtree instead of leaving its descendants rendered as orphans.
+- Liking your own comment is now permitted and returns 200, matching the existing behaviour of post likes; it previously returned 403 with a message describing a permission failure when the real reason was a product rule. A self-like still produces no notification.
+- The mail provider credential moved from a root-level setting into the provider's own configuration group; the `RESEND_API_KEY` environment variable is unchanged.
+- Selecting no mail transport, or an unrecognised one, now fails at startup instead of resolving to a default.
+- The mail health indicator is disabled, so a briefly unreachable mail server no longer makes the application report itself unhealthy.
+- Production now honours `REFRESH_COOKIE_SECURE` and `REFRESH_COOKIE_SAME_SITE`; the production profile previously pinned both values, leaving the environment variables inert in the only profile where they matter.
+- `POST /auth/refresh` and `POST /auth/logout` accept the refresh token from the `luvax_refresh` cookie when the request body omits it; a token supplied in the body always takes precedence.
+- `POST /auth/refresh` now returns `401` rather than `400` when no refresh token is supplied by either the body or the cookie.
+- `POST /auth/logout` clears the refresh cookie and remains idempotent when no token is supplied at all.
+- Flyway no longer accepts out-of-order migrations; the migration set is a contiguous sequence with no gaps, so this only re-enables a safety check that was previously suppressed for no reason tied to an actual workflow.
+- Notification API responses now embed the triggering user's summary (id, username, display name, avatar, verified flag) instead of a bare actor id; a soft-deleted or unknown actor now renders as a placeholder instead of a raw id the client had to resolve separately. This is a breaking change to the notification response shape.
+- The example environment file now documents 22 previously-undocumented configuration variables that already had defaults, covering the refresh-token purge job, the WebSocket revocation sweep interval, the notification live-push toggle, and several module seed/consumer/scheduler toggles.
+- Added the support module data rules and brought the reference schema up to the migrations it describes.
+- Added the mail module data rules, which did not exist, and corrected the project structure documents against the code they describe.
+- The mail queue now records why it carries no broker-level dead-letter argument, and which queue in the topology is the genuine outlier.
+- Recorded why a small number of harmless startup proxy warnings and one non-JSON error response for an over-long request remain as accepted, understood gaps rather than unexplained rough edges.
+- Recorded that follower and following counts are visible to everyone regardless of the viewer's own blocks, so comparing a count against a filtered list can reveal that a block exists somewhere in that list, as a known and accepted tradeoff rather than an oversight.
+- Corrected internal module documentation for the hashtag module, which was still marked as unimplemented scaffolding despite being fully implemented.
+- Corrected internal module documentation for the message module: conversation and participant management is implemented, but sending, listing, and reacting to messages is not, since no send-message endpoint exists yet.
+- Corrected internal documentation to state that account soft delete, for users specifically, is a documented but unimplemented retention policy; no code path currently sets it.
+- Synchronized internal architecture documentation with the current codebase: migration count, test coverage listing, and module directory listing.
+- Synchronized the reference database schema document with the two most recent migrations (the top-liked-comments index and the case-insensitive username index).
+- Internal comment-style guidance no longer cites a pre-commit hook that does not exist in this repository.
+- Local development containers now persist PostgreSQL and RabbitMQ data across container recreation, declare healthchecks and restart policies, and the RabbitMQ image now ships the management UI bound to loopback.
+- Usernames now identify an account case-insensitively while preserving the casing they were registered with. `Alice` and `alice` are the same person, so only one of them can exist, and logging in or looking up a profile works with any casing. The profile continues to display the casing the account was created with rather than a lowercased form.
+- Registering or renaming to a username that differs from an existing one only by case is now rejected with the same generic conflict returned for any other duplicate. Previously it slipped past the availability check and surfaced as a different, more specific error, which allowed a caller to distinguish a taken username from a taken email.
+- Notification push delivery latency is significantly reduced by polling for new events roughly five times more often.
+- A comment or story WebSocket session established before an account is banned, suspended, or logged out is no longer left open until its access token naturally expires; the session is now terminated shortly after the account status changes.
+- The user object returned by login, register, and refresh is renamed in the API schema from `UserSummaryResponse` to `AuthenticatedUserResponse` to distinguish the authenticated-self object (which carries email and role) from the shared public author summary; the emitted JSON fields are unchanged.
+- A module guide for the recommendation feature covering its architecture, endpoint contract, configuration, operational runbook, degradation behavior, and known limitations.
+- The login endpoint now accepts a single identifier field containing an email address or a username in place of the previous email-only field; this is a breaking change to the login request contract.
+- STRUCT.md updated to reflect `comment` module as fully implemented, adding sub-package list, module responsibility, test coverage rows, `comment.live.events` fanout exchange, `comment.notification.queue` with its DLQ, and three binding rows.
+- STRUCT.md updated to reflect `report` and `admin` modules as fully implemented, including accurate sub-package lists, module responsibility descriptions, test coverage rows, and Flyway migration count corrected to 29 (V28 add_user_events_upcoming_partitions and V29 preserve_admin_action_audit_history added).
+- `docs/modules/report/DATA_RULES.md` implementation status updated from scaffolding-only to fully implemented; all business rule entries annotated with the service methods that now enforce them.
+- Report cursor pagination now uses explicit query limits without Spring Data offset pagination abstractions.
+- Report moderation list endpoints now return cursor-paginated `ReportSummaryResponse` pages instead of offset-paginated full report details.
+- `ApiErrorCode` gains comment-scoped error codes.
+- RabbitMQ topology gains the `comment.live.events` fanout exchange (bound to the event bus for `comment.#`) and a dedicated `comment.notification.queue` with its dead-letter queue.
+- Comment write and live-delivery paths emit MDC correlation fields (commentId, postId, userId, eventId, serverId).
+- Disabled raw per-statement SQL logging (`show-sql`, `format_sql`, `use_sql_comments`) in the dev profile in favor of the new structured application logs; the prod profile already had these disabled and needed no change.
+- Synced `database/schema.sql` with all 24 Flyway migrations (V01–V24): added missing V18 metadata config tables (`system_settings`, `notification_type_configs`, `moderation_action_configs`, `feature_flags`, `report_reason_configs`) with seed data and triggers; V23/V24 were already reflected. Updated struct.md migration count from 22 to 24.
+- Hashtag Elasticsearch propagation moved from a synchronous post-commit dual-write to outbox-based asynchronous publishing, emitting an index upsert or delete event per affected hashtag after the post-association change is flushed.
+- Post Elasticsearch index is now maintained through the outbox on publish, caption update, archive, and soft-delete; publish and unarchive upsert the document while archive and soft-delete remove it.
+- `STRUCT.md` (`.claude/rules/` and `.agents/rules/`) updated to reflect current codebase state: 21 Flyway migrations (V01–V21), 7 implemented modules (auth, mail, users, social, media, hashtag, notification), new `common/` packages (inbox, outbox, messaging, settings, config/elasticsearch, config/rabbit, config/security), restructured `security/` sub-packages, Elasticsearch service and config, full RabbitMQ topology, updated Technology Stack versions, and accurate Redis key patterns.
+- Authenticated notification OpenAPI operations now inherit the global bearer-auth requirement instead of re-declaring it per operation.
+- Testing rules now exempt integration tests that exercise a real RabbitMQ broker via Testcontainers from the AMQP auto-configuration exclusion requirement.
+- `OAuth2AuthenticationSuccessHandler` no longer writes tokens into the callback response body; instead generates an exchange code and redirects the browser to `{frontendBaseUrl}/oauth2/callback?code={code}`, eliminating token exposure in the browser redirect (resolves AUTH-012).
+- `AuthService` extended with `exchangeOAuth2Code` to support the new back-channel exchange flow.
+- `UserProfileResponse` and `PublicUserProfileResponse` Javadoc and `@Schema` descriptions now explicitly distinguish `isVerified` (administrator-granted platform badge, `users.is_verified`, always `false` for regular users) from email confirmation status (`user_credentials.email_verified`, exposed as `emailVerified` in the auth response). Investigation confirmed `isVerified` returning `false` after email verification is correct behavior — the two fields are unrelated.
+- Users module: `User` and `UserSettings` JPA entities, `UserRepository` and `UserSettingsRepository` moved from the auth module to `com.app.modules.users`.
+- Users module: `UserRole`, `UserStatus` enums and their JPA converters moved from the auth module to `com.app.modules.users`.
+- `GET /api/v1/users/me` — returns the authenticated user's full profile.
+- `PATCH /api/v1/users/me` — partial profile update with username uniqueness enforcement.
+- `GET /api/v1/users/{userId}` — public profile lookup; private accounts return 401; counter fields omitted for unauthenticated callers.
+- `GET /api/v1/users/me/settings` — returns the authenticated user's notification and privacy settings.
+- `PATCH /api/v1/users/me/settings` — partial settings update with patch semantics.
+- RabbitMQ topology now declares the `social.events` topic exchange, `social.events.dlx`, `mail.queue`, and `mail.dlq` for mail side-effect events only.
+- RabbitMQ environment variables are documented in the environment template with publisher confirms and returns enabled.
+- Transactional outbox storage now records versioned domain event envelopes in PostgreSQL before RabbitMQ publishing.
+- Scheduled outbox publisher now publishes due events to RabbitMQ with correlated publisher confirms, bounded retry metadata, and dead-letter terminal state.
+- Consumer inbox storage now records processed message IDs for idempotent RabbitMQ consumers.
+- Auth registration, verification resend, password reset, password changed, and OAuth-only reset flows now record mail side-effect events through the transactional outbox instead of sending mail directly.
+- Forgot-password handling now records durable outbox events inside a short transaction and applies a configurable response-time floor after the transaction to reduce account-enumeration timing signals.
+- Auth mail RabbitMQ consumer now processes `mail.queue` events with manual ack, idempotent inbox deduplication, bounded retry, and DLQ routing.
+- Synchronous Resend mail sender added for RabbitMQ consumers while keeping the existing async mail facade for non-consumer callers.
+- Social follow endpoint now creates accepted follows for public accounts, pending follow requests for private accounts, and records follow events through the transactional outbox.
+- Media upload-complete now persists validated media metadata, derives CDN URLs server-side, and records `media.uploaded.v1` outbox events after successful inserts.
+- Media upload URL endpoint now returns short-lived Cloudflare R2 pre-signed PUT URLs with backend-generated storage keys.
+- `User` and `UserSettings` entities, enums, converters, and repositories relocated from `com.app.modules.auth` to `com.app.modules.users`; all auth module import references updated accordingly.
+- Auth mail side-effect documentation now points to outbox events and the mail consumer token-generation flow; raw verification/reset tokens are no longer created in the auth request path.
+- Auth mail events now use `actorId = null` for unauthenticated verification resend and forgot-password requests while keeping `aggregateId` as the target user id.
+- Auth mail RabbitMQ bindings now live with the auth module event contracts instead of the shared RabbitMQ infrastructure config.
+- Media API now exposes OpenAPI documentation for direct-upload URL issuance and upload confirmation.
+- Replaced split SonarCloud Maven steps with a single `verify sonar-maven-plugin:sonar` invocation; added SonarCloud package cache and `GITHUB_TOKEN` env declaration.
+- `AuthController` refactored to implement `AuthApi`; class-level `@Tag` and `@RequestMapping` removed (now on the interface); all `@Operation`, `@ApiResponses`, and `@Parameter` annotations removed from handler methods.
+- `GIT_WORKFLOW.md` agent rule documenting branch naming, Conventional Commits format, allowed scopes, PR size labels, and discrepancies found between `CONTRIBUTING.md` and the actual pr-lint/pr-size workflow enforcement.
+- 11 agent skills under `.claude/skills/`: `skill-jpa-entity`, `skill-spring-repository`, `skill-spring-service`, `skill-rest-controller`, `skill-mapstruct-mapper`, `skill-dto`, `skill-flyway-migration`, `skill-exception-handling`, `skill-redis-key`, `skill-test-unit`, `skill-test-integration` — each derived from the implemented `auth` and `mail` modules.
+- 4 agent workflows under `.claude/workflows/`: `workflow-implement-module`, `workflow-add-flyway-migration`, `workflow-add-api-endpoint`, `workflow-code-review`.
+- `DOC_FIRST.md` agent rule mandating that `GLOBAL_RULES.md` and the relevant module `DATA_RULES.md` (plus `STRUCT.md` for new module implementations) are read before any feature implementation or business-logic change.
+- `base.md`: added missing `description` field to frontmatter.
+- `changelog_rule.md`: corrected description (was a copy of struct.md's description); changed trigger from `model_decision` to `always_on` to match the rule's stated requirement.
+- `doc_first.md`: corrected description (was a copy of struct.md's description).
+- Bumped Testcontainers from 1.21.0 to 1.21.4 to ship a docker-java client compatible with Docker Engine ≥ 25 (which requires Docker API ≥ 1.40).
+- Maven Surefire now includes `**/*IT.java` in the test phase so the auth integration test runs as part of `./mvnw test`.
+- Email-verification and password-reset tokens now live in Redis (24h and 15m TTL respectively), keyed by `auth:token:email-verification:{sha256}` and `auth:token:password-reset:{sha256}`; consumption is atomic via Lua and a reverse `…:user:{userId}` index ensures issuing a new token invalidates the prior pending one.
+- `TokenService.consumeEmailVerificationToken` / `consumePasswordResetToken` now return the owning `UUID` so callers no longer need a separate hash lookup.
+- Moved `UserRole`, `UserStatus`, and `OAuthProvider` enums from `modules/auth/entity/` to new `modules/auth/enums/` package; all import sites updated
+- `AuthServiceImpl` and `OAuth2AuthenticationSuccessHandler` now delegate `User` → `UserSummaryResponse` mapping to the injected `AuthMapper` bean, replacing inline field-by-field construction
+- `JwtAuthenticationFilter` delegates `User` → `UserPrincipal` construction to the injected `SecurityMapper` bean
+- `app.jwt.*` is the canonical JWT configuration namespace (`secret`, `issuer`, `access-token-ttl`, `refresh-token-ttl`); the obsolete `security.jwt.*` block has been removed from `application-dev.yml` and `application-prod.yml`
+- `spring.datasource.hikari.data-source-properties.stringtype=unspecified` enabled to allow VARCHAR binding to Postgres custom enum and `inet` columns
+- `Application.java` now uses `@ConfigurationPropertiesScan` so `JwtProperties`, `CorsProperties`, and `AppProperties` bind without per-config registration
+- `pom.xml` adds `spring-boot-starter-oauth2-client` and `spring-security-oauth2-jose` to provide `NimbusJwtEncoder`/`NimbusJwtDecoder`
+- `CLAUDE.md` reduced to a minimal pointer file; all project rules, architecture state, and conventions moved to `.claude/rules/AGENT.md`
+- `.claude/rules/AGENT.md` rewritten with full codebase audit results: accurate module status table, complete `common/` class inventory, Flyway migration status (V01–V17), mail module documentation, API response contract, known gaps, and updated environment variable table including `RESEND_API_KEY`
+- `MailServiceImpl` variable keys renamed from `recipientName` to `toName`; `appName` added as a template variable sourced from `MailProperties`
+- Email templates updated to use `toName` and `appName` Thymeleaf variables; hardcoded branding removed
+- `MailConfig` removed `MailProperties` from `@EnableConfigurationProperties` since the class is now a `@Component` self-registering bean
+- `GlobalExceptionHandler` rewritten to use `AppException` + `ApiErrorCode` for all handler return paths; validation handlers now collect all field/constraint violations into a `Map<String, String>` returned as `data`
+- `MailServiceImpl` expiry constants promoted to `public` for test visibility
+- `GlobalExceptionHandler` rewritten to handle only generic, framework-level exceptions (`ApiException`, validation, malformed request, type mismatch, not found, method not allowed, data integrity, optimistic lock, access denied, authentication, upload size, illegal argument/state, entity not found, transaction system, and a catch-all 500), all responding with `ApiResponse<Void>`
+- Token exceptions (`TokenNotFoundException`, `TokenExpiredException`, `TokenAlreadyUsedException`) relocated from `common/exception/` to `modules/auth/exception/` to enforce module ownership of domain errors
+- `MailSendException` relocated from `common/exception/` to `common/mail/` alongside the mail service it belongs to
+- `GlobalExceptionHandlerTest` rewritten against the new envelope and handler surface
+- `CLAUDE.md` rewritten to accurately describe this project (Spring Boot 4.0.6 social network) — replaced all content copied from an unrelated recruitment ATS project
+- `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The commit subject check now fails when it cannot resolve the revision range it was given, instead of reporting that all zero subjects were within the limit and exiting successfully.
+- Addressing a route with a method it does not support now answers `405` with an `Allow` header naming the methods it does, and the generated API document declares that response on every operation. It previously answered a generic `400`, which a client could not tell from a malformed request.
+- Every error response now declares its own JSON content type instead of negotiating one, so a request carrying an `Accept` header the API cannot satisfy receives its real status rather than an empty `500`. An unauthenticated call asking for XML returned `500` with no body.
+- The pull request check that rejects an over-length commit subject now actually runs; it was invoked in a way that failed with a permission error before the script was ever read, so the gate was red on every pull request for a reason unrelated to commit subjects.
+- A production start now refuses to proceed and names every variable at fault when a required environment variable is unset, instead of binding the unresolved placeholder as literal text and serving traffic with values such as `${JWT_ISSUER}` in every issued token.
+- An appeal or confirmation link is no longer destroyed by a refusal it had nothing to do with; both paths now run every check that can refuse while the token is still spendable, and redeem it only once the write has succeeded.
+- A recipient the deployment was configured never to mail is now recorded as skipped by every mail lane alike, instead of being dead-lettered by one, counted as a delivery failure by another and swallowed by a third.
+- The public support form now advertises and accepts exactly the same category set, because both read the category configuration table; disabling a category previously hid it from the form while the server kept accepting it.
+- A provider error is no longer misread as permanent because a three-digit run appeared in a request id, which dead-lettered a retryable failure on its first attempt.
+- The mail provider's own error text no longer carries a recipient address into the delivery log or the dead-letter reason.
+- The anonymous category list is now rate limited per client and served from a short-lived cache, so a signed-out read no longer reaches the database on every call.
+- Story expiry and suspension expiry are now decided by one clock rather than two, so whether a story is live or a suspension is over no longer depends on which of the application and the database is ahead.
+- A database constraint violation is now mapped by the constraint's own name rather than by finding that name anywhere in the driver's message, which could answer with a different constraint's error.
+- The unsubscribe token column is now varchar rather than char, which is what the entity maps to; as char it failed schema validation and the application did not start at all.
+- Campaign personalisation tokens are now substituted correctly; the sanitizer rewrites double braces as a template-injection defence, which would otherwise have left every placeholder visible to recipients.
+- A stalled mail provider can no longer hold a consumer thread indefinitely; each send is bounded by a configurable call timeout, which is the only HTTP bound the Resend SDK permits from outside it.
+- Every read path that reaches comments or stories through native SQL now hides administratively removed rows, including the report target lookup, the platform statistics gauges and the development seed pipeline.
+- Live post fanout is now enabled in production; the /ws/posts endpoint was reachable while nothing published to it.
+- A request for a banned or deleted hashtag now answers `404` with its own error code rather than an empty page, so a client can distinguish an unavailable hashtag from one with no posts yet.
+- Pagination depth on the posts-by-hashtag read is now bounded with its own error code; previously an over-deep request degraded silently and charged a failure to a circuit breaker shared with two other search surfaces.
+- The recommendation feed pipeline now logs a warning and records a counter metric when a batch of recommender candidates resolves to no visible posts, and when a request falls all the way back to the chronological feed; previously this degraded silently behind a normal `200` response.
 - Post and hashtag search returned a raw server error for any Elasticsearch-side failure that was not a plain connectivity problem (an authentication rejection, an index-state error, a version mismatch), instead of degrading gracefully like a genuine outage does; the search index is a rebuildable tier and no failure reaching it should surface as a hard error.
 - The CORS configuration rejected the `Idempotency-Key` header on cross-origin requests, blocking message sends from a browser entirely with a CORS error even though the request otherwise succeeded.
 - The `user_new_empty` development seed account now genuinely follows nobody, matching its documented "zero following" cold-start fixture; previously it only guaranteed nobody followed it, while it still followed a normal-sized batch of other accounts.
@@ -165,136 +545,6 @@ The read answers not-found when an account has no settings record, and the accou
 The seed script now creates the record, and existing accounts without one have been given it.
 - The report listings now reject an unrecognised query parameter instead of ignoring it, as the administrative endpoints already did.
 A misspelled filter was previously answered with an unfiltered page, which a reviewer works through believing it is the set they asked for.
-
-### Changed
-- The development seed's warning and strike volume has been raised well above the enum-coverage minimum, to a level that exercises the discipline ladder's list, filter, pagination, and active/revoked states.
-- The list of hashtags returned when a post is restored is renamed to say what it holds.
-It names the banned tags the caption still carries after the restore, which is the post's present state rather than the set that one call changed, so restoring the same post twice reports the same tags both times.
-The audit metadata key carrying the same set is renamed to match.
-
-### Removed
-- The original development auto-seeder, which generated a small set of placeholder accounts and posts with placeholder media on startup, has been removed and replaced by the rebuilt seeder described below.
-- The two group-chat environment variables have been removed from the example environment template. Group conversations were removed from the product in an earlier release, and neither variable has controlled any behavior since.
-
-### Added
-- The development seed dataset's authored content (display names, bios, captions, comments, direct messages, hashtags, and moderation notes) has been rewritten in natural English, replacing the earlier Vietnamese-language authoring pass.
-- The rebuilt development seeder's usage, its fixed QA accounts and shared password, its consumer-activation requirements, and how to re-provision its media are now documented in a dedicated README.
-- The rebuilt development seeder now has a single entry point that runs on application startup behind an explicit opt-in flag: it refuses to run against anything but a local database, wipes and rewrites the full seeded dataset in dependency order, replays the seeded activity through the same event pipeline production traffic uses, and then verifies every status/type/reason value the platform's enums define is actually represented in the data before declaring the run complete.
-- A dedicated configuration profile now holds off the five notification-producing consumers during a development seed run, since the seeder writes their notification rows directly with historically correct timestamps instead.
-- The rebuilt development seeder now emits a bounded set of real domain events (search-index updates for every post and hashtag, and engagement events for every like, save, and comment) through the same transactional outbox every production write path uses, so the real search-index and recommendation consumers index and learn from the seeded dataset. View events are deliberately never emitted, since seeded view counts and view activity are already written directly.
-- The rebuilt development seeder now writes its remaining domain data: stories with a realistic live/expired split and their views and likes; direct-message conversations and messages honoring both the sender and administrative deletion tombstones; notifications standing in for the consumers a seed run holds off; and the moderation history (reports, audit actions, warnings, and strikes) and platform analytics (daily and half-hourly statistics buckets, and behavioral events) that complete the seeded dataset.
-- The rebuilt development seeder now writes its post, comment, and engagement data: every seeded post with its media, hashtag associations, and a plausible view count; the full hashtag registry and its trending snapshot; threaded comments drawn from scripted reply chains and pooled comment text, including several soft-deleted reply threads; and the post likes, post saves, and comment likes connecting seeded accounts to seeded content.
-- The rebuilt development seeder now writes its first domain data: every seeded account (profile, credentials, and settings), every seeded media asset (avatars, banners, and post media, each minted with its own unique storage key), and the follow and block graph connecting the seeded accounts.
-- Foundational infrastructure for the rebuilt development seeder has been added: configuration to gate whether it runs, a loader that reads and validates the seed content files, a deterministic timeline generator for realistic historical timestamps, and a reset step that wipes prior seed data before a fresh run.
-- The development seed dataset's media now sources real, licensed photos and video clips from Pexels and provisions them to the development object storage bucket, replacing the earlier placeholder image and video sources.
-- The development seed dataset's post volume has been expanded to 722 posts with post counts per account following a fixed distribution band, and every user avatar, user banner, and post media reference now points at a real Pexels-sourced asset instead of the earlier generated-avatar and placeholder-media schemes.
-- A complete, realistic content dataset (personas, accounts, posts, hashtags, comments, direct-message conversations, and moderation case histories) has been authored for the upcoming rewrite of the development seeder, replacing the placeholder content the current seeder generates.
-- An account's violation history can now be read including records that have been revoked, which were previously removed from the list entirely, so an account that had been disciplined and then cleared looked identical to one that never was.
-Revoked entries are returned only when asked for, are marked as revoked, and say when and by whom.
-- The account detail an administrator reads now says how many warnings currently count toward the account's next strike, so a reviewer can be told that the warning they are about to issue will be the third and will suspend the account.
-- A single session can now be ended instead of only every session at once.
-The session must belong to the account it is named under, and ending one that has already ended reports success rather than an error.
-Ending one session does not sign the account out everywhere, which ending all of them does.
-- A signed-in client can now ask which session it is using, so a reviewer reading its own account's sessions can tell which row is the one it is sitting on.
-- Several account identifiers can now be resolved to display names in one request, instead of one request per account.
-Queues, audit rows, violation rows and activity rows all show bare identifiers, and this is what turns them into names.
-An identifier that matches no account is returned and marked as such rather than quietly left out.
-- The moderation audit log can now be filtered by a time window and by the account an action was taken against, so an investigation can ask what happened last Tuesday, or everything done to this account.
-A moderator still sees only its own entries.
-- A moderator can now list the reports it escalated.
-Escalating takes a report out of every queue a moderator can read, so until now there was no way to follow what had been handed up.
-- An account's posts now carry their attached images and video when a reviewer reads them, instead of only the caption.
-- The recommender service now starts with the rest of the local development stack.
-It was defined but never started, so every like, save, view and comment was retried against a service that was not running and then discarded.
-Those four kinds of activity now reach the activity log, taking it from three kinds to seven in development.
-This is development only; nothing about a production deployment was set up.
-- A moderator or administrator can now remove and restore a reported story and a reported message, the same way they already could a post or a comment.
-Closing a report about either previously recorded a moderation decision in the audit log while the content stayed up, which was the one place where the record and the reality could disagree.
-Removing a story leaves its expiry alone, so a story that expires while removed does not come back into anyone's feed when it is restored; once a story is both removed and expired the existing cleanup job deletes it and it can no longer be restored.
-Removing a message withholds its text, its media and any post or story it shares from both participants, leaving the same placeholder the thread already shows when a sender deletes their own message.
-The message keeps its content so a restore can return it, and a restore never undoes a deletion the sender performed.
-- Suspension with no end date is now stated as a supported choice in the endpoint documentation rather than only being possible.
-Omitting the duration suspends indefinitely and stores no end time, which the reinstatement sweep never matches, so the account stays suspended until an administrator lifts it.
-
-- Every display vocabulary the API asks a client to send back is now readable in one call: report reasons, notification types, and moderation action types, each with its label, its behavioural flags, and whether it is currently enabled.
-A disabled row is returned and flagged rather than filtered out, so a client can show it as unavailable instead of offering it and meeting a rejection.
-Readable by any signed-in caller, because a person filing a report needs the same reason list a moderator needs when issuing a warning.
-- A moderator or administrator can now list an account's posts and its comments while investigating it, including drafts, archived posts, and content moderation has already removed, and regardless of whether the account is private or has blocked the reviewer.
-- A moderator or administrator can now open a single post, comment, account, story, or message by its own identifier, so a link from an audit entry or an account's content listing no longer dead-ends.
-- The account detail an administrator reads now says what that administrator is allowed to do to the account and which roles it may be moved to, so a control can be shown or hidden from the payload instead of from a copy of the rules kept in the client.
-- Restoring a post now names the banned hashtags its caption still carries, so a moderator is told the post came back with fewer tags than its text names rather than finding out from a later complaint.
-- A post in the following feed now carries its hashtags, the same field and the same shape the post detail already carried, so one post card renders identically wherever it came from.
-- The bucket width of a statistics chart can now be requested rather than only reported. Asking for half-hourly buckets over a window older than the fine-retention horizon is refused rather than answered with an empty chart, because those rows have been rolled up and deleted.
-- The real-time surface is now documented alongside the REST description: the four endpoints, the ticket handshake, every subscribable destination, the events each carries, and the list of what is pushed against what must still be polled.
-
-- An administrator can now read what an account did: session starts, searches with the term that was used, and views of another account's profile.
-The read requires a time window of at most thirty days, because the underlying table is partitioned by time and a query without one reads the whole history of the platform.
-- Behavioural events are now recorded at all. Three kinds are written, chosen for what they answer per unit of write volume; every other kind the schema allows for is deliberately still unwritten, and the endpoint's documentation says so, so an administrator seeing three kinds does not report it as a defect.
-Recording a view of one's own profile is skipped, since it would bury the views that matter.
-- An administrator can now see a platform snapshot: accounts by status and by role, totals for posts, comments and stories, reports by status and by reason, and the most used hashtags.
-The snapshot carries the time it was computed, so a client can show how fresh it is rather than implying the numbers are live.
-- An administrator can now chart any of those figures over time. Omitting both bounds gives the last day; the server picks the bucket width from how far back the window reaches and says which it used.
-- An administrator can now manage the hashtag registry: list and search it across every lifecycle state, create a hashtag ahead of any post using it, ban one, return one to circulation, and delete one.
-Every action is recorded in the moderation audit log with who decided and why.
-- A hashtag can now be banned, which takes the term out of discovery and refuses it on new posts, or deleted, which additionally drops it from the hashtag list shown on a post.
-Neither removes anything: the posts that already used the tag, their associations, and the usage counter all survive, so both decisions are reversible.
-- Banning a hashtag now clears it from the trending list immediately rather than at the next snapshot.
-A term is usually banned while it is trending, which is the worst moment to leave it there.
-- A post whose caption names a banned hashtag is now refused, and the response names the offending tags so they can be highlighted in the caption rather than guessed at.
-This covers creating a post, editing a caption, and publishing a post that was drafted or archived before the ban.
-- A post now lists the hashtags it is associated with, so a client knows which parts of a caption to render as links.
-A hashtag an administrator has deleted is left out while the caption keeps its literal text.
-- A hashtag can now be created directly in a banned state, which reserves a term before anyone can use it.
-- A moderator can now warn an account, giving moderation a step between doing nothing and banning.
-Three warnings that still count produce a strike; the first strike suspends for seven days, the second for thirty, the third and any after it ban permanently.
-- A warning counts toward the next strike while it stands, was issued after the account's most recent strike, and is less than ninety days old, so an account that behaves for long enough starts again.
-- A strike never weakens a penalty already in force, so warning an account that is already banned records the strike without shortening the ban, and the response says which happened.
-- An administrator can now reverse a single warning or a single strike. Neither reversal changes the account's status: lifting a suspension or a ban stays a separate, explicit decision.
-- A warned account is now told, and can review its own warnings afterwards. It never sees its strikes, nor who issued anything.
-- The reasons a moderator may cite when warning an account are drawn from the report-reason registry, so retiring a reason is a configuration change rather than a release.
-- A moderator can now hand a report up to an administrator instead of closing it or leaving it, and must say why.
-An escalated report leaves the moderator queue, stays readable to the moderator that escalated it, and can be closed only by an administrator.
-- An administrator can now see how many reports are waiting on them. Escalation pushes no notification, so this count is the only signal one has arrived.
-- A moderator can now see the content a report points at, even when the author's account is private or the author has blocked them.
-The report is the only way in, so a moderator sees what somebody flagged and nothing else.
-- An administrator can now list, search, and inspect accounts, spanning every account status including removed accounts, which no public surface shows.
-- The account detail view shows where an account was created from, where and when it last signed in, its live sessions, and the reports filed against it.
-- An administrator can now end every one of an account's sessions in one action, and the audit entry records how many were ended.
-- An administrator can now change an account's role between user and moderator, and promote a moderator to administrator.
-The change ends the account's sessions in the same operation, so a demotion takes effect immediately rather than when the old session expires.
-- A suspension can now be given a duration in days, after which the account returns to active by itself.
-The first sign-in attempt after the term lapses restores the account, and a periodic sweep does the same for an account nobody signs into, so an expired suspension never lingers.
-- The moderation audit log now records role changes and forced logouts, and the action registry lists every action type the moderation surface is planned to record.
-
-### Changed
-- Refusing to act on an administrator now answers the same status and the same code whether the request was a status change or a role change. It previously answered two different ones for the same cause, which forced a client to keep its own copy of the rule to tell them apart.
-The two genuine conflicts on the role path, a skip-level promotion and a request naming the role the account already holds, keep their own code.
-- An administrator's account detail no longer says only what the account is; it also says what may be done to it.
-
-- The administrative activity log now also covers engagement: post likes, saves, views, and comments appear alongside session starts, searches, and profile views, and answer to the same event-type filter.
-Both kinds of event are recorded under one vocabulary, so the filter cannot name a value that no writer produces.
-- Statistics that count whole tables are now computed by a background job rather than on the request, which is the difference between milliseconds and seconds once the platform is large.
-Counts of things that happened in an interval are counted directly rather than derived by subtracting two snapshots, so a moderation sweep can never make "new posts this half hour" read as a negative number.
-- Restoring a post whose caption names a banned hashtag now succeeds without that association instead of failing.
-A moderator undoing its own removal is not blocked by an unrelated decision it cannot reverse, and the audit entry records which tags were left off.
-- A moderator reading a single report by identifier now reaches the same reports its queue shows, plus any report it escalated itself.
-Anything else answers as if the report did not exist. The queue already hid closed and escalated reports; reading one by identifier did not.
-- Hashtag search and the trending list now show active hashtags only.
-- A moderator's report list now covers the open part of the review lifecycle only. Asking for closed or escalated reports returns an empty page; an administrator's view is unchanged.
-- Resolving or dismissing a report is no longer possible through the triage endpoint, which now only claims a report for review.
-Both closures already had audited endpoints of their own, and the triage path wrote nothing, so a report could previously be closed with no record of who closed it.
-- Restoring a post removed by moderation now returns it to the status it held before the removal, instead of publishing everything it touches.
-A post that was a draft when it was removed comes back a draft, and the response says where it landed.
-- Removing a post by moderation now does everything removing it as its owner does: its hashtag associations are detached and it leaves the search index.
-Previously a moderated post kept contributing to trending counts and kept answering searches.
-- The error code for a refused role change is renamed to match the status it answers with. Behaviour is unchanged.
-- A moderator reading the moderation audit log now sees only the entries it wrote; an administrator still sees everything.
-Requesting another actor's entries returns nothing rather than their contents, and requesting one by identifier reports it as not found.
-- Moderation requests no longer accept a caller-supplied metadata object.
-The audit log records server-derived facts only, and a request that still sends one is rejected rather than silently stripped.
-- The application now takes its schema-migration lock without holding a transaction open, which is what allows an index to be built without blocking writes to the table.
-
-### Fixed
 - The statistics metric parameter is now published as the closed set of keys it has always accepted, rather than as free text with the keys described in prose where only a human could find them.
 - An account's violation history is now published as what it is, two different kinds of entry told apart by a discriminator, instead of one flat shape in which half the fields were declared present and arrived empty.
 - Fields that can legitimately arrive empty on the discipline and report-target payloads are now described as such. They were previously declared as always present, so a generated client treated them as guaranteed.
@@ -303,158 +553,19 @@ The audit log records server-derived facts only, and a request that still sends 
 - The moderator report queue no longer reads every report ever filed to return one page. At five million reports the first page took a quarter of a second and touched sixty-seven thousand pages; it now takes a twentieth of a millisecond and touches twenty-four.
 - Paging deeper into the report queue and the administrator audit log no longer costs more the further in you go.
 - The administrator audit listing no longer reads the whole table to return one page.
-
 - The API description of the own-warnings listing now declares the page it returns. It previously described only the two ways the call can fail, so a client generated from the description had no type for the success payload.
 - The API description of creating a post, editing a caption, and publishing a drafted or archived post now declares the rejection each answers when the caption names a banned hashtag, and points at the field carrying the offending names.
 - The monthly partitions behind the behavioural event table now cover the current month and the two ahead of it at all times, and a gap left by an earlier release is closed.
 A write into an uncovered month never failed; it was absorbed silently and made that month's partition impossible to create afterwards, so the problem only became visible once it could no longer be repaired.
 - Listing accounts by role and listing hashtags without a status filter no longer read the whole table. At two hundred thousand rows the account listing filtered to moderators took fifteen milliseconds and touched fifty thousand pages; it now takes a tenth of a millisecond and touches twenty-four.
 - A moderation action's response now carries its creation timestamp, which was previously always null even though the stored entry had one.
-
-### Removed
-- The error code for a missing report resolution note, which no path had been able to raise since the requirement moved behind a mandatory field. An error code nothing can produce is a promise the API cannot keep.
-
-### Security
-- A staff member cannot act on a ticket appealing a decision they made themselves.
-- Only an administrator can decide an appeal; a moderator may read and escalate one but cannot record a verdict they have no capability to execute.
-- The eleven administrator-only endpoints now enforce the administrator role in the service layer as well as in their endpoint annotations, so removing an annotation no longer opens an endpoint.
-- The administrative surface now enforces a per-caller request budget. None of its thirty-three operations carried one, so two hundred requests a second from a single token were accepted; the four most expensive reads carry tighter budgets than the rest.
-- Every administrative read now rejects a query parameter it does not understand instead of ignoring it. A misspelled filter previously returned a full unfiltered page, which a client then displayed as though the filter had been applied.
-- A pagination cursor whose identifier has been truncated is now rejected. Removing characters from it previously produced a different, valid position, so the caller silently received the wrong page instead of an error.
-- Ending an account's sessions, whether by forcing a logout or by changing its role, now takes effect on the account's very next request.
-Previously the account kept whatever access it already held until that access expired on its own, which could be a further fifteen minutes.
-Sessions already open when this ships stay valid; an ordinary logout still ends only the session it was sent from.
-- A container image started without an explicit profile now runs the production profile instead of the development one, so a deployment that forgets to set a profile no longer serves API documentation anonymously, marks the refresh cookie non-Secure, or routes outbound mail to localhost.
-- The development profile no longer shadows the configured cookie signing secret with a value published in this repository, so the operator's secret is authoritative in every profile.
-- A direct-message WebSocket session is now closed when the session is revoked by logout, ban, or suspension, instead of surviving until its access token expired on its own.
-- The guard that rejects a forged client message aimed at another user's realtime channel is now active whenever any realtime endpoint is enabled, rather than only when the comment, notification, or post endpoints happen to be on.
-- Accepting `SameSite=None` on the refresh cookie now requires an explicit acknowledgement and otherwise fails at startup, because it removes the only cross-site request protection on the refresh and logout endpoints while leaving every request apparently successful.
-- WebSocket connections now authenticate with a single-use ticket that expires in 30 seconds, so an access token no longer travels in a URL where proxies and content delivery networks record it in their access logs.
-
-### Tests
-- Added coverage for the support authorization matrix, the conflict-of-interest rule and the claim race.
-- Added coverage for the new service-layer administrator gate, including the warning and strike revocations that previously read no actor role at all.
-- Every administrative controller now asserts that its endpoints refuse a request carrying no token at all. The suite previously checked only that a revoked token was refused.
-- The permitted-operations payload is checked by agreeing with the component that enforces the rules, for every combination of actor role and target role, rather than by restating the rules a third time.
-- The report queue's plan is asserted directly, so neither adding a status to the queue without extending the index nor removing the apparently redundant cursor bound can silently return it to a full scan.
-- The ranked feed's copy of a post is checked component by component against the original, walking the response's fields reflectively rather than naming them, so a field added later is covered without editing the test and a field silently swapped with a neighbour of the same type is caught.
-
-### Fixed
 - Corrected `database/schema.sql`, which still had the group-conversation columns, a stale follow-counter function, and no record of the new conversation-customization columns despite Flyway having already migrated past all of it.
-
-### Added
-- A conversation can now be pinned to the top of the caller's own list, muted to suppress its notifications, and given a private nickname visible only to the caller, all independent of the other participant's own view.
-- A conversation can now be deleted from the caller's own inbox only, and marked unread again.
-Deleting only hides it for the caller; the other participant and the message history are untouched, and a new message from them reactivates it for the caller automatically.
-- Two people who follow each other now get a conversation automatically, so writing to someone no longer depends on one of them starting a thread first.
-Pairs who already followed each other before this release are given one by the upgrade.
-- A message that carries an attachment now includes the attachment's URL, dimensions, duration, and blurhash in the message response, so a client can render it without a second request per message.
-- Prometheus metrics are now exposed for scraping at `/actuator/prometheus`, which previously returned 404 despite the registry being present.
-- Local service containers now declare healthchecks and restart policies, and the application image declares a healthcheck.
-
-### Removed
-- Group conversations.
-The endpoints, the group fields on conversation responses, and the underlying columns are all gone, and messaging is now one to one.
-Existing group conversations are deleted by the upgrade, after being copied into archive tables so the content is recoverable.
-
-### Fixed
 - Marking a conversation unread now has a visible effect even when the caller sent its own newest messages. It previously cleared the read marker, which only changes the count when the other participant has newer messages to count; it is now an independent flag, cleared the next time the caller opens the conversation.
 - Two people following each other back at the same instant no longer deadlock in the database, which previously failed one of the two follows outright.
 The follower and following counters are updated in a fixed order now, so the two directions of a pair queue behind each other instead of colliding.
 - Ending a follow no longer leaves an empty conversation behind.
 A conversation that already has messages in it is kept, because unfollowing someone should not destroy the record of what was said.
-
-### Changed
-- Real-time direct-message delivery is now enabled in the production profile. The setting was absent there, so it fell back to off and messages were delivered only on refresh.
-- Real-time comment and like delivery is now enabled in the production profile. It was disabled, which left the only realtime endpoint the client opens absent in production and the feature silently inert.
-- `/actuator/prometheus` is reachable without authentication and should be restricted at the ingress.
-- The local database, cache, broker, and search ports are now published on the loopback interface only, matching the treatment the mail sink already documented.
-- The local database now uses a named volume, so its contents survive container recreation.
-
-### Fixed
 - The WebSocket handshake's remote-address logging no longer risks a null-pointer failure on non-Servlet requests, resolving a SonarQube dead-code finding without changing the logged value.
-
-### Tests
-- The development data seeder no longer runs during the test suite. It previously activated whenever a developer enabled seeding locally, inserting rows into whichever integration-test database was live and breaking that test's own teardown on a foreign key, with the affected test varying by timing.
-- A query-parameter test no longer selects its subject by position from an unordered reflection array, which intermittently picked a synthetic bridge method carrying none of the annotations under test.
-
-- The environment template now documents the media-duration limit plus post and message live/consumer toggles, so local and operator configuration exposes every application-owned environment variable.
-
-### Added
-- A user can now like and unlike a story, mirroring the existing post-like flow: self-like is permitted, liking an already-liked story is a conflict, and the story response carries the viewer's liked state plus, for the owner, the total like count.
-- Development-only automatic data seeding on startup: with `SEED_DATA=true` under the `dev` profile, the application seeds curated verified accounts, posts with real externally hosted media, comments, likes, and a follow graph a few seconds after startup, and logs a single reviewer account (which follows every seeded user) whose credentials give an immediate full-feed review experience. It is idempotent and never runs in production.
-- Comment, reply, comment-like, and comment-mention notifications now carry the id of the post they concern, alongside the existing comment id, so a client can open the correct post in one response instead of being unable to resolve it. Like-post notifications are unchanged. The field is additive and null for notifications that don't concern a post.
-- A user can now set and clear a banner (cover image), mirroring the existing avatar upload flow: upload through the pre-signed media flow, then save the resulting CDN URL to the profile. Sending an empty string clears it, exactly like the avatar. The banner URL is returned on both the self and public profile responses.
-- Conversations now deliver new and deleted messages to active participants in real time over a WebSocket connection, in addition to the existing REST history endpoint.
-- Sending a message now notifies every other active participant in the conversation.
-- Sending a message (text, image, video, post share, or story share) into a conversation, with a reply reference, idempotent retries, and validation that the payload matches the declared message type.
-- Cursor-paginated message history for a conversation, including a placeholder for a deleted message.
-- Sender-only message deletion that preserves the message as a placeholder instead of removing it.
-- Marking a conversation read, and a total unread message count across all of a user's conversations.
-- The caller's conversation list now includes a preview of each conversation's newest message.
-- Media uploads now accept animated GIF images and QuickTime video, alongside the JPEG, PNG, and WebP images and MP4 and WebM video already supported. Nothing was removed. HEIC and HEIF remain refused: the CDN serves exactly what was stored and nothing transcodes, so an accepted HEIC would upload cleanly and then fail to render for most viewers.
-- `GET /media/constraints` publishes the limits the upload path actually enforces, so a composer can state the accepted formats, the size ceiling, and the video length ceiling instead of hardcoding values that drift. It is served from the same configuration the upload validator reads, so it cannot advertise a rule the server does not apply.
-- `GET /posts/liked` lists the posts the signed-in user has liked, newest like first, so a profile's liked tab has an endpoint behind it instead of a placeholder. It is self-only: the list is always the caller's own, and one user cannot page another's likes. A post that has since been deleted, removed by moderation, unpublished, or hidden by a block or a newly private author is left out, which can return fewer entries than the requested page size while more pages remain.
-- A profile's post list accepts a `type` filter carrying one or more post types, so a photos tab can ask for image, video, and carousel and leave text posts out. Repeat the parameter for several values; a single comma-delimited value also works. Omitting it filters nothing and returns exactly what it returned before. An unrecognised value is refused with a message naming every accepted value, rather than quietly ignored. A cursor is bound to the filter that issued it and is refused under a different one, because the ordering does not depend on the filter and replaying such a cursor would otherwise silently skip every excluded post before that position.
-- A post's like count now updates live. A client watching a post can subscribe to that post's realtime channel and receive a frame whenever anyone likes or unlikes it, so the count no longer sits frozen next to a comment stream that is already updating. Each frame carries the current total rather than a change, so a client that misses one is corrected by the next. Delivery is best-effort and the REST response remains authoritative. A viewer who is blocked by the post's owner stops receiving these frames even if they subscribed before the block was created. The tier is off by default and enabled per environment.
-- Post, comment, and user responses now carry `hasReported`, telling a client whether the viewer has already reported that target so the report control can be disabled rather than offered and then rejected. It is true exactly when a fresh report would be refused as a duplicate, which includes reports a moderator has since resolved or dismissed, since neither permits reporting the same target again. It is false for an anonymous viewer and on the viewer's own content, and it is resolved once per page, so a list costs one additional query regardless of how many items it returns.
-- The comment list accepts a `sort` parameter with two modes. `top`, the default, is the existing behaviour: up to three most-liked comments are pinned above the first page. `newest` suppresses that block and returns pure chronology. Both order the list newest first, so an existing client that sends no parameter sees no change. A cursor is bound to the mode that issued it and is rejected under the other rather than returning a silently wrong page.
-- Comments now carry an `editedAt` timestamp, on both the REST response and the live broadcast payload, which is null until the author changes the content and is never moved by anything else. Comparing `createdAt` against `updatedAt` was the only way to guess at this before, and it never worked: a single like moves `updatedAt`, and the two values are not equal even on a comment that has just been created.
-- `GET /comments/{commentId}/deletion-scope` reports how many comments deleting a comment would remove, so a confirmation dialogue can state the real scope of a subtree removal instead of the direct-reply count. The number is an estimate; the delete's own response is authoritative.
-- A tracked seed script creates a fixed set of local development accounts, a follow graph, and published posts, so a fresh clone no longer produces a running application with no way to log in; it writes only to the local compose database and refuses to run against any other.
-- `CONTRIBUTING.md` now documents how to seed a fresh environment and which accounts that leaves you with.
-- Outbound email can now be delivered over SMTP as well as through the hosted provider, selected by the `app.mail.transport` setting.
-- Local development now sends every message to a Mailpit inbox started by `docker compose`, so a fresh clone can register an account, open the verification link, and log in without a provider credential or a manual database edit.
-- The application refuses to start when the SMTP transport is selected outside the development profile, so an environment variable cannot silently divert production mail into a local sink.
-- Refresh tokens are now also issued as an `HttpOnly`, `SameSite`-scoped cookie on login, email verification, OAuth2 code exchange, and refresh, so browser clients can restore a session after a page reload without persisting a credential to web storage.
-- New `app.security.refresh-cookie` configuration group controls the cookie's name, path, `Secure` flag, and `SameSite` policy per environment.
-
-### Tests
-- Regression coverage rejecting a WebSocket handshake and a live-feed subscription for a banned, suspended, deactivated, or deleted account.
-- Unit coverage for the WebSocket connection handshake authentication and for the per-conversation subscription authorization guard, including rejection of a non-participant, a departed participant, and an unauthenticated connection.
-- Regression coverage confirming a deleted account is excluded from message notification fan-out.
-- Unit and end-to-end integration coverage for message notification fan-out, including suppression for a departed participant, a blocked recipient, and a recipient with message notifications disabled, and duplicate-event handling.
-- Regression coverage rejecting a spoofed media asset reference, a non-published shared post, and an expired or deleted shared story in a sent message.
-- Unit coverage for message send validation and gating, idempotent retry and conflict handling, history pagination, sender-only delete, and read-state tracking.
-- End-to-end integration coverage for sending each message type, idempotent replay, history pagination, delete, and read-state endpoints.
-
-### Security
-- Changing an account's status is now restricted to administrators and refused when the actor is the target or the target is an administrator: a moderator could previously ban any account including every administrator, and because a banned account cannot sign in to reverse it, a single moderator could lock the entire administrator tier out with no in-application recovery path. The audit-history endpoint for one user moved to `/admin/actions/for-user/{userId}`, which is a breaking change for that endpoint's callers.
-- Confirming a media upload no longer trusts the client's claim that the file reached storage: any authenticated user could previously register unlimited media assets, under any storage key including one the server never issued, and receive a CDN URL for an object that does not exist. Upload confirmation now verifies the object against storage before the asset is recorded.
-- Registration and password reset now enforce a password policy: 8 to 64 characters, at most 72 bytes when encoded as UTF-8, at least one uppercase letter, at least one digit or special character, and no whitespace or invisible characters. Login is deliberately unbounded, so accounts created under the previous rules continue to work and the policy is not disclosed to an attacker probing the login endpoint.
-- A deployment that did not set `APP_COOKIE_SIGNING_SECRET` previously started successfully and signed OAuth2 authorization-state cookies with the unresolved placeholder text as its HMAC key, voiding the tamper-evidence those cookies are meant to provide; declared constraints on security configuration are now enforced at startup, so such a deployment fails to start instead of running with a publicly known key.
-- Closed several remaining ways a blocked party's identity could leak: the live comment feed now filters each subscriber individually instead of broadcasting to everyone watching a post, notification listings and unread counts exclude blocked actors, mentioning a blocked account no longer delivers a notification, and the last few endpoints that confirmed a block's existence now respond identically to a nonexistent account instead.
-- Email uniqueness is now case-insensitive, closing a duplicate-account gap equivalent to the one already closed for usernames.
-- A forged pagination cursor for the conversations list could overflow the underlying timestamp column and return a server error instead of a clean validation failure; it now uses the same bounded cursor format as every other paginated list.
-- A concurrent duplicate unfollow, follow-request rejection, unblock, unlike, or unsave request could return a server error instead of a not-found response; all five now resolve cleanly under concurrent requests.
-- Ten paginated endpoints across posts, comments, conversations, and stories previously accepted an unbounded or zero page size; one of them could be driven to a server error this way. All paginated endpoints now enforce the same 1-100 page size bound.
-- A pagination cursor obtained from one list endpoint (for example, the followers list) can no longer be replayed against a different list endpoint; cursors are now bound to the endpoint that issued them. Any cursor obtained before this change is rejected once; affected clients simply restart pagination from the first page.
-- The comment and notification WebSocket endpoints now deny all cross-origin connections by default when no allowed origins are configured, matching the existing REST behavior. A blank configuration previously admitted any localhost-scoped browser origin on these two endpoints only.
-- A user blocked from viewing a post could still register as a live watcher of that post's comment activity over WebSocket by sending watch or heartbeat frames directly, bypassing the same visibility check already enforced when subscribing; both frame types are now authorized identically, and an unrecognized comment-topic subscription is now rejected by default instead of allowed through.
-- An endpoint reachable by more than one HTTP method (the conversations list and the WebSocket handshake) previously received a separate rate-limit budget per method instead of one shared budget; the two methods now share a single budget, and the production WebSocket handshake limit is raised from 30 to 60 attempts per 60 seconds to preserve the same effective capacity.
-- A request body that is malformed, has an unrecognized field, an invalid enum value, invalid JSON, or is missing now returns 400 Bad Request with a dedicated error code instead of 500 Internal Server Error, and the response no longer echoes the rejected field name or any internal class name.
-
-### Changed
-- Refusing a media upload for its format now names every accepted type for that media kind instead of only saying the type is not allowed, so a client can word the error without keeping its own copy of the list. The message is generated from the same allowlist the check reads, so it cannot describe a rule the server does not enforce.
-- A video upload declaring a duration longer than 180 seconds is now refused. This limit is advisory and is documented as such: duration is supplied by the client and the server never opens the file, so it bounds an honest client and nothing more. File size is different and genuinely verified against the stored object, and the two should not be assumed equally strong.
-- The profile post list now refuses a query parameter it does not support instead of ignoring it. Every other endpoint keeps accepting unknown parameters, so nothing else changes; this one endpoint is closed because a filter that is silently dropped is indistinguishable from a filter that matched everything.
-- Deleting a comment is no longer slower on a busy database than on an empty one. The delete scanned the entire comments table once per level of the subtree it was removing, so its cost grew with the total number of comments in the system rather than with the number being deleted; measured against 210,000 comments it took 320 ms, and now takes under 2 ms. The set of comments removed is unchanged.
-- The OpenAPI authoring guide instructed that every response declare an explicit body schema. On a success response that is wrong, because the server always wraps the payload in a standard envelope, and the contract test rejects it. The guide now states the rule separately for success and error responses.
-- Deleting a comment now returns how many comments were removed, counting the comment itself plus every descendant at any depth. The response body previously carried no data at all, so a client had no way to tell that deleting a comment with one visible reply had removed eleven.
-- `comment.deleted.v1` now carries the same count, so a live subscriber can remove the whole subtree instead of leaving its descendants rendered as orphans.
-- Liking your own comment is now permitted and returns 200, matching the existing behaviour of post likes; it previously returned 403 with a message describing a permission failure when the real reason was a product rule. A self-like still produces no notification.
-- The mail provider credential moved from a root-level setting into the provider's own configuration group; the `RESEND_API_KEY` environment variable is unchanged.
-- Selecting no mail transport, or an unrecognised one, now fails at startup instead of resolving to a default.
-- The mail health indicator is disabled, so a briefly unreachable mail server no longer makes the application report itself unhealthy.
-- Production now honours `REFRESH_COOKIE_SECURE` and `REFRESH_COOKIE_SAME_SITE`; the production profile previously pinned both values, leaving the environment variables inert in the only profile where they matter.
-- `POST /auth/refresh` and `POST /auth/logout` accept the refresh token from the `luvax_refresh` cookie when the request body omits it; a token supplied in the body always takes precedence.
-- `POST /auth/refresh` now returns `401` rather than `400` when no refresh token is supplied by either the body or the cookie.
-- `POST /auth/logout` clears the refresh cookie and remains idempotent when no token is supplied at all.
-- Flyway no longer accepts out-of-order migrations; the migration set is a contiguous sequence with no gaps, so this only re-enables a safety check that was previously suppressed for no reason tied to an actual workflow.
-- Notification API responses now embed the triggering user's summary (id, username, display name, avatar, verified flag) instead of a bare actor id; a soft-deleted or unknown actor now renders as a placeholder instead of a raw id the client had to resolve separately. This is a breaking change to the notification response shape.
-- The example environment file now documents 22 previously-undocumented configuration variables that already had defaults, covering the refresh-token purge job, the WebSocket revocation sweep interval, the notification live-push toggle, and several module seed/consumer/scheduler toggles.
-
-### Fixed
 - The development auto-seeder now gives every seeded account a settings row, matching real registration; without it, `GET`/`PATCH /users/me/settings` returned not-found for any seeded account.
 - When post search was unavailable it returned an empty page identical to a genuine no-match apart from the response timestamp, so no client could tell "nothing matched your search" from "search is down" and no empty state could be worded honestly. Cursor-paginated responses now carry a `degraded` flag, false on every complete result including a real no-match, and true only when post search fell back because its index was unreachable. Hashtag search does not set it: its fallback answers from the database with real results, and only the ranking differs.
 - Listing one user's likes had no index carrying the full sort order, so a page could degrade into a scan of every like that user had ever made whenever many of them shared a timestamp, which is what a bulk import or a rapid burst of likes produces. Measured against a user holding twenty thousand such likes, a single first page read all twenty thousand rows; it now reads four pages of index.
@@ -487,117 +598,14 @@ A conversation that already has messages in it is kept, because unfollowing some
 - The hourly hashtag trending snapshot job now reuses the same time window across runs within the same hour instead of creating an unbounded, ever-growing set of near-duplicate snapshot rows on every run.
 - A transient failure resolving one WebSocket session's token during the periodic revocation sweep no longer aborts the whole sweep pass; the affected session is skipped and retried on the next scheduled run instead of leaving every other session unchecked.
 - Closed a latent inconsistency between the case-insensitive username uniqueness constraint and the documented soft-delete retention policy; no application code path could reach the affected state, but the database now enforces the same rule the application already assumed.
-
-### Tests
-- Added coverage for every password policy rule on both the registration and the password-reset payload, including the no-break space and zero-width space cases that a whitespace regex does not catch, plus end-to-end coverage proving an over-long password no longer produces a server error.
-- Added regression coverage for the blocked-party disclosure fixes, the case-insensitive email constraint, the five conditional-delete race fixes, the conversation cursor bound, the page size bound on every newly-covered endpoint, the single-writer `updated_at` fix, the notification `isRead` fix, the WebSocket handshake 401 fix, and the UTC timestamp rendering fix.
-- Added a contract test asserting that every request-body endpoint declares its 415, derived from the published document rather than a fixed list, so a new endpoint that omits it fails the build.
-- Added regression coverage proving cursor pagination for notifications, reports, admin actions, and conversations does not drop or duplicate rows when many items share the same sort timestamp, matching coverage already in place for other paginated lists.
-- Resolved a rare failure in a WebSocket revocation sweep test caused by a benign race in the test's own teardown, unrelated to the behavior under test.
-
-### Documentation
-- Added the support module data rules and brought the reference schema up to the migrations it describes.
-- Added the mail module data rules, which did not exist, and corrected the project structure documents against the code they describe.
-- The mail queue now records why it carries no broker-level dead-letter argument, and which queue in the topology is the genuine outlier.
-- Recorded why a small number of harmless startup proxy warnings and one non-JSON error response for an over-long request remain as accepted, understood gaps rather than unexplained rough edges.
-- Recorded that follower and following counts are visible to everyone regardless of the viewer's own blocks, so comparing a count against a filtered list can reveal that a block exists somewhere in that list, as a known and accepted tradeoff rather than an oversight.
-- Corrected internal module documentation for the hashtag module, which was still marked as unimplemented scaffolding despite being fully implemented.
-- Corrected internal module documentation for the message module: conversation and participant management is implemented, but sending, listing, and reacting to messages is not, since no send-message endpoint exists yet.
-- Corrected internal documentation to state that account soft delete, for users specifically, is a documented but unimplemented retention policy; no code path currently sets it.
-- Synchronized internal architecture documentation with the current codebase: migration count, test coverage listing, and module directory listing.
-- Synchronized the reference database schema document with the two most recent migrations (the top-liked-comments index and the case-insensitive username index).
-- Internal comment-style guidance no longer cites a pre-commit hook that does not exist in this repository.
-
-### Added
-- A post view can now be recorded via `POST /api/v1/posts/{postId}/view`; the view is captured as a behavioral event and feeds the recommendation engine as a read signal, without synchronously changing any counter on the post.
-- Liking or saving a post now feeds the recommendation engine: each action is recorded as a behavioral event and forwarded to the recommender asynchronously, so the personalized feed reflects real engagement, not only the seeded interaction history.
-- A personalized "for you" post feed at GET /api/v1/recommendations/feed, ranked by the Gorse recommender with per-post ranking scores, degrading to the popularity ranking and then the chronological following feed whenever the recommender is unavailable.
-- A deterministic synthetic seed tool generates demo users, text posts, a follow graph, and interaction history for the recommendation demo, and can push or rebuild the Gorse dataset from the same source.
-- The Gorse recommender (v0.5.11) now runs as a dedicated service through a compose overlay, storing data in its own PostgreSQL database, secured by an API key and a loopback-bound authenticated dashboard.
-- The first page of a post's comments now begins with up to three pinned top comments, ordered by like count; each comment carries a `pinned` flag so a client can tell them apart from the newest-first list rather than inferring it from position. Only comments with at least one like are eligible, a pinned comment is never repeated in the same page's newest-first body, and the pinned block is additional to the requested page size. Page two onward is unchanged.
-- Notifications are now delivered in real time over a WebSocket connection, in addition to the existing REST endpoints; a client may subscribe only to its own notification stream, and a missed push is always recoverable by re-fetching the notification list.
-- A WebSocket connection is now terminated automatically if the underlying account is banned, suspended, or logged out, rather than remaining open until the access token naturally expires.
-- A WebSocket handshake is now rate limited, and every rejected handshake is logged.
-- User search by username is available to authenticated callers, matching case-insensitively on any part of the username and ordering results by follower count.
-- The users a caller has blocked can now be listed as a paginated page, newest block first.
-- A user's public profile can now be fetched by username as well as by id; the username match is case-insensitive.
-
-### Changed
-- Local development containers now persist PostgreSQL and RabbitMQ data across container recreation, declare healthchecks and restart policies, and the RabbitMQ image now ships the management UI bound to loopback.
-- Usernames now identify an account case-insensitively while preserving the casing they were registered with. `Alice` and `alice` are the same person, so only one of them can exist, and logging in or looking up a profile works with any casing. The profile continues to display the casing the account was created with rather than a lowercased form.
-- Registering or renaming to a username that differs from an existing one only by case is now rejected with the same generic conflict returned for any other duplicate. Previously it slipped past the availability check and surfaced as a different, more specific error, which allowed a caller to distinguish a taken username from a taken email.
-- Notification push delivery latency is significantly reduced by polling for new events roughly five times more often.
-- A comment or story WebSocket session established before an account is banned, suspended, or logged out is no longer left open until its access token naturally expires; the session is now terminated shortly after the account status changes.
-- The user object returned by login, register, and refresh is renamed in the API schema from `UserSummaryResponse` to `AuthenticatedUserResponse` to distinguish the authenticated-self object (which carries email and role) from the shared public author summary; the emitted JSON fields are unchanged.
-
-### Fixed
 - A recommendation feedback message that can never be processed no longer redelivers onto the same queue indefinitely; it is dead-lettered directly instead.
 - The personalized feed's per-post visibility check no longer issues additional database queries per post as the page size grows.
 - A clean checkout can now start the full local Docker stack; the PostgreSQL container no longer fails to start on the currently resolved image version.
-
-### Removed
-- The development-only feed seed data script is no longer part of the application; local development databases no longer receive this seed data automatically.
-
-### Documentation
-- A module guide for the recommendation feature covering its architecture, endpoint contract, configuration, operational runbook, degradation behavior, and known limitations.
-
-### Tests
-- Regression coverage for the recommendation feedback consumer, covering successful processing of each supported engagement type, unknown event types, missing required fields, transient-versus-permanent recommender failures, and duplicate-delivery handling.
-- Regression coverage for the personalized feed pipeline, covering pagination, visibility and ownership filtering across multiple candidate rounds, ranking-score attachment, and fallback to the popularity ranking and then the chronological feed.
-- Regression coverage for the recommender REST client, covering request shape, authentication headers, and response parsing for every supported operation.
-- Regression coverage asserting that liking or saving a post enqueues the corresponding recommendation event with the correct payload, and that no event is enqueued on a conflicting or duplicate action.
-- Regression coverage for the batched post-visibility check used by the personalized feed, and for the recommendation feedback consumer's broker-dead-letter behavior on a permanent failure.
-- Regression coverage for post view recording, including self-view suppression, and for the resulting read-class recommendation feedback.
-- The follower, following, and pending follow-request lists now use the shared user summary object; the emitted JSON is unchanged, only the shared shape is reused.
-- Post responses (single post, feed, saved posts, and a user's posts) now embed the author as a nested user summary object (id, username, display name, avatar URL, verified flag) instead of separate top-level author id, username, display-name, and avatar fields; the post likers endpoint now returns that same user summary shape, and a post caption edit history entry embeds the editor the same way instead of a bare editor id. A post by a deleted author is hidden as before; a deleted liker now appears as a placeholder rather than silently vanishing from the likers list.
-- Comment responses now embed the author as a nested user summary object (id, username, display name, avatar URL, verified flag) instead of a bare author id; the previous top-level `userId` field is removed, and a comment by a deleted author returns a placeholder author rather than a dangling id. The same author object arrives over the live comment WebSocket feed, so a live-rendered comment shows the same author as one fetched over REST.
-- Pagination cursors are now opaque and share a single format across every list endpoint; cursors issued by a previous version are no longer accepted.
-- The report and admin listing endpoints now name their page-size parameter `limit`, matching every other paginated endpoint.
-- The notifications endpoint maximum page size is raised from 50 to 100.
-- A malformed pagination cursor now returns a 400 error with a typed code instead of silently returning the first page.
-- Post search now rejects a cursor addressing a result offset beyond 10,000 with a 400 error, matching the bound hashtag search already applied; previously only a negative offset was rejected.
-- A comment WebSocket handshake rejected because of a blacklisted (logged-out) token now returns the same response as every other rejection reason, with no distinguishing status code.
-- The social module's internal route constants now match the endpoints they describe; no endpoint path changed.
-- Removed unused internal path constants that described endpoints the application never served; no served endpoint changed.
-
-### Added
-- A shared public user summary object - user id, username, display name, avatar URL, and verified flag - is now available for embedding an author or actor inline in API responses; a soft-deleted or unknown user resolves to a placeholder rather than a missing value.
-- Foundation for the direct messaging module: 1-1 and group conversations, group participant management (add, remove, leave with automatic admin handoff), group renaming, and cursor-paginated conversation listing with per-conversation unread counts.
-- A message request from a user who is blocked, or from a non-follower when the recipient has disabled message requests, is now rejected.
-- Users can now log in with either their email address or their username, supplied through a single login identifier field.
-
-### Changed
-- The login endpoint now accepts a single identifier field containing an email address or a username in place of the previous email-only field; this is a breaking change to the login request contract.
-
-### Fixed
 - A comment delivered over the live WebSocket feed, or served from the recent-comments cache, no longer includes a "liked by viewer" flag; that flag is meaningful only per-viewer and could previously show one viewer's own like state to every other subscriber of the same post. It remains present and correct on every REST response.
 - Post list endpoints (feed and a user's posts) no longer issue one extra media query per post; the media for a whole page is now loaded in a single batch.
 - Cursor-paginated lists no longer drop items that share an exact creation timestamp when paging across the boundary; feeds, profile posts, likes, saves, comments, replies, followers, and following now return every item exactly once.
 - An exactly-full final page of any cursor-paginated list now correctly reports that no further page exists rather than advertising a next page that is empty.
 - A banned or suspended account can no longer complete the comment WebSocket handshake; a still-valid token now authenticates only when the account's status is active, matching the guarantee already enforced on REST requests. An already-open connection from before the status change is now also terminated shortly after, rather than remaining open until its token naturally expires (see Changed).
-
-### Tests
-- Unit coverage for the comment notification consumer's dead-letter routing on a permanent or retry-exhausted failure, previously exercised only indirectly through integration tests.
-- Regression coverage proving a user cannot subscribe to another user's notification WebSocket topic, including from a session established on the comment WebSocket endpoint.
-- End-to-end coverage proving a notification is delivered to the correct recipient's WebSocket session only, is suppressed correctly (self-action, disabled preference, blocked actor), and is not delivered to an unrelated connected user.
-- Regression coverage proving a WebSocket session is terminated shortly after the underlying account is banned, suspended, or its token is logged out, and that a still-valid session survives the same check.
-- Regression coverage proving repeated WebSocket handshake attempts beyond the configured limit are rejected.
-- Regression coverage reproducing keyset row loss on a group of rows sharing one creation timestamp and proving the tuple-cursor fix returns every row exactly once.
-- Regression coverage asserting a banned or suspended account's otherwise-valid token no longer establishes a comment WebSocket session.
-- Regression coverage proving the comment WebSocket handshake rejects a missing, malformed, wrong-secret, expired, or blacklisted token, and rejects an unauthenticated caller on the SockJS HTTP fallback transport as well as the native transport.
-- Integration tests that start a Redis container now pin an explicit blank password so a developer's local `REDIS_PASSWORD` environment variable can no longer leak into the test context and cause unrelated authentication failures.
-- End-to-end coverage connecting a real STOMP client through the full security filter chain and asserting a live comment event is received.
-- Regression coverage asserting the trending hashtags endpoint rejects an oversized page size and a negative page number.
-- Regression coverage asserting the social module's route constants resolve to the paths it actually serves.
-- Regression coverage asserting the removed unused path constants no longer exist.
-- Regression coverage for concurrent attempts to start a 1-1 conversation with the same user, asserting exactly one conversation results.
-- Regression coverage for conversation-list pagination across conversations with no messages yet.
-- Regression coverage for group-admin handoff when the last admin is forcibly removed from a group.
-- Unit coverage for conversation creation and deduplication, participant and group-admin gating, group admin handoff on leave, and conversation-list cursor pagination.
-- End-to-end integration coverage for the new conversation endpoints, covering creation, deduplication, listing, group management, and membership changes.
-- Coverage for login by username and by email through the identifier field, including uppercase-username resolution and identical failure responses for an unknown identifier and a wrong password.
-
-### Fixed
 - A message-notification event that permanently fails or exhausts its retries is now routed to the dead-letter queue by the broker instead of being acknowledged as successfully processed.
 - Sending a message no longer leaves the response's created-at timestamp null.
 - Sharing an expired or deleted story into a message is now rejected instead of creating a reference the recipient can no longer view.
@@ -610,108 +618,15 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Paginating the conversation list past a conversation with no messages yet no longer returns a 500 error.
 - Out-of-range request parameters (such as an oversized page size or limit) on the notification, moderation-action, and report listing endpoints now return 400 Bad Request instead of 500 Internal Server Error.
 - A reply can no longer be attached to a parent comment that belongs to a different post; such requests are now rejected as not found and no longer corrupt reply or comment counters.
-
-### Security
-- A banned, suspended, deactivated, or deleted account can no longer open a message WebSocket connection or subscribe to a conversation's live feed using a still-valid token issued before the account's state changed.
-- A WebSocket subscription to a conversation's live message feed is rejected unless the subscriber is an active participant of that conversation.
-- A deleted account no longer receives a message notification.
-- Referencing another user's media asset in an image or video message is now rejected instead of accepting any existing asset ID.
-- The live comment WebSocket connection can now actually be established; it previously rejected every real client because the browser-only query-parameter authentication path was never permitted through the access control rules.
-- The trending hashtags endpoint now rejects a page size above 100 or a negative page number with 400 Bad Request instead of accepting an unbounded page size, and no longer accepts a client-supplied sort field.
-- Two concurrent requests to start a 1-1 conversation with the same user can no longer create duplicate conversations; the request is now serialized and backed by a database uniqueness constraint.
-- The follower and following list endpoints now reject an out-of-range limit or an oversized cursor with 400 instead of silently clamping the value.
-- The resend email verification endpoint now normalizes its response time to a floor, so a registered address can no longer be distinguished from an unregistered one by response latency.
-- Duplicate reports for the same reporter, target, and type are now prevented by a database uniqueness constraint, closing a race in which two concurrent submissions could both be recorded.
-- Username availability on profile update is now checked across all accounts including soft-deleted ones, so a collision with a soft-deleted account returns the same conflict response as an active one and no longer reveals account state.
-- Post search now bounds its page size, so an oversized request can no longer force a mass result hydration or exceed the search engine's result-window limit.
-- Post creation now bounds the number of media identifiers accepted, rejecting an oversized list at request validation.
-- Moderation action metadata is now bounded to a maximum number of entries, preventing unbounded growth of the moderation audit table.
-- Usernames are now stored and matched case-insensitively, and the login rate limit now keys on the submitted identifier so username-based attempts are throttled per account rather than falling back to an address-only bucket.
-
-### Removed
-- Unused internal mail request type.
-
-### Fixed
 - The local PostgreSQL container now accepts the legacy IANA timezone name `Asia/Saigon`, which some database clients (for example DBeaver) send by default, resolving a connection failure for users in that timezone.
-
-### Added
-- Deduplicated story view recording, with the trigger-maintained view count returned on every call and owner views exempted from counting.
-- Owner-only cursor-paginated list of a story's viewers, newest view first.
-- A `story_view` notification is created for the story owner on a viewer's first view of a story.
-- Scheduled hourly cleanup that hard-deletes stories once they are both soft-deleted and past expiry.
-
-### Tests
-- Story view recording and viewer-list unit coverage, notification-consumer unit and integration coverage, and integration coverage for view deduplication, the outbox event, the viewer list, and the cleanup job's selectivity.
-
-### Added
-- Story creation backed by an owned media asset, with story type and 24-hour expiry derived automatically.
-- Story reads: a single story, a user's active stories, and a feed tray grouped by author with unseen-first ordering.
-- Owner-only soft delete of a story.
-- Story visibility enforcement: private accounts require an accepted follow, and blocks hide stories in both directions.
-
-### Tests
-- Story lifecycle and visibility service unit coverage, and an end-to-end integration test covering creation, feed, per-user listing, deletion, media-ownership rejection, expiry, private-account gating, and blocking.
-
-### Changed
-- STRUCT.md updated to reflect `comment` module as fully implemented, adding sub-package list, module responsibility, test coverage rows, `comment.live.events` fanout exchange, `comment.notification.queue` with its DLQ, and three binding rows.
-- STRUCT.md updated to reflect `report` and `admin` modules as fully implemented, including accurate sub-package lists, module responsibility descriptions, test coverage rows, and Flyway migration count corrected to 29 (V28 add_user_events_upcoming_partitions and V29 preserve_admin_action_audit_history added).
-- `docs/modules/report/DATA_RULES.md` implementation status updated from scaffolding-only to fully implemented; all business rule entries annotated with the service methods that now enforce them.
-
-### Fixed
 - Concurrent duplicate follow requests now resolve atomically: the losing request receives a clean already-following/already-requested error instead of a generic conflict, and duplicate follow notifications are no longer emitted.
 - Hashtag names longer than 100 characters are now dropped during normalization instead of failing the whole post publish or caption update with a misleading conflict error.
 - Malformed path or query parameter values (for example a non-UUID user ID) now return 400 Bad Request instead of 500, and no longer write attacker-controllable stack traces to the error log.
-
-### Security
-- Media upload URLs now bind the client-declared content length into the presigned signature, so an oversized body can no longer be uploaded past the maximum media size limit; clients must send a matching `Content-Length` header on upload.
-- Unlike and unsave now mask hidden (draft or archived) posts as not-found for non-owners, closing an existence oracle that revealed the lifecycle state of other users' unpublished posts, and reject unlike/unsave on a published post that is blocked, private without an accepted follow, or owned by a deactivated account.
-- Visibility-gate rejections on like, unlike, save, and unsave now return `POST_NOT_FOUND` uniformly instead of `POST_FORBIDDEN`, preventing callers from distinguishing a hidden post from a nonexistent one by error code.
-- Notification list cursor lookups are now scoped to the authenticated recipient, removing a cross-user oracle that disclosed whether an arbitrary notification ID exists and when it was created.
-- Comment like and unlike now enforce the parent post's visibility rules, closing a gap that let blocked or non-follower users like comments on posts they cannot view.
-- OAuth2 sign-in now requires the identity provider to assert the email as verified before creating a new local account, preventing account squatting on an unverified email address.
-- Removed the email address from JWT access-token claims so account email is no longer readable from the unencrypted token payload.
-- Public user-profile lookups now enforce block and private-account visibility: a block in either direction returns 404, and follower/following/post counts are hidden from non-followers of a private account.
-- Post captions and user bio are now length-bounded at the request layer (2200 and 500 characters respectively).
-
-### Fixed
 - Preserved moderation audit history when an acting administrator is permanently deleted by changing the actor foreign key to `ON DELETE SET NULL`.
 - Synchronized `database/schema.sql` with Flyway V29 so new environments preserve audit rows after an acting administrator is deleted.
 - Concurrent duplicate like or save on a post, and duplicate like on a comment, now return a clean 409 conflict instead of a 500.
-### Added
-- Admin moderation workflows for user status, post and comment removal/restoration, report closure, and cursor-paginated immutable audit history.
-- Split admin moderation into 13 explicit API operations and added user-specific audit history, summary DTO mapping, append-only repository verification, and transactional rollback coverage.
-- OpenAPI-documented admin endpoints with moderator/administrator role enforcement and structured audit metadata.
-- Admin unit and full-stack integration coverage for authorization, target mutations, audit queries, and actor-deletion retention.
-- Automated `user_events` monthly partition management: a migration backfills the current and next two months' partitions, and a scheduled job pre-creates the partition two months ahead each month so new events no longer accumulate in the default catch-all partition.
-
-### Security
-- Development seed data is no longer applied in production: Flyway now scans `classpath:db/migration` only by default, the dev seed moved to a dev-profile-only `classpath:db/dev-seed` location.
-
-### Fixed
 - Resolved Flyway duplicate-version conflict on V25: renamed `V25__add_comment_moderation_status.sql` to V26 and `V26__create_comment_write_idempotency.sql` to V27, restoring application startup and unblocking all 144 integration-test errors.
 - Per-instance live-comment RabbitMQ queue now declares durable instead of non-durable, resolving a broker-rejected `queue.declare` (`transient_nonexcl_queues` deprecation on RabbitMQ 4.x) that crash-looped the live-comment consumer connection on startup.
-
-### Added
-- Report submission and moderation workflow with polymorphic target validation, duplicate and self-report prevention, role-restricted retrieval, and controlled status transitions.
-- Report pending moderation endpoint returning FIFO cursor-paginated queue summaries.
-- Unit and Testcontainers integration coverage for report submission, validation, authorization, retrieval, and status transitions.
-- Comment module: create, edit, soft-delete (subtree), likes, and nested replies up to depth 10, with cursor-paginated listing of top-level comments and replies.
-- Synchronous comment moderation (content normalization plus rule-based rejection for empty, over-length, blocked-word, and spam content).
-- HTTP write idempotency for comment creation via an `Idempotency-Key` header, replaying the original response on a matching retry and rejecting key reuse with a different payload.
-- Optional per-post comment slow-mode rate limiting backed by Redis.
-- Event-driven comment, reply, mention, and like notifications via a dedicated RabbitMQ consumer.
-- Redis recent-comments cache with cache-aside writes, rebuild-on-miss, and fail-open degradation.
-- Real-time comment delivery over WebSocket (STOMP/SockJS) with JWT-authenticated handshake, per-subscription post-visibility authorization, and per-instance RabbitMQ fanout queues.
-- Comment subsystem metrics and a Redis/RabbitMQ health indicator.
-
-### Changed
-- Report cursor pagination now uses explicit query limits without Spring Data offset pagination abstractions.
-- Report moderation list endpoints now return cursor-paginated `ReportSummaryResponse` pages instead of offset-paginated full report details.
-- `ApiErrorCode` gains comment-scoped error codes.
-- RabbitMQ topology gains the `comment.live.events` fanout exchange (bound to the event bus for `comment.#`) and a dedicated `comment.notification.queue` with its dead-letter queue.
-- Comment write and live-delivery paths emit MDC correlation fields (commentId, postId, userId, eventId, serverId).
-
-### Fixed
 - Report response OpenAPI schemas now include examples and required-field metadata.
 - Comment list endpoints now enforce post visibility; private posts return 403 to non-followers, consistent with the create and WebSocket paths.
 - Idempotency key races are resolved with an `INSERT ... ON CONFLICT DO NOTHING` reservation in the request transaction, so a concurrent duplicate cannot poison the transaction and a rolled-back create frees the key.
@@ -721,12 +636,6 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Structured logging for outbox publish failures, pre-signed media upload URL failures, user registration and login outcomes, and post creation/status-transition events.
 - Chronological following feed endpoint (`GET /api/v1/posts/feed`): cursor-paginated published posts from accepted-follow accounts, newest first, with bidirectional block exclusion and empty-following short circuit.
 - `V99__seed_feed_test_data.sql` Flyway migration seeding 7 users, 5 follows, 2 blocks, and 12 posts covering all feed business rules for manual endpoint testing.
-
-### Changed
-- Disabled raw per-statement SQL logging (`show-sql`, `format_sql`, `use_sql_comments`) in the dev profile in favor of the new structured application logs; the prod profile already had these disabled and needed no change.
-- Synced `database/schema.sql` with all 24 Flyway migrations (V01–V24): added missing V18 metadata config tables (`system_settings`, `notification_type_configs`, `moderation_action_configs`, `feature_flags`, `report_reason_configs`) with seed data and triggers; V23/V24 were already reflected. Updated struct.md migration count from 22 to 24.
-
-### Fixed
 - Prevented an unexpected login-request body read failure from escaping the security filter chain uncaught, which previously bypassed the standard API response envelope entirely.
 - Corrected `PostMapper.toResponse` and `PostMapper.toFeedResponse` to map the pre-assembled `media` parameter instead of `post.media`; the wrong source caused MapStruct to generate code that discarded the CDN URL, media type, dimensions, and blurhash from all post API responses.
 - Prevented a broken message-broker channel from letting an acknowledgment failure escape the auth mail, post index, hashtag index, and social notification event consumers uncaught.
@@ -735,38 +644,6 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Added author `username`, `displayName`, and `avatarUrl` to post and feed API responses, batched via a single author lookup alongside the existing media batching, fixing a frontend crash on the main feed caused by missing author display fields.
 - Replaced `ResultSetExtractor` lambda with `queryForObject` in `HashtagTrendingServiceImpl` to resolve always-false null check on latest trending period (SonarQube `java:S2583`).
 - Added emptiness guards before `doesNotContainAnyElementsOf` assertion in `HashtagControllerIT` to prevent trivially passing pagination test (SonarQube `java:S5841`).
-
-### Security
-- Removed the recipient email address from transactional email send success/failure log lines to eliminate a PII exposure.
-- Logged every JWT authentication rejection reason so failed-auth attempts are no longer indistinguishable from one another in application logs.
-- Logged refresh-token replay/theft-detection events before revoking all active sessions for the affected user, so a real token-theft incident is no longer silent.
-- Logged OAuth2 state-cookie signature and deserialization failures instead of silently treating a tampered or corrupted cookie as an absent authorization request.
-
-### Tests
-- Added authorization coverage for regular users accessing the pending report queue and report status updates.
-- Added WebSocket JWT handshake interceptor unit tests covering valid non-blacklisted token, revoked (blacklisted) token, missing token parameter, and invalid token paths.
-- Added pagination boundary unit tests verifying `hasNextPage=false` on an exactly-full final page and `hasNextPage=true` with one probe row beyond the limit.
-- Added comment-module coverage for the idempotency replay and conflict paths (unit + controller IT), admin-delete authorization, read-side visibility on private posts, and the reply/like/mention notification consumer branches.
-- Added `SocialControllerIT` covering all 7 REST endpoints of the social module (follow, unfollow, block, unblock, get followers, get following, follow-request list, approve, reject) against real PostgreSQL and Redis containers.
-- Extended `AuthMailEventHandlerTest` with 11 new methods covering null eventId, unsupported event type, wrong aggregate type, missing/null/non-String/non-UUID data.userId, inactive user, displayName fallback, and all remaining dispatch branches.
-- Extended `AuthMailEventConsumerTest` with 4 new `isTransient` methods covering `DataAccessException`, `RedisSystemException`, `AmqpException`, and non-SERVICE_UNAVAILABLE `AppException` inputs.
-- Extended `MediaMetadataValidatorTest` with 8 new methods covering blank storage key, leading/trailing slashes, zero max-size system setting, zero width/height, negative video duration, blank blurhash, and zero file size.
-- Extended `OutboxPublisherServiceImplTest` with 5 new methods covering `ExecutionException` on confirm, interrupt on confirm, returned message marking event failed, null exception message default text, and `markPublished` returning false without throwing.
-- Extended `DeadLetterPublisherTest` with 3 new methods covering `ExecutionException`, message returned from broker, and nack from broker.
-- Extended `HashtagTrendingServiceImplTest` with 3 new methods covering no-period sentinel (empty result), single hashtag, and multi-hashtag result set.
-- Added `CustomOidcUserTest` with 5 methods covering all delegated methods of `CustomOidcUser`.
-- Added unit test coverage for previously untested service classes, targeting failure and exception branches: the social service (self-follow, not-found, block, already-following/requested, follow-request approve/reject, block cascade purge, private-account visibility, cursor decoding), the OAuth2 exchange-code service (absent-code rejection), the system-setting accessor (missing and non-numeric values), the post search fallback (availability degradation vs. programming-error rethrow), the post response assembler (batched media hydration), and the hashtag trending empty-snapshot guard.
-- Integration tests for the hashtag and post index-sync consumers covering at-least-once delivery, idempotent reprocessing, dead-letter routing of malformed messages, and the post out-of-order delete-before-upsert gate, against real PostgreSQL, Redis, RabbitMQ, and Elasticsearch containers.
-- `PostControllerIT` search scenario now drives the real outbox to RabbitMQ to consumer to Elasticsearch path instead of seeding the index directly.
-- Unit tests for the post service (creation media validation, carousel cardinality, owner-only authorization, lifecycle transitions, soft-delete invariants, hashtag extraction), post visibility service, and the like and save services (idempotency and visibility enforcement).
-- Integration test covering post CRUD, lifecycle, visibility gating across public, private, and blocked combinations, like and save idempotency, and search behaviour with Elasticsearch available and stopped.
-
-### Changed
-- Hashtag Elasticsearch propagation moved from a synchronous post-commit dual-write to outbox-based asynchronous publishing, emitting an index upsert or delete event per affected hashtag after the post-association change is flushed.
-- Post Elasticsearch index is now maintained through the outbox on publish, caption update, archive, and soft-delete; publish and unarchive upsert the document while archive and soft-delete remove it.
-- `STRUCT.md` (`.claude/rules/` and `.agents/rules/`) updated to reflect current codebase state: 21 Flyway migrations (V01–V21), 7 implemented modules (auth, mail, users, social, media, hashtag, notification), new `common/` packages (inbox, outbox, messaging, settings, config/elasticsearch, config/rabbit, config/security), restructured `security/` sub-packages, Elasticsearch service and config, full RabbitMQ topology, updated Technology Stack versions, and accurate Redis key patterns.
-
-### Fixed
 - `SocialServiceImpl.decodeCursor` returned `null` for the first-page request, which was passed as an untyped JDBC parameter to JPQL causing `PSQLException: could not determine data type of parameter` under `stringtype=unspecified`; `decodeCursor` now returns a far-future sentinel (`now + 100 years`) and the JPQL `IS NULL OR` guard is removed since the sentinel makes it redundant.
 - Logout now propagates token-blacklist failures instead of swallowing them, and revokes the refresh token before blacklisting so a blacklist failure cannot leave both invalidations un-applied.
 - Added forward migration V23 to drop the legacy plaintext `access_token`, `refresh_token`, and `token_expires_at` columns from `oauth_accounts` (idempotent `DROP COLUMN IF EXISTS`), reconciling databases that ran the original migration with the rewritten one; the prior changelog and schema attribution of this drop to V19 was incorrect.
@@ -784,115 +661,13 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Hashtag id is now generated by the PostgreSQL `gen_random_uuid()` column default instead of the JPA `AUTO` strategy, aligning with the documented ID policy.
 - Hashtag Elasticsearch repository no longer connects to Elasticsearch during application-context startup (`@Document(createIndex = false)`); the index and its ngram mapping are created by the seed runner when Elasticsearch is reachable. This prevents every Spring context without an Elasticsearch instance from failing to start.
 - Redis connection now authenticates correctly when `REDIS_PASSWORD` is set, resolving NOAUTH errors on startup.
-
-### Added
-- RabbitMQ topology for Elasticsearch index synchronization: durable `hashtag.index.sync` and `post.index.sync` work queues with dead-letter queues, bound to the shared `social.events` topic exchange with dead-lettering to `social.events.dlx`.
-- Idempotent `hashtag` and `post` index-sync consumers that apply Elasticsearch upsert and delete events with bounded in-process retry and dead-letter routing on permanent or exhausted failures; the post consumer re-checks PostgreSQL and indexes only existing published posts, dropping stale out-of-order events.
-- Post creation, retrieval, caption update, lifecycle transition, and soft-delete endpoints, with per-post append-only caption edit history readable by the owner.
-- Post like and save endpoints with idempotent semantics and cursor-paginated liker and saved-post listings.
-- Post visibility enforcement gating retrieval, listing, liking, and saving by block relationships and private-account follow state.
-- Elasticsearch full-text post search guarded by the `elasticsearchSearch` circuit breaker, degrading to an empty result page when the search tier is unavailable.
-- Posts Elasticsearch index seed runner that batch-loads published posts from PostgreSQL on startup only when the index is empty and `app.post.seed.enabled` is true.
-- `post_edit_history` table (Flyway V22) recording the pre-edit caption and editor for every caption change, append-only and never soft-deleted.
-- Follow and block state read methods on the social service exposing accepted-follow and bidirectional-block checks to other modules.
-- Hashtag-id lookup on the hashtag service returning hashtag associations grouped by post for index seeding.
-- Post API error codes `POST_NOT_FOUND`, `POST_FORBIDDEN`, `POST_ALREADY_LIKED`, and `POST_ALREADY_SAVED`, and post API path constants for status, history, likes, saved, and search.
-- Public hashtag HTTP endpoints `GET /api/v1/hashtags/search` and `GET /api/v1/hashtags/trending`, documented via the `HashtagApi` OpenAPI interface and rate-limited per endpoint.
-- `HashtagIndexSeedRunner` seeding the Elasticsearch `hashtags` index from PostgreSQL on startup only when the index is empty and `app.hashtag.seed.enabled` is true, treating seeding failures as non-fatal so startup never blocks on the rebuildable search tier.
-- `HashtagTrendingService` computing ranked hashtag trending snapshots from a windowed `post_hashtags` aggregation and serving the latest snapshot as an offset-paginated response, driven by a scheduled, transactional snapshot job.
-- `HashtagSearchService` providing fuzzy hashtag name search backed by an Elasticsearch ngram match with automatic degradation to a PostgreSQL `pg_trgm` query, guarded by the `elasticsearchSearch` circuit breaker and returning cursor-paginated results.
-- `HashtagService` with normalization, idempotent post-hashtag association upsert, and a synchronous post-commit Elasticsearch dual-write that never rolls back the source-of-truth write on indexing failure; `hashtags.post_count` remains trigger-owned.
-- Hashtag module scaffolding: `/search` API path constant, `HASHTAG_NOT_FOUND` error code, `app.hashtag` configuration namespace, and a `HashtagProperties` bean binding the trending-job and seed settings.
-- Hashtag module API DTOs (`HashtagResponse`, `HashtagTrendingResponse`, `HashtagSearchRequest`) and a MapStruct `HashtagMapper` converting between entities, the Elasticsearch document, and response DTOs.
-- Hashtag Elasticsearch projection: `HashtagDocument` (`hashtags` index) with an ngram-analyzed `name` sub-field for prefix/fuzzy search alongside a keyword main field, its `hashtags.json` index settings, and a `HashtagSearchRepository`.
-- Hashtag module persistence layer: `Hashtag`, `PostHashtag`, and `HashtagTrending` JPA entities (with composite-key embeddables for the junction and trending tables) plus their Spring Data repositories, including a pg_trgm fuzzy hashtag search query and a bulk post-association deletion query.
-- Elasticsearch service added to `docker-compose.yaml` using image `9.0.3` (upgraded from initial 8.17.3 to align with `elasticsearch-java:9.2.8` used by Spring Data Elasticsearch 6.x; single-node, security disabled, 512 MB JVM heap, named volume for index persistence).
-- `spring-boot-starter-data-elasticsearch` dependency added to `pom.xml`; version resolved by Spring Boot BOM.
-- `ElasticsearchProperties` configuration-properties bean binding `app.elasticsearch.*` (URIs, optional credentials, connect/socket timeouts).
-- `ElasticsearchConfig` wires the Spring Data Elasticsearch client from `ElasticsearchProperties`; basic auth applied only when both username and password are non-blank.
-- `app.elasticsearch` namespace added to `application.yaml` with environment-variable placeholders.
-- `management.health.elasticsearch.enabled` and `management.endpoint.health.show-details` added to `application.yaml`; Spring Boot's auto-configured `elasticsearchHealthIndicator` handles cluster health reporting.
-- `elasticsearchSearch` Resilience4j circuit breaker instance defined in both dev and prod profiles for use by future hashtag and post search services.
-- Elasticsearch environment variable placeholders added to `.env.example`.
-
-### Tests
-- Added `HashtagControllerIT` integration test covering search validation, empty trending snapshots, Elasticsearch ngram search, cursor pagination, and the Elasticsearch-down pg_trgm fallback against real Postgres, Redis, and Elasticsearch containers.
-- Added unit tests for `HashtagSearchService` covering the Elasticsearch ngram primary path, the PostgreSQL `pg_trgm` fallback, and empty-result pagination.
-- Added unit tests for `HashtagService` covering name normalization, case-insensitive deduplication, post-commit Elasticsearch dual-write failure isolation, and post-association removal.
-- Notification module: `Notification` entity, `NotificationRepository`, `NotificationService` interface and implementation, `NotificationController`, and `NotificationApi` OpenAPI interface.
-- Cursor-paginated notification listing endpoint (`GET /api/v1/notifications`) returning the authenticated user's notifications in reverse-chronological order.
-- Mark-as-read endpoint (`PATCH /api/v1/notifications/{notificationId}/read`) with recipient-ownership enforcement, and mark-all-as-read endpoint (`PATCH /api/v1/notifications/read-all`).
-- Unread notification count endpoint (`GET /api/v1/notifications/unread-count`).
-- `SocialNotificationConsumer` consuming `user.followed.v1` and `user.follow-requested.v1` events from the notification queue (gated by `app.notification.consumer.enabled`) and creating follow and follow-request notifications idempotently with bounded transient retry and dead-letter routing.
-- RabbitMQ topology: `notification.queue` and `notification.dlq` declared in `RabbitMqTopologyConfig`; `NotificationRabbitBindingConfig` binds `user.followed.v1` and `user.follow-requested.v1` social events to the notification queue.
-- Notification creation guards: self-notification suppression, per-type user notification-preference check (`notifyLikes`, `notifyComments`, `notifyFollows`, `notifyMentions`, `notifyMessages`), and blocked-actor check to prevent unwanted notifications.
-- Elasticsearch service added to `docker-compose.yaml` using image `9.0.3`; single-node, security disabled, 512 MB JVM heap, named volume for index persistence.
-- `spring-boot-starter-data-elasticsearch` dependency added; `ElasticsearchProperties` configuration bean and `ElasticsearchConfig` wiring the Spring Data Elasticsearch client from those properties.
-- `elasticsearchSearch` Resilience4j circuit breaker instance defined in both dev and prod profiles for use by future search services.
-
-### Fixed
 - Notification creation now checks the governing user-settings toggle for every notification type (likes, comments, mentions, and messages in addition to follows); story views have no toggle and are never preference-suppressed.
 - Fixed `SocialNotificationConsumer` failing to start when `app.notification.consumer.enabled=true` due to missing `@Autowired` on the primary constructor.
 - Disabled Apache HC5 automatic-retry behavior on the `TestRestTemplate` used by `AuthControllerIT`; `httpclient5` (added transitively by `spring-boot-starter-data-elasticsearch`) was causing `Retry-After`-honoring retries on rate-limit 429 responses, making the integration test suite hang indefinitely.
 - Corrected the RabbitMQ auto-configuration exclusion class name in two integration test contexts from the stale Spring Boot 3.x path to the Spring Boot 4.x path, preventing infinite RabbitMQ reconnection loops when no broker is available during test runs.
-
-### Changed
-- Authenticated notification OpenAPI operations now inherit the global bearer-auth requirement instead of re-declaring it per operation.
-- Testing rules now exempt integration tests that exercise a real RabbitMQ broker via Testcontainers from the AMQP auto-configuration exclusion requirement.
-
-### Tests
-- Renamed notification and RabbitMQ topology test methods to the `{method}_{condition}_{outcome}` naming convention.
-- `NotificationServiceImplTest`: 15 unit tests covering all creation guards, mark-as-read ownership and idempotency, mark-all-as-read, unread count, and cursor pagination.
-- `NotificationControllerIT`: 8 integration tests covering pagination, ownership enforcement, bulk read, unread count accuracy, and JWT authentication.
-- `SocialNotificationConsumerIT`: 6 integration tests covering happy path follow and follow-request creation, event-id deduplication, malformed-payload dead-lettering, self-follow suppression, and unknown-event-type skipping.
-- Added unit tests for `ElasticsearchConfig` credential and timeout wiring.
-- Added integration test verifying Elasticsearch cluster connectivity and actuator health status via Testcontainers.
-
-### Fixed
 - Registration now rejects an email or username that belongs to a soft-deleted account with a 409 domain error instead of propagating a database unique-constraint violation as a 500.
 - OAuth2 sign-in no longer attempts to create a new account when the provider email matches a soft-deleted user; a 409 domain error is returned instead.
 - Username generation for new OAuth2 users now checks the full `users` table (not just non-deleted rows), consistent with the table-wide `UNIQUE` constraint on `users.username`.
-
-### Added
-- `UserRepository` exposes table-wide `existsByEmail`, `existsByUsername`, and `findByEmail` methods aligned with the database `UNIQUE` constraints that have no soft-delete partial index.
-- `POST /api/v1/auth/oauth2/exchange` back-channel endpoint: redeems a one-time opaque exchange code for a standard access/refresh token pair; rate-limited via `lowTraffic` Resilience4j instance and Redis sliding-window filter.
-- `OAuth2ExchangeCodeService` with a Redis-backed implementation that stores 32-byte hex exchange codes under `auth:oauth2:exchange:{code}` (TTL 120 s) and consumes them atomically via a GET-then-DEL Lua script.
-- `OAuth2ExchangeRequest` DTO with `@Schema` annotations for the new exchange endpoint.
-- `AUTH_OAUTH2_EXCHANGE_CODE_INVALID` error code (HTTP 400) returned when an exchange code is absent or expired.
-
-### Changed
-- `OAuth2AuthenticationSuccessHandler` no longer writes tokens into the callback response body; instead generates an exchange code and redirects the browser to `{frontendBaseUrl}/oauth2/callback?code={code}`, eliminating token exposure in the browser redirect (resolves AUTH-012).
-- `AuthService` extended with `exchangeOAuth2Code` to support the new back-channel exchange flow.
-
-### Security
-- Resolved AUTH-012 (CWE-598, MEDIUM): OAuth2 tokens are no longer delivered through the browser redirect. The success handler now issues a short-lived opaque exchange code and completes the handshake via the authenticated back-channel `POST /api/v1/auth/oauth2/exchange` endpoint.
-
-### Added
-- Users module: `UserService`, `UserController`, and `UserApi` implementing profile view and update, public profile lookup with private-account enforcement, and settings view and update endpoints.
-
-### Documentation
-- `UserProfileResponse` and `PublicUserProfileResponse` Javadoc and `@Schema` descriptions now explicitly distinguish `isVerified` (administrator-granted platform badge, `users.is_verified`, always `false` for regular users) from email confirmation status (`user_credentials.email_verified`, exposed as `emailVerified` in the auth response). Investigation confirmed `isVerified` returning `false` after email verification is correct behavior — the two fields are unrelated.
-- Users module: `User` and `UserSettings` JPA entities, `UserRepository` and `UserSettingsRepository` moved from the auth module to `com.app.modules.users`.
-- Users module: `UserRole`, `UserStatus` enums and their JPA converters moved from the auth module to `com.app.modules.users`.
-- `GET /api/v1/users/me` — returns the authenticated user's full profile.
-- `PATCH /api/v1/users/me` — partial profile update with username uniqueness enforcement.
-- `GET /api/v1/users/{userId}` — public profile lookup; private accounts return 401; counter fields omitted for unauthenticated callers.
-- `GET /api/v1/users/me/settings` — returns the authenticated user's notification and privacy settings.
-- `PATCH /api/v1/users/me/settings` — partial settings update with patch semantics.
-- RabbitMQ topology now declares the `social.events` topic exchange, `social.events.dlx`, `mail.queue`, and `mail.dlq` for mail side-effect events only.
-- RabbitMQ environment variables are documented in the environment template with publisher confirms and returns enabled.
-- Transactional outbox storage now records versioned domain event envelopes in PostgreSQL before RabbitMQ publishing.
-- Scheduled outbox publisher now publishes due events to RabbitMQ with correlated publisher confirms, bounded retry metadata, and dead-letter terminal state.
-- Consumer inbox storage now records processed message IDs for idempotent RabbitMQ consumers.
-- Auth registration, verification resend, password reset, password changed, and OAuth-only reset flows now record mail side-effect events through the transactional outbox instead of sending mail directly.
-- Forgot-password handling now records durable outbox events inside a short transaction and applies a configurable response-time floor after the transaction to reduce account-enumeration timing signals.
-- Auth mail RabbitMQ consumer now processes `mail.queue` events with manual ack, idempotent inbox deduplication, bounded retry, and DLQ routing.
-- Synchronous Resend mail sender added for RabbitMQ consumers while keeping the existing async mail facade for non-consumer callers.
-- Social follow endpoint now creates accepted follows for public accounts, pending follow requests for private accounts, and records follow events through the transactional outbox.
-- Media upload-complete now persists validated media metadata, derives CDN URLs server-side, and records `media.uploaded.v1` outbox events after successful inserts.
-- Media upload URL endpoint now returns short-lived Cloudflare R2 pre-signed PUT URLs with backend-generated storage keys.
-
-### Fixed
 - `UserMapper.toProfileResponse` and `toPublicProfileResponse` now correctly map `isPrivate` and `isVerified` from the `User` entity; previously, MapStruct's JavaBeans convention stripped the `is` prefix from the boolean getter names (`isPrivate()` → property `private`, `isVerified()` → property `verified`), which did not match the record constructor parameter names (`isPrivate`, `isVerified`), causing both fields to silently default to `false` in every response.
 - `UserServiceImpl.getUserProfile` no longer rejects authenticated callers viewing a private account; the visibility guard now reads `if (user.isPrivate() && !isAuthenticated)` so only unauthenticated requests receive HTTP 401 for private profiles.
 - `UserStateValidator.enforceEmailVerified` now throws `AppException(AUTH_EMAIL_NOT_VERIFIED)` instead of `AUTH_ACCOUNT_INACTIVE`, giving callers a dedicated, distinguishable error code for the unverified-email case.
@@ -901,33 +676,100 @@ A conversation that already has messages in it is kept, because unfollowing some
 - RabbitMQ template mandatory publishing is enabled so unroutable outbox messages can be detected by publisher returns.
 - Outbox publisher now uses short transactional claim leases and per-event state commits instead of holding one batch transaction across RabbitMQ publisher confirms.
 - Media upload-complete now only maps PostgreSQL unique violations to duplicate storage-key conflicts instead of masking unrelated database integrity failures.
+- `refresh` flow transaction boundary corrected: `rotate()` and `revoke()` in `RefreshTokenServiceImpl` now use `REQUIRES_NEW` propagation so both the old-token revocation and the new-token revocation commit to the database independently, even when the outer request transaction rolls back after a banned or suspended account check. Previously, the entire transaction rolled back and the original refresh token remained active.
+- Banned, suspended, and deactivated users can no longer receive or redeem a password-reset link; `forgotPassword` returns silently and `resetPassword` throws the appropriate locked/inactive error.
+- Password-reset email link now uses `mail.frontend-base-url` and the configurable `mail.reset-password-path` property (default `/reset-password`) instead of the backend API URL, making the link functional in a browser.
+- `TokenNotFoundException` thrown during password-reset token consumption is now converted to `AppException(AUTH_RESET_TOKEN_INVALID)` at the service layer before reaching `GlobalExceptionHandler`, returning HTTP 400 with the correct error code instead of HTTP 404.
+- `GlobalExceptionHandler.handleInvalidToken` now maps token-not-found and token-expired exceptions to `ApiErrorCode.NOT_FOUND` (HTTP 404).
+- `ApplicationTests.contextLoads` updated to use Testcontainers for PostgreSQL and Redis; Spring Boot 4 autoconfigure exclude paths corrected (`org.springframework.boot.{jdbc,hibernate,data.jpa,flyway,data.redis,amqp}.autoconfigure.*`).
+- `AuthControllerIT` annotated with `@AutoConfigureTestRestTemplate` so the `TestRestTemplate` bean is registered under Spring Boot 4 (which moved this autoconfig out of the default `@SpringBootTest` activation set).
+- Resolved `ObjectMapper` bean injection failure in `SecurityConfig`, `OAuth2AuthenticationSuccessHandler`, and `OAuth2AuthenticationFailureHandler` by migrating imports from `com.fasterxml.jackson.databind.ObjectMapper` (Jackson 2.x) to `tools.jackson.databind.ObjectMapper` (Jackson 3.x, required by Spring Boot 4)
+- Removed `ObjectMapper` from `SecurityConfig` constructor; injected via `@Autowired` field to break the circular dependency that prevented context startup
+- Fixed `ApplicationTests.contextLoads` failure by adding `src/test/resources/application-test.yml` with placeholder env-var values and excluding infrastructure auto-configurations (DataSource, JPA, Flyway, Redis, RabbitMQ) that require live services
+- `CustomOidcUserService.resolveUniqueUsername` random-suffix branch now re-checks uniqueness via `ThreadLocalRandom` and a bounded retry loop, preventing the rare unique-constraint violation that previously surfaced as a 500.
 
-### Changed
-- `User` and `UserSettings` entities, enums, converters, and repositories relocated from `com.app.modules.auth` to `com.app.modules.users`; all auth module import references updated accordingly.
-- Auth mail side-effect documentation now points to outbox events and the mail consumer token-generation flow; raw verification/reset tokens are no longer created in the auth request path.
-- Auth mail events now use `actorId = null` for unauthenticated verification resend and forgot-password requests while keeping `aggregateId` as the target user id.
-- Auth mail RabbitMQ bindings now live with the auth module event contracts instead of the shared RabbitMQ infrastructure config.
-- Media API now exposes OpenAPI documentation for direct-upload URL issuance and upload confirmation.
-
-### Tests
-- Added RabbitMQ topology tests covering active mail queues, mail event bindings, dead-letter binding, and inactive future queues.
-- Added outbox enqueue tests covering event metadata, JSON payload envelope, required field validation, and absence of direct RabbitMQ publishing.
-- Added outbox publisher tests covering confirm success, publish failure retry scheduling, max-attempt dead state, nack handling, timeout handling, and database publisher updates.
-- Added RabbitMQ Testcontainer coverage for outbox publisher delivery and unroutable-message retry behavior.
-- Added outbox claim-lease tests covering expired `PROCESSING` event reclaim and stale-claim result guards.
-- Added processed-message inbox tests covering first processing, duplicate skipping, and rollback on failed processing.
-- Added auth mail-event tests covering minimal outbox payloads and the absence of raw verification/reset token creation in auth mail request paths.
-- Added forgot-password event-routing and timing-equalizer tests, plus controller integration coverage that register writes auth mail outbox events without token-bearing payloads.
-- Added auth mail consumer unit and RabbitMQ Testcontainer coverage for successful delivery, duplicate skipping, transient retry, invalid payload DLQ routing, and DLQ publish failure requeue behavior.
-- Added social follow service, outbox event, repository, and trigger-counter coverage.
-- Added media upload-complete tests covering metadata validation, synchronous media persistence, outbox event payloads, and database-generated media IDs.
-- Added media upload URL validation, storage key generation, and R2 presigner configuration tests.
-- Added media upload-complete tests covering current-user storage-key ownership and non-unique database integrity failures.
-
-### CI
-- Replaced split SonarCloud Maven steps with a single `verify sonar-maven-plugin:sonar` invocation; added SonarCloud package cache and `GITHUB_TOKEN` env declaration.
+### Removed
+- The `ci-test.yml` CI workflow, which had been unintentionally disabled and was reporting a permanent failure on every push and pull request; its coverage was already fully subsumed by `sonarcloud.yml`.
+- The local SMTP mail transport and its Mailpit sink.
+- The original development auto-seeder, which generated a small set of placeholder accounts and posts with placeholder media on startup, has been removed and replaced by the rebuilt seeder described below.
+- The two group-chat environment variables have been removed from the example environment template. Group conversations were removed from the product in an earlier release, and neither variable has controlled any behavior since.
+- The error code for a missing report resolution note, which no path had been able to raise since the requirement moved behind a mandatory field. An error code nothing can produce is a promise the API cannot keep.
+- Group conversations.
+The endpoints, the group fields on conversation responses, and the underlying columns are all gone, and messaging is now one to one.
+Existing group conversations are deleted by the upgrade, after being copied into archive tables so the content is recoverable.
+- The development-only feed seed data script is no longer part of the application; local development databases no longer receive this seed data automatically.
+- Unused internal mail request type.
+- PostgreSQL tables `email_verification_tokens` and `password_reset_tokens` (dropped from `V02__create_users_auth_tables.sql`); their JPA entities and repositories.
+- `TokenAlreadyUsedException` — Redis cannot distinguish "expired" from "already used"; both now surface as `TokenNotFoundException` mapped to `AUTH_RESET_TOKEN_INVALID`.
+- `MailProperties` record from `common/config/` replaced by the standard class at `common/mail/config/`
+- `MailService`, `MailServiceImpl`, and `MailSendException` from `modules/mail/` relocated into `common/mail/`
+- `ErrorResponse` record and the legacy `common/exception/` token and mail exception classes superseded by `ApiException` and the relocated domain exceptions
 
 ### Security
+- The mail transport is now resolved from `APP_MAIL_TRANSPORT` in every profile, so the startup guard that refuses the non-network transport outside development is what actually enforces it. The production profile pinned the transport to a literal, which made the variable inert there and left the guard's published refusal unreachable.
+- The trusted-proxy list can now be set from the environment in every profile. The production profile pinned it to an empty literal that outranked the `.env` file, so `APP_SECURITY_TRUSTED_PROXY_CIDRS` had no effect there and, behind an ingress, every per-IP rate limit collapsed into a single global bucket while `registration_ip` and `last_login_ip` recorded the proxy for every account.
+- Replaying a rotated refresh token now actually terminates every session on the account. The revocation was previously discarded by the same rejection that reported it, so a thief who redeemed the stolen token first kept an indefinitely rotatable session while the logs recorded a remediation that never took effect.
+- A password rejected by validation is no longer written to the application log in cleartext. The framework logged the whole validation result, rejected value included, before the application produced its response, so every failed password attempt accumulated a near-miss of a live credential in a file operators read and log shippers forward; the application now records the field and the constraint it violated and never the value.
+- `/actuator/prometheus` is no longer served to unauthenticated callers by default; it falls through to the ADMIN rule that covers the rest of `/actuator/**`, and `APP_SECURITY_PUBLIC_METRICS_ENDPOINT` reopens it, with a startup warning, only where the port is reachable from the monitoring network alone.
+- A staff member cannot act on a ticket appealing a decision they made themselves.
+- Only an administrator can decide an appeal; a moderator may read and escalate one but cannot record a verdict they have no capability to execute.
+- The eleven administrator-only endpoints now enforce the administrator role in the service layer as well as in their endpoint annotations, so removing an annotation no longer opens an endpoint.
+- The administrative surface now enforces a per-caller request budget. None of its thirty-three operations carried one, so two hundred requests a second from a single token were accepted; the four most expensive reads carry tighter budgets than the rest.
+- Every administrative read now rejects a query parameter it does not understand instead of ignoring it. A misspelled filter previously returned a full unfiltered page, which a client then displayed as though the filter had been applied.
+- A pagination cursor whose identifier has been truncated is now rejected. Removing characters from it previously produced a different, valid position, so the caller silently received the wrong page instead of an error.
+- Ending an account's sessions, whether by forcing a logout or by changing its role, now takes effect on the account's very next request.
+Previously the account kept whatever access it already held until that access expired on its own, which could be a further fifteen minutes.
+Sessions already open when this ships stay valid; an ordinary logout still ends only the session it was sent from.
+- A container image started without an explicit profile now runs the production profile instead of the development one, so a deployment that forgets to set a profile no longer serves API documentation anonymously, marks the refresh cookie non-Secure, or routes outbound mail to localhost.
+- The development profile no longer shadows the configured cookie signing secret with a value published in this repository, so the operator's secret is authoritative in every profile.
+- A direct-message WebSocket session is now closed when the session is revoked by logout, ban, or suspension, instead of surviving until its access token expired on its own.
+- The guard that rejects a forged client message aimed at another user's realtime channel is now active whenever any realtime endpoint is enabled, rather than only when the comment, notification, or post endpoints happen to be on.
+- Accepting `SameSite=None` on the refresh cookie now requires an explicit acknowledgement and otherwise fails at startup, because it removes the only cross-site request protection on the refresh and logout endpoints while leaving every request apparently successful.
+- WebSocket connections now authenticate with a single-use ticket that expires in 30 seconds, so an access token no longer travels in a URL where proxies and content delivery networks record it in their access logs.
+- Changing an account's status is now restricted to administrators and refused when the actor is the target or the target is an administrator: a moderator could previously ban any account including every administrator, and because a banned account cannot sign in to reverse it, a single moderator could lock the entire administrator tier out with no in-application recovery path. The audit-history endpoint for one user moved to `/admin/actions/for-user/{userId}`, which is a breaking change for that endpoint's callers.
+- Confirming a media upload no longer trusts the client's claim that the file reached storage: any authenticated user could previously register unlimited media assets, under any storage key including one the server never issued, and receive a CDN URL for an object that does not exist. Upload confirmation now verifies the object against storage before the asset is recorded.
+- Registration and password reset now enforce a password policy: 8 to 64 characters, at most 72 bytes when encoded as UTF-8, at least one uppercase letter, at least one digit or special character, and no whitespace or invisible characters. Login is deliberately unbounded, so accounts created under the previous rules continue to work and the policy is not disclosed to an attacker probing the login endpoint.
+- A deployment that did not set `APP_COOKIE_SIGNING_SECRET` previously started successfully and signed OAuth2 authorization-state cookies with the unresolved placeholder text as its HMAC key, voiding the tamper-evidence those cookies are meant to provide; declared constraints on security configuration are now enforced at startup, so such a deployment fails to start instead of running with a publicly known key.
+- Closed several remaining ways a blocked party's identity could leak: the live comment feed now filters each subscriber individually instead of broadcasting to everyone watching a post, notification listings and unread counts exclude blocked actors, mentioning a blocked account no longer delivers a notification, and the last few endpoints that confirmed a block's existence now respond identically to a nonexistent account instead.
+- Email uniqueness is now case-insensitive, closing a duplicate-account gap equivalent to the one already closed for usernames.
+- A forged pagination cursor for the conversations list could overflow the underlying timestamp column and return a server error instead of a clean validation failure; it now uses the same bounded cursor format as every other paginated list.
+- A concurrent duplicate unfollow, follow-request rejection, unblock, unlike, or unsave request could return a server error instead of a not-found response; all five now resolve cleanly under concurrent requests.
+- Ten paginated endpoints across posts, comments, conversations, and stories previously accepted an unbounded or zero page size; one of them could be driven to a server error this way. All paginated endpoints now enforce the same 1-100 page size bound.
+- A pagination cursor obtained from one list endpoint (for example, the followers list) can no longer be replayed against a different list endpoint; cursors are now bound to the endpoint that issued them. Any cursor obtained before this change is rejected once; affected clients simply restart pagination from the first page.
+- The comment and notification WebSocket endpoints now deny all cross-origin connections by default when no allowed origins are configured, matching the existing REST behavior. A blank configuration previously admitted any localhost-scoped browser origin on these two endpoints only.
+- A user blocked from viewing a post could still register as a live watcher of that post's comment activity over WebSocket by sending watch or heartbeat frames directly, bypassing the same visibility check already enforced when subscribing; both frame types are now authorized identically, and an unrecognized comment-topic subscription is now rejected by default instead of allowed through.
+- An endpoint reachable by more than one HTTP method (the conversations list and the WebSocket handshake) previously received a separate rate-limit budget per method instead of one shared budget; the two methods now share a single budget, and the production WebSocket handshake limit is raised from 30 to 60 attempts per 60 seconds to preserve the same effective capacity.
+- A request body that is malformed, has an unrecognized field, an invalid enum value, invalid JSON, or is missing now returns 400 Bad Request with a dedicated error code instead of 500 Internal Server Error, and the response no longer echoes the rejected field name or any internal class name.
+- A banned, suspended, deactivated, or deleted account can no longer open a message WebSocket connection or subscribe to a conversation's live feed using a still-valid token issued before the account's state changed.
+- A WebSocket subscription to a conversation's live message feed is rejected unless the subscriber is an active participant of that conversation.
+- A deleted account no longer receives a message notification.
+- Referencing another user's media asset in an image or video message is now rejected instead of accepting any existing asset ID.
+- The live comment WebSocket connection can now actually be established; it previously rejected every real client because the browser-only query-parameter authentication path was never permitted through the access control rules.
+- The trending hashtags endpoint now rejects a page size above 100 or a negative page number with 400 Bad Request instead of accepting an unbounded page size, and no longer accepts a client-supplied sort field.
+- Two concurrent requests to start a 1-1 conversation with the same user can no longer create duplicate conversations; the request is now serialized and backed by a database uniqueness constraint.
+- The follower and following list endpoints now reject an out-of-range limit or an oversized cursor with 400 instead of silently clamping the value.
+- The resend email verification endpoint now normalizes its response time to a floor, so a registered address can no longer be distinguished from an unregistered one by response latency.
+- Duplicate reports for the same reporter, target, and type are now prevented by a database uniqueness constraint, closing a race in which two concurrent submissions could both be recorded.
+- Username availability on profile update is now checked across all accounts including soft-deleted ones, so a collision with a soft-deleted account returns the same conflict response as an active one and no longer reveals account state.
+- Post search now bounds its page size, so an oversized request can no longer force a mass result hydration or exceed the search engine's result-window limit.
+- Post creation now bounds the number of media identifiers accepted, rejecting an oversized list at request validation.
+- Moderation action metadata is now bounded to a maximum number of entries, preventing unbounded growth of the moderation audit table.
+- Usernames are now stored and matched case-insensitively, and the login rate limit now keys on the submitted identifier so username-based attempts are throttled per account rather than falling back to an address-only bucket.
+- Media upload URLs now bind the client-declared content length into the presigned signature, so an oversized body can no longer be uploaded past the maximum media size limit; clients must send a matching `Content-Length` header on upload.
+- Unlike and unsave now mask hidden (draft or archived) posts as not-found for non-owners, closing an existence oracle that revealed the lifecycle state of other users' unpublished posts, and reject unlike/unsave on a published post that is blocked, private without an accepted follow, or owned by a deactivated account.
+- Visibility-gate rejections on like, unlike, save, and unsave now return `POST_NOT_FOUND` uniformly instead of `POST_FORBIDDEN`, preventing callers from distinguishing a hidden post from a nonexistent one by error code.
+- Notification list cursor lookups are now scoped to the authenticated recipient, removing a cross-user oracle that disclosed whether an arbitrary notification ID exists and when it was created.
+- Comment like and unlike now enforce the parent post's visibility rules, closing a gap that let blocked or non-follower users like comments on posts they cannot view.
+- OAuth2 sign-in now requires the identity provider to assert the email as verified before creating a new local account, preventing account squatting on an unverified email address.
+- Removed the email address from JWT access-token claims so account email is no longer readable from the unencrypted token payload.
+- Public user-profile lookups now enforce block and private-account visibility: a block in either direction returns 404, and follower/following/post counts are hidden from non-followers of a private account.
+- Post captions and user bio are now length-bounded at the request layer (2200 and 500 characters respectively).
+- Development seed data is no longer applied in production: Flyway now scans `classpath:db/migration` only by default, the dev seed moved to a dev-profile-only `classpath:db/dev-seed` location.
+- Removed the recipient email address from transactional email send success/failure log lines to eliminate a PII exposure.
+- Logged every JWT authentication rejection reason so failed-auth attempts are no longer indistinguishable from one another in application logs.
+- Logged refresh-token replay/theft-detection events before revoking all active sessions for the affected user, so a real token-theft incident is no longer silent.
+- Logged OAuth2 state-cookie signature and deserialization failures instead of silently treating a tampered or corrupted cookie as an absent authorization request.
+- Resolved AUTH-012 (CWE-598, MEDIUM): OAuth2 tokens are no longer delivered through the browser redirect. The success handler now issues a short-lived opaque exchange code and completes the handshake via the authenticated back-channel `POST /api/v1/auth/oauth2/exchange` endpoint.
 - OAuth2 authorization-request cookie is now signed with HMAC-SHA256 using a secret configured via `app.security.cookie-signing-secret` (`APP_COOKIE_SIGNING_SECRET`); cookies with an absent or invalid signature are silently rejected before deserialization, preventing `state`-parameter forgery (AUTH-027).
 - Replaced blanket `csrf.disable()` with `csrf.ignoringRequestMatchers("/api/**")` so CSRF protection remains active on the OAuth2 callback paths (`/login/oauth2/code/**`); Spring Security now verifies the `state` parameter on every callback (AUTH-027).
 - Introduced `CookieOAuth2AuthorizationRequestRepository` to store the pending `OAuth2AuthorizationRequest` in an `HttpOnly`, `SameSite=Lax`, `Path=/`, 5-minute cookie instead of the HTTP session, preserving `SessionCreationPolicy.STATELESS` while keeping `state`-parameter CSRF protection intact; the `Secure` flag is enabled only under the `prod` Spring profile (AUTH-027).
@@ -953,104 +795,8 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Strict request body deserialization enabled globally (`spring.jackson.deserialization.fail-on-unknown-properties=true`) plus `@JsonIgnoreProperties(ignoreUnknown = false)` on `RegisterRequest` and `ResetPasswordRequest` (AUTH-022).
 - Production profile sets `logging.file.path: /var/log/app` so the `${user.home}` fallback applies only to dev/test (AUTH-023).
 - Media upload-complete now rejects client-submitted storage keys outside the authenticated user's generated upload prefix.
-
-### Added
-- SonarCloud static analysis integrated into CI: `sonarcloud.yml` workflow runs on every push to `main` and on every pull request targeting `main`; JaCoCo coverage report at `target/site/jacoco/jacoco.xml` is forwarded to SonarCloud for coverage metrics. **Action required:** disable "Automatic Analysis" in SonarCloud project settings (Administration → Analysis Method) to prevent conflicts with this CI-based analysis.
-- CI workflow `ci-test.yml` runs the Maven test suite on pull requests targeting `main` or `develop`; job is reporting-only and does not block merges.
-- CI secrets audit report saved to `.claude/workspace/ci-secrets-audit.md`; confirmed no GitHub Actions secrets are required — all runtime values are provided by `@ServiceConnection`, `@DynamicPropertySource`, or `@TestPropertySource` in the test classes.
-- `OpenApiConfig` bean updated to source the server URL from `AppProperties.baseUrl()` and produce API title `"App API"`, version `"1.0.0"`, and a global `bearerAuth` Bearer JWT security scheme.
-- `AuthApi` interface (`modules/auth/api`) carrying all `@Tag`, `@Operation`, `@ApiResponses`, and `@Parameter` OpenAPI annotations for the 8 auth endpoints; `AuthController` implements this interface and contains zero documentation annotations.
-- `docs/modules/OPENAPI_GUIDE.md`: developer guide explaining how to document a new module using the Interface Segregation pattern, including step-by-step instructions, rules, a reference endpoint table, and common mistakes.
-
-### Changed
-- `AuthController` refactored to implement `AuthApi`; class-level `@Tag` and `@RequestMapping` removed (now on the interface); all `@Operation`, `@ApiResponses`, and `@Parameter` annotations removed from handler methods.
-- `GIT_WORKFLOW.md` agent rule documenting branch naming, Conventional Commits format, allowed scopes, PR size labels, and discrepancies found between `CONTRIBUTING.md` and the actual pr-lint/pr-size workflow enforcement.
-- 11 agent skills under `.claude/skills/`: `skill-jpa-entity`, `skill-spring-repository`, `skill-spring-service`, `skill-rest-controller`, `skill-mapstruct-mapper`, `skill-dto`, `skill-flyway-migration`, `skill-exception-handling`, `skill-redis-key`, `skill-test-unit`, `skill-test-integration` — each derived from the implemented `auth` and `mail` modules.
-- 4 agent workflows under `.claude/workflows/`: `workflow-implement-module`, `workflow-add-flyway-migration`, `workflow-add-api-endpoint`, `workflow-code-review`.
-- `DOC_FIRST.md` agent rule mandating that `GLOBAL_RULES.md` and the relevant module `DATA_RULES.md` (plus `STRUCT.md` for new module implementations) are read before any feature implementation or business-logic change.
-
-### Changed
-- `base.md`: added missing `description` field to frontmatter.
-- `changelog_rule.md`: corrected description (was a copy of struct.md's description); changed trigger from `model_decision` to `always_on` to match the rule's stated requirement.
-- `doc_first.md`: corrected description (was a copy of struct.md's description).
-
-### Fixed
-- `refresh` flow transaction boundary corrected: `rotate()` and `revoke()` in `RefreshTokenServiceImpl` now use `REQUIRES_NEW` propagation so both the old-token revocation and the new-token revocation commit to the database independently, even when the outer request transaction rolls back after a banned or suspended account check. Previously, the entire transaction rolled back and the original refresh token remained active.
-
-### Fixed
-- Banned, suspended, and deactivated users can no longer receive or redeem a password-reset link; `forgotPassword` returns silently and `resetPassword` throws the appropriate locked/inactive error.
-- Password-reset email link now uses `mail.frontend-base-url` and the configurable `mail.reset-password-path` property (default `/reset-password`) instead of the backend API URL, making the link functional in a browser.
-- `TokenNotFoundException` thrown during password-reset token consumption is now converted to `AppException(AUTH_RESET_TOKEN_INVALID)` at the service layer before reaching `GlobalExceptionHandler`, returning HTTP 400 with the correct error code instead of HTTP 404.
-
-### Added
-- `MailProperties.resetPasswordPath` field (default `/reset-password`) bound to `app.mail.reset-password-path` / `MAIL_RESET_PASSWORD_PATH` environment variable, making the frontend reset-form path configurable.
-
-### Added
-- Implementation plan for OpenAPI interface segregation pattern in the `auth` module at `docs/plans/openapi-interface-segregation-plan.md`.
-
-
-- Integrated `springdoc-openapi-starter-webmvc-ui` 3.0.3 for interactive API documentation.
-- `OpenApiConfig` bean exposing title, version, server entry from `app.base-url`, and global Bearer JWT security scheme.
-- OpenAPI JSON endpoint at `/api-docs` and Swagger UI at `/swagger-ui` (dev profile only; disabled in prod).
-- Full `@Tag`, `@Operation`, `@ApiResponses`, and `@SecurityRequirement` annotations on all `AuthController` endpoints.
-- `@Schema` annotations with descriptions, examples, and required-mode markers on all `auth` request and response DTOs.
-- Swagger UI paths (`/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html`) added to `SecurityConfig` permit list.
-
-
-- `report_reason_configs` table appended to V18 Flyway migration: stores display metadata and per-`report_type` scope control for all 8 `report_reason` enum values, seeded with one row per reason.
-- `GLOBAL_RULES.md`: new `Enum vs. Config Table Relationship` section documenting the contract between PostgreSQL enum columns and config tables (`notification_type_configs`, `moderation_action_configs`, `report_reason_configs`).
-- `media/DATA_RULES.md`: server-side metadata validation rule for `media_assets` insert — specifies that the server must validate all client-submitted metadata before creating the record, and that validation failure must leave no orphaned row.
-
-### Security
 - LOW: documented a TOCTOU race in `TokenServiceImpl.createToken` (4-step issue flow is non-atomic so concurrent same-user issuance can briefly leak orphan single-use tokens until natural TTL); deferred per Phase 3 unit-test contract that asserts the current non-atomic shape.
 - MEDIUM: aligned `TokenNotFoundException` / `TokenExpiredException` HTTP mapping with the audit-mandated contract — verify-email with consumed/expired/unknown tokens now returns HTTP 404 (`NOT_FOUND`) instead of HTTP 400 (`AUTH_RESET_TOKEN_INVALID`), so the three states are indistinguishable to the caller.
-
-### Fixed
-- `GlobalExceptionHandler.handleInvalidToken` now maps token-not-found and token-expired exceptions to `ApiErrorCode.NOT_FOUND` (HTTP 404).
-- `ApplicationTests.contextLoads` updated to use Testcontainers for PostgreSQL and Redis; Spring Boot 4 autoconfigure exclude paths corrected (`org.springframework.boot.{jdbc,hibernate,data.jpa,flyway,data.redis,amqp}.autoconfigure.*`).
-- `AuthControllerIT` annotated with `@AutoConfigureTestRestTemplate` so the `TestRestTemplate` bean is registered under Spring Boot 4 (which moved this autoconfig out of the default `@SpringBootTest` activation set).
-
-### Changed
-- Bumped Testcontainers from 1.21.0 to 1.21.4 to ship a docker-java client compatible with Docker Engine ≥ 25 (which requires Docker API ≥ 1.40).
-- Maven Surefire now includes `**/*IT.java` in the test phase so the auth integration test runs as part of `./mvnw test`.
-
-### Tests
-- Rewrote `TokenServiceImplTest` (Redis-backed): added `consumeEmailVerificationToken_valid_executesLuaScript` to assert the atomic-consume Lua script execution.
-- Added `TokenBlacklistServiceImplTest` covering positive / zero / negative TTL stores, key-exists / key-absent / null-Redis-result reads, and null/blank `jti` defensive paths.
-- Added `RateLimiterServiceImplTest` covering under-limit, at-limit, over-limit, and null-script-result outcomes.
-- Extended `AuthServiceImplTest`: `logout_blacklistsAccessTokenAndRevokesRefreshToken`, `logout_invalidAccessToken_stillRevokesRefreshToken`, `logout_noAuthContext_blacklistsNothingAndRevokesRefreshToken`.
-- Extended `JwtTokenProviderTest`: `generateAccessToken_containsJtiClaim`, `generateAccessToken_eachInvocationProducesUniqueJti`, `validateAndParse_returnsJtiInClaims`, `validateAndParse_returnsExpiresAtInClaims`.
-- Extended `GlobalExceptionHandlerTest`: `tokenNotFoundException_returnsNotFound`, `tokenExpiredException_returnsNotFound`.
-- Extended `AuthControllerIT`: `verifyEmail_invalidToken_returnsNotFound`, `verifyEmail_consumedToken_returns404`, `verifyEmail_unknownToken_returnsSameNotFoundAsConsumed`, `login_logout_reuseAccessToken_returns401` (blacklist), `login_wrongPassword_5timesSameIp_6thReturns429`, `forgotPassword_3timesSameIp_4thReturns429`.
-- Test totals: 115 tests run, 0 failures, 0 errors.
-
-### Changed
-- Email-verification and password-reset tokens now live in Redis (24h and 15m TTL respectively), keyed by `auth:token:email-verification:{sha256}` and `auth:token:password-reset:{sha256}`; consumption is atomic via Lua and a reverse `…:user:{userId}` index ensures issuing a new token invalidates the prior pending one.
-- `TokenService.consumeEmailVerificationToken` / `consumePasswordResetToken` now return the owning `UUID` so callers no longer need a separate hash lookup.
-
-### Removed
-- PostgreSQL tables `email_verification_tokens` and `password_reset_tokens` (dropped from `V02__create_users_auth_tables.sql`); their JPA entities and repositories.
-- `TokenAlreadyUsedException` — Redis cannot distinguish "expired" from "already used"; both now surface as `TokenNotFoundException` mapped to `AUTH_RESET_TOKEN_INVALID`.
-
-### Added
-- Redis-backed JWT access-token blacklist: logout now records the token's `jti` for its remaining lifetime so it cannot authenticate again before its natural expiry.
-- Redis-backed sliding-window rate limiter on `POST /api/v1/auth/login` (5/15min, IP+email keyed), `/forgot-password` and `/verify-email/resend` (3/hr, IP keyed), executed via an atomic `INCR`+`EXPIRE` Lua script.
-- `app.rate-limit.*` configuration namespace bound to `RateLimitProperties` for per-endpoint limit and window tuning.
-- MapStruct 1.6.3 dependency and annotation processor; `lombok-mapstruct-binding` 0.2.0 wires Lombok before MapStruct in both compile and test-compile phases
-- `AuthMapper` interface in `modules/auth/mapper/` maps `User` + `emailVerified` boolean to `UserSummaryResponse` via MapStruct Spring component model
-- `SecurityMapper` interface in `common/security/` maps `User` entity to `UserPrincipal` security principal via MapStruct Spring component model
-
-### Changed
-- Moved `UserRole`, `UserStatus`, and `OAuthProvider` enums from `modules/auth/entity/` to new `modules/auth/enums/` package; all import sites updated
-- `AuthServiceImpl` and `OAuth2AuthenticationSuccessHandler` now delegate `User` → `UserSummaryResponse` mapping to the injected `AuthMapper` bean, replacing inline field-by-field construction
-- `JwtAuthenticationFilter` delegates `User` → `UserPrincipal` construction to the injected `SecurityMapper` bean
-
-### Fixed
-- Resolved `ObjectMapper` bean injection failure in `SecurityConfig`, `OAuth2AuthenticationSuccessHandler`, and `OAuth2AuthenticationFailureHandler` by migrating imports from `com.fasterxml.jackson.databind.ObjectMapper` (Jackson 2.x) to `tools.jackson.databind.ObjectMapper` (Jackson 3.x, required by Spring Boot 4)
-- Removed `ObjectMapper` from `SecurityConfig` constructor; injected via `@Autowired` field to break the circular dependency that prevented context startup
-- Fixed `ApplicationTests.contextLoads` failure by adding `src/test/resources/application-test.yml` with placeholder env-var values and excluding infrastructure auto-configurations (DataSource, JPA, Flyway, Redis, RabbitMQ) that require live services
-
-### Security
 - Hardened JWT decoder: `JwtTokenProvider` now installs a `DelegatingOAuth2TokenValidator` combining `JwtTimestampValidator` with `JwtIssuerValidator(properties.issuer())`, so signature alone is no longer sufficient — the `iss` claim is enforced on decode.
 - Closed login timing oracle: `AuthServiceImpl.login` now invokes BCrypt against a precomputed dummy hash on the unknown-email, missing-credential, and null-password-hash branches, eliminating email enumeration via response latency.
 - OAuth2 link-by-email gate: `CustomOidcUserService` refuses to attach an OAuth identity to a pre-existing local account unless the IdP confirms `email_verified=true`, preventing OAuth-based account takeover via misconfigured IdPs.
@@ -1059,89 +805,132 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Locked actuator endpoints: only `/actuator/health` is permitted without auth; `/actuator/**` now requires `ROLE_ADMIN`, blocking ordinary authenticated users from reading `/actuator/prometheus`, `/actuator/env`, etc.
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
-### Fixed
-- `CustomOidcUserService.resolveUniqueUsername` random-suffix branch now re-checks uniqueness via `ThreadLocalRandom` and a bounded retry loop, preventing the rare unique-constraint violation that previously surfaced as a 500.
-
 ### Tests
+- The actuator access test no longer depends on a search tier running on the developer machine; it declared no such container, so its anonymous health probe answered 503 and the class failed wherever that tier was absent.
+- The administrative comment moderation test now asserts the moderation tombstone and that the owner deletion column is left untouched, which is the separation the schema has enforced since the two were split.
+- The unrouted-constant guard now recognises the hashtag by-name lookup and posts-by-hashtag listing as routed, pinning both to their handlers instead of asserting they had been removed.
+- Nine integration test classes now declare their mail sender stand-in at the type the moderation and campaign senders inject, rather than at the interface; an interface-typed override left the transport bean unassignable and their contexts failed to start before any assertion ran.
+- The mail transport selection tests now assert what they were written to assert; both cases covering the network transport failed to build their context for a missing bean, so neither assertion had ever run.
+- Refresh-token theft detection is now covered by an integration test that asserts committed database state and the end-to-end rejection of the successor token, rather than that a mocked repository method was called; the previous assertions stayed green against code whose revocation was being rolled back.
+- The production-profile activation test loads its context again; its mail sender stand-in was declared at the interface rather than at the type two production beans inject, so the context failed before any assertion ran.
+- The people-you-may-know affinity bound is now covered by tests that pin what it costs the ranking, so a future change to its depth is a measured decision rather than a guess.
+- Both mail consumers now cover the suppressed-recipient branch, which is the gap that let the three mail lanes drift into three different answers for the same refusal.
+- A newly opened support ticket now answers with the time it was created rather than a null, because the ticket timestamps are read back after the insert that sets them.
+- Added coverage for the support authorization matrix, the conflict-of-interest rule and the claim race.
+- Added coverage for the new service-layer administrator gate, including the warning and strike revocations that previously read no actor role at all.
+- Every administrative controller now asserts that its endpoints refuse a request carrying no token at all. The suite previously checked only that a revoked token was refused.
+- The permitted-operations payload is checked by agreeing with the component that enforces the rules, for every combination of actor role and target role, rather than by restating the rules a third time.
+- The report queue's plan is asserted directly, so neither adding a status to the queue without extending the index nor removing the apparently redundant cursor bound can silently return it to a full scan.
+- The ranked feed's copy of a post is checked component by component against the original, walking the response's fields reflectively rather than naming them, so a field added later is covered without editing the test and a field silently swapped with a neighbour of the same type is caught.
+- The development data seeder no longer runs during the test suite. It previously activated whenever a developer enabled seeding locally, inserting rows into whichever integration-test database was live and breaking that test's own teardown on a foreign key, with the affected test varying by timing.
+- A query-parameter test no longer selects its subject by position from an unordered reflection array, which intermittently picked a synthetic bridge method carrying none of the annotations under test.
+- The environment template now documents the media-duration limit plus post and message live/consumer toggles, so local and operator configuration exposes every application-owned environment variable.
+- Regression coverage rejecting a WebSocket handshake and a live-feed subscription for a banned, suspended, deactivated, or deleted account.
+- Unit coverage for the WebSocket connection handshake authentication and for the per-conversation subscription authorization guard, including rejection of a non-participant, a departed participant, and an unauthenticated connection.
+- Regression coverage confirming a deleted account is excluded from message notification fan-out.
+- Unit and end-to-end integration coverage for message notification fan-out, including suppression for a departed participant, a blocked recipient, and a recipient with message notifications disabled, and duplicate-event handling.
+- Regression coverage rejecting a spoofed media asset reference, a non-published shared post, and an expired or deleted shared story in a sent message.
+- Unit coverage for message send validation and gating, idempotent retry and conflict handling, history pagination, sender-only delete, and read-state tracking.
+- End-to-end integration coverage for sending each message type, idempotent replay, history pagination, delete, and read-state endpoints.
+- Added coverage for every password policy rule on both the registration and the password-reset payload, including the no-break space and zero-width space cases that a whitespace regex does not catch, plus end-to-end coverage proving an over-long password no longer produces a server error.
+- Added regression coverage for the blocked-party disclosure fixes, the case-insensitive email constraint, the five conditional-delete race fixes, the conversation cursor bound, the page size bound on every newly-covered endpoint, the single-writer `updated_at` fix, the notification `isRead` fix, the WebSocket handshake 401 fix, and the UTC timestamp rendering fix.
+- Added a contract test asserting that every request-body endpoint declares its 415, derived from the published document rather than a fixed list, so a new endpoint that omits it fails the build.
+- Added regression coverage proving cursor pagination for notifications, reports, admin actions, and conversations does not drop or duplicate rows when many items share the same sort timestamp, matching coverage already in place for other paginated lists.
+- Resolved a rare failure in a WebSocket revocation sweep test caused by a benign race in the test's own teardown, unrelated to the behavior under test.
+- Regression coverage for the recommendation feedback consumer, covering successful processing of each supported engagement type, unknown event types, missing required fields, transient-versus-permanent recommender failures, and duplicate-delivery handling.
+- Regression coverage for the personalized feed pipeline, covering pagination, visibility and ownership filtering across multiple candidate rounds, ranking-score attachment, and fallback to the popularity ranking and then the chronological feed.
+- Regression coverage for the recommender REST client, covering request shape, authentication headers, and response parsing for every supported operation.
+- Regression coverage asserting that liking or saving a post enqueues the corresponding recommendation event with the correct payload, and that no event is enqueued on a conflicting or duplicate action.
+- Regression coverage for the batched post-visibility check used by the personalized feed, and for the recommendation feedback consumer's broker-dead-letter behavior on a permanent failure.
+- Regression coverage for post view recording, including self-view suppression, and for the resulting read-class recommendation feedback.
+- The follower, following, and pending follow-request lists now use the shared user summary object; the emitted JSON is unchanged, only the shared shape is reused.
+- Post responses (single post, feed, saved posts, and a user's posts) now embed the author as a nested user summary object (id, username, display name, avatar URL, verified flag) instead of separate top-level author id, username, display-name, and avatar fields; the post likers endpoint now returns that same user summary shape, and a post caption edit history entry embeds the editor the same way instead of a bare editor id. A post by a deleted author is hidden as before; a deleted liker now appears as a placeholder rather than silently vanishing from the likers list.
+- Comment responses now embed the author as a nested user summary object (id, username, display name, avatar URL, verified flag) instead of a bare author id; the previous top-level `userId` field is removed, and a comment by a deleted author returns a placeholder author rather than a dangling id. The same author object arrives over the live comment WebSocket feed, so a live-rendered comment shows the same author as one fetched over REST.
+- Pagination cursors are now opaque and share a single format across every list endpoint; cursors issued by a previous version are no longer accepted.
+- The report and admin listing endpoints now name their page-size parameter `limit`, matching every other paginated endpoint.
+- The notifications endpoint maximum page size is raised from 50 to 100.
+- A malformed pagination cursor now returns a 400 error with a typed code instead of silently returning the first page.
+- Post search now rejects a cursor addressing a result offset beyond 10,000 with a 400 error, matching the bound hashtag search already applied; previously only a negative offset was rejected.
+- A comment WebSocket handshake rejected because of a blacklisted (logged-out) token now returns the same response as every other rejection reason, with no distinguishing status code.
+- The social module's internal route constants now match the endpoints they describe; no endpoint path changed.
+- Removed unused internal path constants that described endpoints the application never served; no served endpoint changed.
+- Unit coverage for the comment notification consumer's dead-letter routing on a permanent or retry-exhausted failure, previously exercised only indirectly through integration tests.
+- Regression coverage proving a user cannot subscribe to another user's notification WebSocket topic, including from a session established on the comment WebSocket endpoint.
+- End-to-end coverage proving a notification is delivered to the correct recipient's WebSocket session only, is suppressed correctly (self-action, disabled preference, blocked actor), and is not delivered to an unrelated connected user.
+- Regression coverage proving a WebSocket session is terminated shortly after the underlying account is banned, suspended, or its token is logged out, and that a still-valid session survives the same check.
+- Regression coverage proving repeated WebSocket handshake attempts beyond the configured limit are rejected.
+- Regression coverage reproducing keyset row loss on a group of rows sharing one creation timestamp and proving the tuple-cursor fix returns every row exactly once.
+- Regression coverage asserting a banned or suspended account's otherwise-valid token no longer establishes a comment WebSocket session.
+- Regression coverage proving the comment WebSocket handshake rejects a missing, malformed, wrong-secret, expired, or blacklisted token, and rejects an unauthenticated caller on the SockJS HTTP fallback transport as well as the native transport.
+- Integration tests that start a Redis container now pin an explicit blank password so a developer's local `REDIS_PASSWORD` environment variable can no longer leak into the test context and cause unrelated authentication failures.
+- End-to-end coverage connecting a real STOMP client through the full security filter chain and asserting a live comment event is received.
+- Regression coverage asserting the trending hashtags endpoint rejects an oversized page size and a negative page number.
+- Regression coverage asserting the social module's route constants resolve to the paths it actually serves.
+- Regression coverage asserting the removed unused path constants no longer exist.
+- Regression coverage for concurrent attempts to start a 1-1 conversation with the same user, asserting exactly one conversation results.
+- Regression coverage for conversation-list pagination across conversations with no messages yet.
+- Regression coverage for group-admin handoff when the last admin is forcibly removed from a group.
+- Unit coverage for conversation creation and deduplication, participant and group-admin gating, group admin handoff on leave, and conversation-list cursor pagination.
+- End-to-end integration coverage for the new conversation endpoints, covering creation, deduplication, listing, group management, and membership changes.
+- Coverage for login by username and by email through the identifier field, including uppercase-username resolution and identical failure responses for an unknown identifier and a wrong password.
+- Story view recording and viewer-list unit coverage, notification-consumer unit and integration coverage, and integration coverage for view deduplication, the outbox event, the viewer list, and the cleanup job's selectivity.
+- Story lifecycle and visibility service unit coverage, and an end-to-end integration test covering creation, feed, per-user listing, deletion, media-ownership rejection, expiry, private-account gating, and blocking.
+- Added authorization coverage for regular users accessing the pending report queue and report status updates.
+- Added WebSocket JWT handshake interceptor unit tests covering valid non-blacklisted token, revoked (blacklisted) token, missing token parameter, and invalid token paths.
+- Added pagination boundary unit tests verifying `hasNextPage=false` on an exactly-full final page and `hasNextPage=true` with one probe row beyond the limit.
+- Added comment-module coverage for the idempotency replay and conflict paths (unit + controller IT), admin-delete authorization, read-side visibility on private posts, and the reply/like/mention notification consumer branches.
+- Added `SocialControllerIT` covering all 7 REST endpoints of the social module (follow, unfollow, block, unblock, get followers, get following, follow-request list, approve, reject) against real PostgreSQL and Redis containers.
+- Extended `AuthMailEventHandlerTest` with 11 new methods covering null eventId, unsupported event type, wrong aggregate type, missing/null/non-String/non-UUID data.userId, inactive user, displayName fallback, and all remaining dispatch branches.
+- Extended `AuthMailEventConsumerTest` with 4 new `isTransient` methods covering `DataAccessException`, `RedisSystemException`, `AmqpException`, and non-SERVICE_UNAVAILABLE `AppException` inputs.
+- Extended `MediaMetadataValidatorTest` with 8 new methods covering blank storage key, leading/trailing slashes, zero max-size system setting, zero width/height, negative video duration, blank blurhash, and zero file size.
+- Extended `OutboxPublisherServiceImplTest` with 5 new methods covering `ExecutionException` on confirm, interrupt on confirm, returned message marking event failed, null exception message default text, and `markPublished` returning false without throwing.
+- Extended `DeadLetterPublisherTest` with 3 new methods covering `ExecutionException`, message returned from broker, and nack from broker.
+- Extended `HashtagTrendingServiceImplTest` with 3 new methods covering no-period sentinel (empty result), single hashtag, and multi-hashtag result set.
+- Added `CustomOidcUserTest` with 5 methods covering all delegated methods of `CustomOidcUser`.
+- Added unit test coverage for previously untested service classes, targeting failure and exception branches: the social service (self-follow, not-found, block, already-following/requested, follow-request approve/reject, block cascade purge, private-account visibility, cursor decoding), the OAuth2 exchange-code service (absent-code rejection), the system-setting accessor (missing and non-numeric values), the post search fallback (availability degradation vs. programming-error rethrow), the post response assembler (batched media hydration), and the hashtag trending empty-snapshot guard.
+- Integration tests for the hashtag and post index-sync consumers covering at-least-once delivery, idempotent reprocessing, dead-letter routing of malformed messages, and the post out-of-order delete-before-upsert gate, against real PostgreSQL, Redis, RabbitMQ, and Elasticsearch containers.
+- `PostControllerIT` search scenario now drives the real outbox to RabbitMQ to consumer to Elasticsearch path instead of seeding the index directly.
+- Unit tests for the post service (creation media validation, carousel cardinality, owner-only authorization, lifecycle transitions, soft-delete invariants, hashtag extraction), post visibility service, and the like and save services (idempotency and visibility enforcement).
+- Integration test covering post CRUD, lifecycle, visibility gating across public, private, and blocked combinations, like and save idempotency, and search behaviour with Elasticsearch available and stopped.
+- Added `HashtagControllerIT` integration test covering search validation, empty trending snapshots, Elasticsearch ngram search, cursor pagination, and the Elasticsearch-down pg_trgm fallback against real Postgres, Redis, and Elasticsearch containers.
+- Added unit tests for `HashtagSearchService` covering the Elasticsearch ngram primary path, the PostgreSQL `pg_trgm` fallback, and empty-result pagination.
+- Added unit tests for `HashtagService` covering name normalization, case-insensitive deduplication, post-commit Elasticsearch dual-write failure isolation, and post-association removal.
+- Notification module: `Notification` entity, `NotificationRepository`, `NotificationService` interface and implementation, `NotificationController`, and `NotificationApi` OpenAPI interface.
+- Cursor-paginated notification listing endpoint (`GET /api/v1/notifications`) returning the authenticated user's notifications in reverse-chronological order.
+- Mark-as-read endpoint (`PATCH /api/v1/notifications/{notificationId}/read`) with recipient-ownership enforcement, and mark-all-as-read endpoint (`PATCH /api/v1/notifications/read-all`).
+- Unread notification count endpoint (`GET /api/v1/notifications/unread-count`).
+- `SocialNotificationConsumer` consuming `user.followed.v1` and `user.follow-requested.v1` events from the notification queue (gated by `app.notification.consumer.enabled`) and creating follow and follow-request notifications idempotently with bounded transient retry and dead-letter routing.
+- RabbitMQ topology: `notification.queue` and `notification.dlq` declared in `RabbitMqTopologyConfig`; `NotificationRabbitBindingConfig` binds `user.followed.v1` and `user.follow-requested.v1` social events to the notification queue.
+- Notification creation guards: self-notification suppression, per-type user notification-preference check (`notifyLikes`, `notifyComments`, `notifyFollows`, `notifyMentions`, `notifyMessages`), and blocked-actor check to prevent unwanted notifications.
+- Elasticsearch service added to `docker-compose.yaml` using image `9.0.3`; single-node, security disabled, 512 MB JVM heap, named volume for index persistence.
+- `spring-boot-starter-data-elasticsearch` dependency added; `ElasticsearchProperties` configuration bean and `ElasticsearchConfig` wiring the Spring Data Elasticsearch client from those properties.
+- `elasticsearchSearch` Resilience4j circuit breaker instance defined in both dev and prod profiles for use by future search services.
+- Renamed notification and RabbitMQ topology test methods to the `{method}_{condition}_{outcome}` naming convention.
+- `NotificationServiceImplTest`: 15 unit tests covering all creation guards, mark-as-read ownership and idempotency, mark-all-as-read, unread count, and cursor pagination.
+- `NotificationControllerIT`: 8 integration tests covering pagination, ownership enforcement, bulk read, unread count accuracy, and JWT authentication.
+- `SocialNotificationConsumerIT`: 6 integration tests covering happy path follow and follow-request creation, event-id deduplication, malformed-payload dead-lettering, self-follow suppression, and unknown-event-type skipping.
+- Added unit tests for `ElasticsearchConfig` credential and timeout wiring.
+- Added integration test verifying Elasticsearch cluster connectivity and actuator health status via Testcontainers.
+- Added RabbitMQ topology tests covering active mail queues, mail event bindings, dead-letter binding, and inactive future queues.
+- Added outbox enqueue tests covering event metadata, JSON payload envelope, required field validation, and absence of direct RabbitMQ publishing.
+- Added outbox publisher tests covering confirm success, publish failure retry scheduling, max-attempt dead state, nack handling, timeout handling, and database publisher updates.
+- Added RabbitMQ Testcontainer coverage for outbox publisher delivery and unroutable-message retry behavior.
+- Added outbox claim-lease tests covering expired `PROCESSING` event reclaim and stale-claim result guards.
+- Added processed-message inbox tests covering first processing, duplicate skipping, and rollback on failed processing.
+- Added auth mail-event tests covering minimal outbox payloads and the absence of raw verification/reset token creation in auth mail request paths.
+- Added forgot-password event-routing and timing-equalizer tests, plus controller integration coverage that register writes auth mail outbox events without token-bearing payloads.
+- Added auth mail consumer unit and RabbitMQ Testcontainer coverage for successful delivery, duplicate skipping, transient retry, invalid payload DLQ routing, and DLQ publish failure requeue behavior.
+- Added social follow service, outbox event, repository, and trigger-counter coverage.
+- Added media upload-complete tests covering metadata validation, synchronous media persistence, outbox event payloads, and database-generated media IDs.
+- Added media upload URL validation, storage key generation, and R2 presigner configuration tests.
+- Added media upload-complete tests covering current-user storage-key ownership and non-unique database integrity failures.
+- Rewrote `TokenServiceImplTest` (Redis-backed): added `consumeEmailVerificationToken_valid_executesLuaScript` to assert the atomic-consume Lua script execution.
+- Added `TokenBlacklistServiceImplTest` covering positive / zero / negative TTL stores, key-exists / key-absent / null-Redis-result reads, and null/blank `jti` defensive paths.
+- Added `RateLimiterServiceImplTest` covering under-limit, at-limit, over-limit, and null-script-result outcomes.
+- Extended `AuthServiceImplTest`: `logout_blacklistsAccessTokenAndRevokesRefreshToken`, `logout_invalidAccessToken_stillRevokesRefreshToken`, `logout_noAuthContext_blacklistsNothingAndRevokesRefreshToken`.
+- Extended `JwtTokenProviderTest`: `generateAccessToken_containsJtiClaim`, `generateAccessToken_eachInvocationProducesUniqueJti`, `validateAndParse_returnsJtiInClaims`, `validateAndParse_returnsExpiresAtInClaims`.
+- Extended `GlobalExceptionHandlerTest`: `tokenNotFoundException_returnsNotFound`, `tokenExpiredException_returnsNotFound`.
+- Extended `AuthControllerIT`: `verifyEmail_invalidToken_returnsNotFound`, `verifyEmail_consumedToken_returns404`, `verifyEmail_unknownToken_returnsSameNotFoundAsConsumed`, `login_logout_reuseAccessToken_returns401` (blacklist), `login_wrongPassword_5timesSameIp_6thReturns429`, `forgotPassword_3timesSameIp_4thReturns429`.
+- Test totals: 115 tests run, 0 failures, 0 errors.
 - Unit tests added: `JwtTokenProviderTest` (HS256 happy path, expired-token rejection, tampered-signature rejection, wrong-algorithm rejection, wrong-issuer rejection, non-UUID subject rejection), `RefreshTokenServiceImplTest` (issue/hash, TTL, rotate happy path, expired/revoked/unknown rejection, concurrent-rotation theft detection, revoke idempotency, bulk revoke), `AuthServiceImplTest` (register conflicts, register success + mail dispatch, login timing-safe failure shapes, status branches, refresh, logout idempotency, forgot/reset flows).
 - Integration test added: `AuthControllerIT` boots the full Spring Boot context against a Testcontainers PostgreSQL container, runs Flyway migrations, and exercises 16 HTTP scenarios covering register, login, refresh rotation/replay, logout, JWT-protected endpoint validation, and email-verification / forgot-password contracts.
-
-### Added
-- Google OAuth2 / OIDC sign-in: `OAuthAccount` entity with case-mapping converter, `OAuthAccountRepository`, `CustomOidcUserService` resolving a Google identity to a local user (link by provider id, fall back to email match, otherwise auto-register with `email_verified=true` and no password), `CustomOidcUser` decorator, and JSON `OAuth2AuthenticationSuccessHandler` / `OAuth2AuthenticationFailureHandler` returning the standard `ApiResponse` envelope
-- `spring.security.oauth2.client.registration.google.*` configuration block driven by `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `APP_BASE_URL` (redirect URI is environment-dependent)
-- `SecurityConfig` now installs `oauth2Login(...)` on the existing single `SecurityFilterChain`, mounting authorize/callback under `/api/v1/auth/oauth2/{authorize,callback/*}` with the custom OIDC user service and JSON handlers
-- Stateless JWT authentication module under `common/security/` — `JwtProperties`, `JwtTokenProvider` backed by Spring Security's `NimbusJwtEncoder`/`Decoder`, `JwtAuthenticationFilter`, `UserPrincipal`, `SecurityUtils`, `CorsProperties`, and a single-chain `SecurityConfig` enforcing stateless session policy with BCrypt strength 12
-- `RefreshTokenService` interface and `RefreshTokenServiceImpl` issuing UUID-based opaque refresh tokens persisted as SHA-256 hashes; supports rotation, single-token revoke, and bulk revoke per user
-- `User`, `UserCredential`, `UserSettings`, and `RefreshToken` JPA entities with `UserRole`/`UserStatus` enums and case-mapping `AttributeConverter`s for the lowercase Postgres custom enum types
-- `UserRepository`, `UserCredentialRepository`, `UserSettingsRepository`, and `RefreshTokenRepository` Spring Data JPA repositories
-- `AuthService` and `AuthServiceImpl` covering register, login, refresh, logout, email verification, resend verification, forgot password, and reset password flows; verification and password change emails dispatched via the existing `MailService`
-- `AuthController` exposing `/api/v1/auth/{register,login,refresh,logout,verify-email,verify-email/resend,forgot-password,reset-password}` returning `ApiResponse` envelopes
-- New `ApiErrorCode` entries: `USER_EMAIL_ALREADY_EXISTS`, `USER_USERNAME_ALREADY_EXISTS`, `AUTH_RESET_TOKEN_EXPIRED`, `AUTH_RESET_TOKEN_USED`
-- `GlobalExceptionHandler` now translates `TokenNotFoundException`, `TokenExpiredException`, and `TokenAlreadyUsedException` into typed 4xx `ApiResponse` failures
-- `RedisConfig` in `common/config/` registers a `LettuceClientOptionsBuilderCustomizer` bean that forces RESP2 protocol, resolving `NOAUTH` errors caused by Lettuce 6 sending `HELLO 3` before authentication against a `requirepass`-only Redis server
-
-### Changed
-- `app.jwt.*` is the canonical JWT configuration namespace (`secret`, `issuer`, `access-token-ttl`, `refresh-token-ttl`); the obsolete `security.jwt.*` block has been removed from `application-dev.yml` and `application-prod.yml`
-- `spring.datasource.hikari.data-source-properties.stringtype=unspecified` enabled to allow VARCHAR binding to Postgres custom enum and `inet` columns
-- `Application.java` now uses `@ConfigurationPropertiesScan` so `JwtProperties`, `CorsProperties`, and `AppProperties` bind without per-config registration
-- `pom.xml` adds `spring-boot-starter-oauth2-client` and `spring-security-oauth2-jose` to provide `NimbusJwtEncoder`/`NimbusJwtDecoder`
-
-### Changed
-- `CLAUDE.md` reduced to a minimal pointer file; all project rules, architecture state, and conventions moved to `.claude/rules/AGENT.md`
-- `.claude/rules/AGENT.md` rewritten with full codebase audit results: accurate module status table, complete `common/` class inventory, Flyway migration status (V01–V17), mail module documentation, API response contract, known gaps, and updated environment variable table including `RESEND_API_KEY`
-
-### Added
-- `MailProperties` standard class (`@Component` + `@ConfigurationProperties`) at `common/mail/config/` with `fromAddress`, `fromName`, `appName`, and `frontendBaseUrl` fields
-- `MailTemplate` enum at `common/mail/enums/` consolidating all template paths and default subjects
-- `MailRequest` DTO at `common/mail/dto/` for carrying recipient and template variable data
-- `MailTemplateRenderer` component at `common/mail/util/` isolating Thymeleaf rendering from dispatch logic
-- `MailService` interface and `MailServiceImpl` at `common/mail/service/` replacing the former `modules/mail/` placement; provider errors now surface as `AppException` with `SERVICE_UNAVAILABLE`
-- `app.mail.from-name`, `app.mail.app-name`, and `app.mail.frontend-base-url` properties bound via the new `MailProperties`; `application-prod.yml` reads these from environment variables
-- Unit tests for `MailTemplateRenderer` and `MailServiceImpl` covering variable assembly, template dispatch, and exception wrapping
-
-### Changed
-- `MailServiceImpl` variable keys renamed from `recipientName` to `toName`; `appName` added as a template variable sourced from `MailProperties`
-- Email templates updated to use `toName` and `appName` Thymeleaf variables; hardcoded branding removed
-- `MailConfig` removed `MailProperties` from `@EnableConfigurationProperties` since the class is now a `@Component` self-registering bean
-
-### Removed
-- `MailProperties` record from `common/config/` replaced by the standard class at `common/mail/config/`
-- `MailService`, `MailServiceImpl`, and `MailSendException` from `modules/mail/` relocated into `common/mail/`
-
-### Added
-- `ApiErrorCode` enum in `common/response/` with typed HTTP status, machine-readable code, and default message for Common and Auth error groups
-- `ApiSuccessCode` enum in `common/response/` with OK, CREATED, ACCEPTED, NO_CONTENT constants
-- `AppException` in `common/exception/` backed by `ApiErrorCode`, replacing raw integer status codes with typed error codes at the service layer
-- `ApiResponse.success()` and `ApiResponse.failure()` factory overloads accepting `ApiSuccessCode`/`ApiErrorCode` enums with optional custom message and data payload
-- `BaseController` resilience fallback methods for rate limiter and circuit breaker using `ApiErrorCode`-backed responses
-
-### Changed
-- `GlobalExceptionHandler` rewritten to use `AppException` + `ApiErrorCode` for all handler return paths; validation handlers now collect all field/constraint violations into a `Map<String, String>` returned as `data`
-- `MailServiceImpl` expiry constants promoted to `public` for test visibility
-
-### Added
-- Generic `ApiException(int statusCode, String errorCode, String message)` in `common/exception/` to decouple service-layer errors from any shared enum catalogue
-- Uniform `ApiResponse<T>` envelope under `common/response/` with `ok`, `created`, and `error` static factories and an embedded `Instant` timestamp
-- `PageResponse<T>` (offset-based, built from Spring Data `Page`) and `CursorPageResponse<T>` (Relay-spec cursor pagination with embedded `PageInfo`) under `common/response/`
-- `ApiConstants` central registry of `/api/v1` route constants for auth, users, posts, comments, stories, social, messages, notifications, hashtags, media, reports, and admin endpoints
-- `spring-boot-starter-validation` dependency for `jakarta.validation` support required by the new framework-level exception handler
-- Transactional mail subsystem under `common/mail` backed by the Resend Java SDK with a dedicated `mailTaskExecutor` async pool, exposing email verification, password reset, welcome, and password-changed messages
-- Thymeleaf email templates under `templates/mail/` for verification, password reset, welcome, and password-changed notifications
-- `app.mail.from-address`, `app.mail.from-name`, and `app.base-url` configuration bound via `MailProperties` and `AppProperties`, all sourced from environment variables
-- Single-use, SHA-256-hashed token issuance and consumption in the `auth` module: `EmailVerificationToken` (24h TTL) and `PasswordResetToken` (15min TTL) entities, JPA repositories, and `TokenService` contract
-- `.env.example` template enumerating every environment variable consumed by the application (database, Redis, JWT, app URL, CORS, Resend mail credentials)
-- Unit test coverage for `TokenServiceImpl`, `MailServiceImpl`, and `GlobalExceptionHandler`
-- `CHANGELOG_RULE.md` in `.claude/rules/` defining mandatory post-task changelog requirements following Keep a Changelog 1.1.0
-- Post-Task Requirements section in `.claude/rules/AGENT.md` enforcing the changelog obligation after every completed task
-- `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
-
-### Changed
-- `GlobalExceptionHandler` rewritten to handle only generic, framework-level exceptions (`ApiException`, validation, malformed request, type mismatch, not found, method not allowed, data integrity, optimistic lock, access denied, authentication, upload size, illegal argument/state, entity not found, transaction system, and a catch-all 500), all responding with `ApiResponse<Void>`
-- Token exceptions (`TokenNotFoundException`, `TokenExpiredException`, `TokenAlreadyUsedException`) relocated from `common/exception/` to `modules/auth/exception/` to enforce module ownership of domain errors
-- `MailSendException` relocated from `common/exception/` to `common/mail/` alongside the mail service it belongs to
-- `GlobalExceptionHandlerTest` rewritten against the new envelope and handler surface
-- `CLAUDE.md` rewritten to accurately describe this project (Spring Boot 4.0.6 social network) — replaced all content copied from an unrelated recruitment ATS project
-- `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
-
-### Removed
-- `ErrorResponse` record and the legacy `common/exception/` token and mail exception classes superseded by `ApiException` and the relocated domain exceptions
