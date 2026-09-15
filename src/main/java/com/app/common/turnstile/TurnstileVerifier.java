@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -57,6 +58,9 @@ public class TurnstileVerifier {
     private final TurnstileMetrics metrics;
     private final RestClient restClient;
 
+    // Explicit, because the package-private test seam below makes this class
+    // multi-constructor and Spring will not pick one on its own.
+    @Autowired
     public TurnstileVerifier(TurnstileProperties properties, TurnstileMetrics metrics) {
         this(
                 properties,
