@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `docs/ops/COOLIFY_RUNBOOK.md`, documenting the production Coolify topology, the backend environment variable matrix, a resolved Elasticsearch version-mismatch incident, the Gorse Compose deployment gotchas, and the seed-on-prod toggle sequence.
 - A pull request check that rejects any commit whose subject exceeds the 80-character limit, closing the gap that let six over-length subjects reach develop while only pull request titles were validated.
 - `scripts/regenerate_schema_sql.sh`, which rebuilds `database/schema.sql` from a clean Flyway run and proves the result by replaying it into a second database and comparing both catalogs.
 - `scripts/regenerate_struct_figures.sh`, which regenerates the migration table, the module list, the test-class table, the RabbitMQ topology, the Redis key prefixes and the declared versions from `git ls-files`.
