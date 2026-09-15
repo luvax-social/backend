@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
@@ -16,6 +17,8 @@ import com.app.common.pagination.CursorCodec;
 import com.app.common.pagination.CursorScope;
 import com.app.common.pagination.TimeCursors;
 import com.app.common.response.CursorPageResponse;
+import com.app.common.turnstile.AuthTurnstileGuard;
+import com.app.common.turnstile.TurnstileSurface;
 import com.app.modules.report.dto.request.CreateReportRequest;
 import com.app.modules.report.dto.request.UpdateReportStatusRequest;
 import com.app.modules.report.dto.response.ReportResponse;
@@ -45,15 +48,34 @@ public class ReportServiceImpl implements ReportService {
 
     private final ReportRepository reportRepository;
     private final ReportMapper reportMapper;
+    private final AuthTurnstileGuard turnstileGuard;
+    private final TransactionTemplate transactionTemplate;
 
-    public ReportServiceImpl(ReportRepository reportRepository, ReportMapper reportMapper) {
+    public ReportServiceImpl(
+            ReportRepository reportRepository,
+            ReportMapper reportMapper,
+            AuthTurnstileGuard turnstileGuard,
+            TransactionTemplate transactionTemplate) {
         this.reportRepository = reportRepository;
         this.reportMapper = reportMapper;
+        this.turnstileGuard = turnstileGuard;
+        this.transactionTemplate = transactionTemplate;
     }
 
     @Override
-    @Transactional
-    public ReportResponse submitReport(UUID reporterId, CreateReportRequest request) {
+    public ReportResponse submitReport(
+            UUID reporterId, CreateReportRequest request, String clientIp) {
+        // Before the existence, self-report and duplicate checks, so a rejected challenge reads
+        // nothing and writes nothing.
+        turnstileGuard.require(request.turnstileToken(), clientIp, TurnstileSurface.REPORT);
+
+        // TransactionTemplate rather than @Transactional on this method: the siteverify call above
+        // can take up to the configured read timeout, and the same-class pattern used by
+        // AuthServiceImpl keeps that outbound wait off a pooled database connection.
+        return transactionTemplate.execute(status -> persistReport(reporterId, request));
+    }
+
+    private ReportResponse persistReport(UUID reporterId, CreateReportRequest request) {
         UUID ownerId = validateEntityExists(request.reportType(), request.entityId());
         if (reporterId.equals(ownerId)) {
             throw new AppException(ApiErrorCode.REPORT_SELF_NOT_ALLOWED);

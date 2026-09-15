@@ -34,4 +34,13 @@ public record CreateReportRequest(
                         description = "Optional context supplied by the reporter",
                         example = "Repeated unsolicited promotional content")
                 @Size(max = 2000)
-                String description) {}
+                String description,
+        @Schema(
+                        description =
+                                "Cloudflare Turnstile token from the widget in the report dialog."
+                                        + " Carries no @NotBlank on purpose: a blank token is"
+                                        + " refused by the verifier, which is what lets"
+                                        + " app.turnstile.auth.enabled switch the check off.",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                @Size(max = 2048)
+                String turnstileToken) {}

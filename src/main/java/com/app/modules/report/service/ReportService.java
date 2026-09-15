@@ -15,14 +15,20 @@ import com.app.modules.users.enums.UserRole;
 public interface ReportService {
 
     /**
-     * Submits a report after validating target existence, ownership, and uniqueness.
+     * Submits a report after verifying the Turnstile challenge and validating target existence,
+     * ownership, and uniqueness.
+     *
+     * <p>Verification runs before any of those checks and outside the write transaction, so a
+     * rejected challenge writes no row and holds no database connection while Cloudflare answers.
      *
      * @param reporterId authenticated reporter identifier
-     * @param request report target and reason
+     * @param request report target, reason and Turnstile token
+     * @param clientIp the caller's address as resolved by {@code IpExtractor}, or null
      * @return persisted pending report
-     * @throws AppException when the target is missing, self-owned, or already reported
+     * @throws AppException with {@code AUTH_CAPTCHA_FAILED} when the challenge is rejected, or when
+     *     the target is missing, self-owned, or already reported
      */
-    ReportResponse submitReport(UUID reporterId, CreateReportRequest request);
+    ReportResponse submitReport(UUID reporterId, CreateReportRequest request, String clientIp);
 
     /**
      * Lists reports for moderation with optional status and target-type filters.
