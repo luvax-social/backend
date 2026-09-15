@@ -1,0 +1,29 @@
+{
+  "requests_by_category": {
+    "appeal_ban": [{ "subject": "Appeal", "body": "Please review my ban." }],
+    "appeal_suspension": [{ "subject": "Appeal", "body": "Please review my suspension." }],
+    "appeal_warning_strike": [{ "subject": "Appeal", "body": "Please review my strike." }],
+    "appeal_content_removal": [{ "subject": "Appeal", "body": "Please review my removed post." }],
+    "account_access": [{ "subject": "Locked out", "body": "I can't log in." }],
+    "account_data": [{ "subject": "Data question", "body": "What data do you hold on me?" }],
+    "bug_report": [{ "subject": "Bug", "body": "Something is broken." }],
+    "safety_concern": [{ "subject": "Safety", "body": "I have a safety concern." }],
+    "other": [{ "subject": "Question", "body": "General question." }]
+  },
+  "verification_requests": [
+    {
+      "claimed_name": "Test Studio",
+      "category_key": "visual_arts",
+      "evidence_website": "https://example.com",
+      "evidence_other_profile": "https://example.com/profile",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": "https://example.com/listing",
+      "evidence_note": null
+    }
+  ],
+  "staff_responses_approved": ["Reviewed and approved."],
+  "staff_responses_rejected": ["Reviewed and rejected."],
+  "escalation_reasons": ["Needs an administrator's decision."]
+}
