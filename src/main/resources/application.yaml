@@ -386,6 +386,12 @@ app:
       "[/api/v1/auth/verify-email/resend]":
         max-attempts: 3
         window-seconds: 3600
+      # Present in dev and prod but absent here until now, so a deployment running on the base
+      # profile alone left the code-redemption endpoint with no per-caller rule at all. The budget
+      # matches both profiles.
+      "[/api/v1/auth/oauth2/exchange]":
+        max-attempts: 10
+        window-seconds: 60
       "[/api/v1/posts]":
         max-attempts: 30
         window-seconds: 60
