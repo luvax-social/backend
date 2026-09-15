@@ -335,6 +335,20 @@ app:
       interval: ${WEBSOCKET_REVOCATION_INTERVAL:PT30S}
   rate-limit:
     endpoint-rules:
+      # Authenticated ticket creation and the caller's own ticket reads. Every other support
+      # path already carried a per-caller Redis rule; this sub-tree carried only the JVM-wide
+      # Resilience4j backstop, which is a global circuit rather than a per-caller bound, so one
+      # abusive caller could exhaust it for everybody. The literal collection route takes the
+      # exact-match fast path and gets its own bucket; the sub-tree pattern covers
+      # /tickets/{ticketId}. An hour-long window, matching the other support rules rather than
+      # the minute-long auth convention, because opening a ticket is a human action already
+      # bounded upstream by the one-open-ticket guard.
+      "[/api/v1/support/tickets]":
+        max-attempts: 10
+        window-seconds: 3600
+      "[/api/v1/support/tickets/**]":
+        max-attempts: 10
+        window-seconds: 3600
       # Followed from a mail client, sometimes twice by a prefetcher, so this is bounded rather
       # than tight. Opting out is idempotent, so a replay is harmless.
       "[/api/v1/support/unsubscribe]":

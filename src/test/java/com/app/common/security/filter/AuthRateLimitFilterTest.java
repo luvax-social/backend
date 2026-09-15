@@ -318,6 +318,30 @@ class AuthRateLimitFilterTest {
         assertThat(recommendationsFilter.resolveRule("/api/v1/posts", "GET")).isNull();
     }
 
+    @Test
+    void resolveRule_supportTicketSubTree_coversTheCollectionAndThePathVariableRoute() {
+        // The authenticated ticket sub-tree carried only the JVM-wide Resilience4j backstop, which
+        // is a global circuit and not a per-caller bound. Both routes must resolve: the literal
+        // collection through the exact-match fast path, and /tickets/{ticketId} through the
+        // sub-tree pattern.
+        Rule ticketsRule = new Rule(10, 3600);
+        Map<String, Rule> rules = new java.util.LinkedHashMap<>();
+        rules.put("/api/v1/support/tickets", ticketsRule);
+        rules.put("/api/v1/support/tickets/**", ticketsRule);
+        AuthRateLimitFilter supportFilter = filterWith(new RateLimitProperties(rules));
+
+        assertThat(supportFilter.resolveRule("/api/v1/support/tickets", "POST"))
+                .isEqualTo(ticketsRule);
+        assertThat(supportFilter.resolveRule("/api/v1/support/tickets", "GET"))
+                .isEqualTo(ticketsRule);
+        assertThat(
+                        supportFilter.resolveRule(
+                                "/api/v1/support/tickets/6f1d3d1c-0d4a-4a3f-8f2b-2c4a9b7e1a55",
+                                "GET"))
+                .isEqualTo(ticketsRule);
+        assertThat(supportFilter.resolveRule("/api/v1/support/appeal", "POST")).isNull();
+    }
+
     private AuthRateLimitFilter filterWith(RateLimitProperties rules) {
         return new AuthRateLimitFilter(
                 rateLimiterService,
