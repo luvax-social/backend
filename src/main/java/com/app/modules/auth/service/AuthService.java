@@ -6,6 +6,7 @@ import com.app.modules.auth.dto.request.ForgotPasswordRequest;
 import com.app.modules.auth.dto.request.LoginRequest;
 import com.app.modules.auth.dto.request.OAuth2ExchangeRequest;
 import com.app.modules.auth.dto.request.RegisterRequest;
+import com.app.modules.auth.dto.request.ResendVerificationRequest;
 import com.app.modules.auth.dto.request.ResetPasswordRequest;
 import com.app.modules.auth.dto.response.AuthResponse;
 
@@ -19,8 +20,13 @@ public interface AuthService {
      * Registers a new user and records mail side-effect events for verification and welcome
      * messages. No session is issued - the user must verify their email before logging in.
      *
+     * <p>The submitted Turnstile token is verified before the uniqueness check and before any
+     * write, so a rejected challenge creates no account and enqueues no mail.
+     *
      * @param request validated registration payload
      * @param httpRequest source request, used to record the origin the account was created from
+     * @throws com.app.common.exception.AppException with {@link
+     *     com.app.common.enums.ApiErrorCode#AUTH_CAPTCHA_FAILED} when the challenge is rejected
      */
     void register(RegisterRequest request, HttpServletRequest httpRequest);
 
@@ -28,9 +34,14 @@ public interface AuthService {
      * Authenticates an existing user by email or username and password and issues a fresh session
      * pair.
      *
+     * <p>The submitted Turnstile token is verified before the credential lookup, so a rejected
+     * challenge costs no password comparison and reveals nothing about the account.
+     *
      * @param request validated login payload
      * @param httpRequest underlying servlet request, used to capture device metadata
      * @return access + refresh tokens with the user summary
+     * @throws com.app.common.exception.AppException with {@link
+     *     com.app.common.enums.ApiErrorCode#AUTH_CAPTCHA_FAILED} when the challenge is rejected
      */
     AuthResponse login(LoginRequest request, HttpServletRequest httpRequest);
 
@@ -66,25 +77,43 @@ public interface AuthService {
      * Records a fresh verification-mail request if an account with the supplied email exists.
      * Behaviour is silent when the address is unknown to avoid account enumeration.
      *
-     * @param email candidate email address
+     * <p>Turnstile verification happens inside the same equalized response window as the lookup, so
+     * the challenge does not reintroduce a timing channel the equalizer exists to close.
+     *
+     * @param request payload containing the email address and the Turnstile token
+     * @param clientIp the caller's address as resolved by {@code IpExtractor}, or null
+     * @throws com.app.common.exception.AppException with {@link
+     *     com.app.common.enums.ApiErrorCode#AUTH_CAPTCHA_FAILED} when the challenge is rejected
      */
-    void resendVerification(String email);
+    void resendVerification(ResendVerificationRequest request, String clientIp);
 
     /**
      * Records a password-reset mail request if an account with the supplied email exists. Behaviour
      * is silent when the address is unknown.
      *
-     * @param request payload containing the email address
+     * <p>Turnstile verification happens inside the same equalized response window as the lookup, so
+     * the challenge does not reintroduce a timing channel the equalizer exists to close.
+     *
+     * @param request payload containing the email address and the Turnstile token
+     * @param clientIp the caller's address as resolved by {@code IpExtractor}, or null
+     * @throws com.app.common.exception.AppException with {@link
+     *     com.app.common.enums.ApiErrorCode#AUTH_CAPTCHA_FAILED} when the challenge is rejected
      */
-    void forgotPassword(ForgotPasswordRequest request);
+    void forgotPassword(ForgotPasswordRequest request, String clientIp);
 
     /**
      * Consumes a password-reset token, replaces the password hash, revokes every active session for
      * that user, and records a security-notification mail event.
      *
-     * @param request payload containing the raw token and the new password
+     * <p>The submitted Turnstile token is verified before the reset token is consumed, so a
+     * rejected challenge leaves the single-use reset link still usable.
+     *
+     * @param request payload containing the raw token, the new password and the Turnstile token
+     * @param clientIp the caller's address as resolved by {@code IpExtractor}, or null
+     * @throws com.app.common.exception.AppException with {@link
+     *     com.app.common.enums.ApiErrorCode#AUTH_CAPTCHA_FAILED} when the challenge is rejected
      */
-    void resetPassword(ResetPasswordRequest request);
+    void resetPassword(ResetPasswordRequest request, String clientIp);
 
     /**
      * Consumes a short-lived OAuth2 exchange code and issues an access/refresh token pair for the

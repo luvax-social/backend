@@ -45,9 +45,11 @@ import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.common.security.service.RefreshTokenService;
 import com.app.common.security.service.TokenBlacklistService;
 import com.app.common.security.util.IpExtractor;
+import com.app.common.turnstile.AuthTurnstileGuard;
 import com.app.modules.auth.dto.request.ForgotPasswordRequest;
 import com.app.modules.auth.dto.request.LoginRequest;
 import com.app.modules.auth.dto.request.RegisterRequest;
+import com.app.modules.auth.dto.request.ResendVerificationRequest;
 import com.app.modules.auth.dto.request.ResetPasswordRequest;
 import com.app.modules.auth.dto.response.AuthResponse;
 import com.app.modules.auth.dto.response.AuthenticatedUserResponse;
@@ -79,6 +81,8 @@ import ch.qos.logback.core.read.ListAppender;
 class AuthServiceImplTest {
 
     private static final String TEST_PASSWORD = "S3cur3P@ssword";
+    private static final String TURNSTILE_TOKEN = "turnstile-token";
+    private static final String CLIENT_IP = "4.5.6.7";
 
     @Mock private UserRepository userRepository;
     @Mock private UserCredentialRepository credentialRepository;
@@ -98,6 +102,7 @@ class AuthServiceImplTest {
     @Mock private OAuth2ExchangeCodeService oauth2ExchangeCodeService;
     @Mock private TransactionTemplate transactionTemplate;
     @Mock private UserEventRecorder userEventRecorder;
+    @Mock private AuthTurnstileGuard turnstileGuard;
 
     private AuthServiceImpl service;
 
@@ -159,7 +164,8 @@ class AuthServiceImplTest {
                         userStateValidator,
                         oauth2ExchangeCodeService,
                         transactionTemplate,
-                        userEventRecorder);
+                        userEventRecorder,
+                        turnstileGuard);
     }
 
     private MockHttpServletRequest stubRequest() {
@@ -172,7 +178,8 @@ class AuthServiceImplTest {
     @Test
     void register_duplicateEmail_throwsConflict() {
         when(userRepository.existsByEmail("a@b.c")).thenReturn(true);
-        RegisterRequest req = new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null);
+        RegisterRequest req =
+                new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null, TURNSTILE_TOKEN);
 
         assertThatThrownBy(() -> service.register(req, stubRequest()))
                 .isInstanceOf(AppException.class)
@@ -185,7 +192,8 @@ class AuthServiceImplTest {
     void register_duplicateUsername_throwsConflict() {
         when(userRepository.existsByEmail(anyString())).thenReturn(false);
         when(userRepository.existsByUsername("user1")).thenReturn(true);
-        RegisterRequest req = new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null);
+        RegisterRequest req =
+                new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null, TURNSTILE_TOKEN);
 
         assertThatThrownBy(() -> service.register(req, stubRequest()))
                 .isInstanceOf(AppException.class)
@@ -206,7 +214,9 @@ class AuthServiceImplTest {
                         });
         when(passwordEncoder.encode(TEST_PASSWORD)).thenReturn("HASH");
 
-        service.register(new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null), stubRequest());
+        service.register(
+                new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null, TURNSTILE_TOKEN),
+                stubRequest());
 
         verify(userRepository).save(any(User.class));
         verify(credentialRepository).save(any(UserCredential.class));
@@ -225,7 +235,9 @@ class AuthServiceImplTest {
                         });
         when(passwordEncoder.encode(anyString())).thenReturn("HASH");
 
-        service.register(new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null), stubRequest());
+        service.register(
+                new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null, TURNSTILE_TOKEN),
+                stubRequest());
 
         verify(authMailEventService).publishUserRegistered(any(User.class));
         verify(authMailEventService).publishEmailVerificationRequested(any(User.class), eq(newId));
@@ -250,7 +262,8 @@ class AuthServiceImplTest {
         logger.addAppender(appender);
         try {
             service.register(
-                    new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null), stubRequest());
+                    new RegisterRequest("user1", "a@b.c", TEST_PASSWORD, null, TURNSTILE_TOKEN),
+                    stubRequest());
         } finally {
             logger.detachAppender(appender);
         }
@@ -271,7 +284,8 @@ class AuthServiceImplTest {
         assertThatThrownBy(
                         () ->
                                 service.login(
-                                        new LoginRequest("nobody@x.y", TEST_PASSWORD),
+                                        new LoginRequest(
+                                                "nobody@x.y", TEST_PASSWORD, TURNSTILE_TOKEN),
                                         stubRequest()))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
@@ -294,7 +308,9 @@ class AuthServiceImplTest {
             assertThatThrownBy(
                             () ->
                                     service.login(
-                                            new LoginRequest(u.getEmail(), "wrong"), stubRequest()))
+                                            new LoginRequest(
+                                                    u.getEmail(), "wrong", TURNSTILE_TOKEN),
+                                            stubRequest()))
                     .isInstanceOf(AppException.class);
         } finally {
             logger.detachAppender(appender);
@@ -314,7 +330,10 @@ class AuthServiceImplTest {
         when(passwordEncoder.matches(eq("wrong"), eq("STORED-HASH"))).thenReturn(false);
 
         assertThatThrownBy(
-                        () -> service.login(new LoginRequest(u.getEmail(), "wrong"), stubRequest()))
+                        () ->
+                                service.login(
+                                        new LoginRequest(u.getEmail(), "wrong", TURNSTILE_TOKEN),
+                                        stubRequest()))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.AUTH_INVALID_CREDENTIALS);
@@ -332,7 +351,10 @@ class AuthServiceImplTest {
                 .enforceActive(u);
 
         assertThatThrownBy(
-                        () -> service.login(new LoginRequest(u.getEmail(), "any"), stubRequest()))
+                        () ->
+                                service.login(
+                                        new LoginRequest(u.getEmail(), "any", TURNSTILE_TOKEN),
+                                        stubRequest()))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.AUTH_ACCOUNT_LOCKED);
@@ -350,7 +372,10 @@ class AuthServiceImplTest {
                 .enforceActive(u);
 
         assertThatThrownBy(
-                        () -> service.login(new LoginRequest(u.getEmail(), "any"), stubRequest()))
+                        () ->
+                                service.login(
+                                        new LoginRequest(u.getEmail(), "any", TURNSTILE_TOKEN),
+                                        stubRequest()))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.AUTH_ACCOUNT_INACTIVE);
@@ -364,7 +389,10 @@ class AuthServiceImplTest {
         when(credentialRepository.findByUserId(u.getId())).thenReturn(Optional.of(cred));
 
         assertThatThrownBy(
-                        () -> service.login(new LoginRequest(u.getEmail(), "any"), stubRequest()))
+                        () ->
+                                service.login(
+                                        new LoginRequest(u.getEmail(), "any", TURNSTILE_TOKEN),
+                                        stubRequest()))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.AUTH_INVALID_CREDENTIALS);
@@ -384,7 +412,8 @@ class AuthServiceImplTest {
         assertThatThrownBy(
                         () ->
                                 service.login(
-                                        new LoginRequest(u.getEmail(), TEST_PASSWORD),
+                                        new LoginRequest(
+                                                u.getEmail(), TEST_PASSWORD, TURNSTILE_TOKEN),
                                         stubRequest()))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
@@ -403,7 +432,9 @@ class AuthServiceImplTest {
         when(refreshTokenService.issue(eq(u.getId()), any(), any(), any())).thenReturn("REFRESH");
 
         AuthResponse resp =
-                service.login(new LoginRequest(u.getEmail(), TEST_PASSWORD), stubRequest());
+                service.login(
+                        new LoginRequest(u.getEmail(), TEST_PASSWORD, TURNSTILE_TOKEN),
+                        stubRequest());
 
         assertThat(resp.accessToken()).isEqualTo("ACCESS");
         assertThat(resp.refreshToken()).isEqualTo("REFRESH");
@@ -426,7 +457,8 @@ class AuthServiceImplTest {
         appender.start();
         logger.addAppender(appender);
         try {
-            service.login(new LoginRequest(u.getEmail(), TEST_PASSWORD), stubRequest());
+            service.login(
+                    new LoginRequest(u.getEmail(), TEST_PASSWORD, TURNSTILE_TOKEN), stubRequest());
         } finally {
             logger.detachAppender(appender);
         }
@@ -451,7 +483,9 @@ class AuthServiceImplTest {
                 .thenReturn("ACCESS");
         when(refreshTokenService.issue(eq(u.getId()), any(), any(), any())).thenReturn("REFRESH");
 
-        AuthResponse resp = service.login(new LoginRequest("alice", TEST_PASSWORD), stubRequest());
+        AuthResponse resp =
+                service.login(
+                        new LoginRequest("alice", TEST_PASSWORD, TURNSTILE_TOKEN), stubRequest());
 
         assertThat(resp.accessToken()).isEqualTo("ACCESS");
         assertThat(resp.refreshToken()).isEqualTo("REFRESH");
@@ -466,7 +500,8 @@ class AuthServiceImplTest {
         assertThatThrownBy(
                         () ->
                                 service.login(
-                                        new LoginRequest("ghost", TEST_PASSWORD), stubRequest()))
+                                        new LoginRequest("ghost", TEST_PASSWORD, TURNSTILE_TOKEN),
+                                        stubRequest()))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 // Identical code to the wrong-password path so the two are indistinguishable.
@@ -481,7 +516,11 @@ class AuthServiceImplTest {
                 .thenReturn(Optional.of(credential(u.getId(), "STORED-HASH")));
         when(passwordEncoder.matches(eq("wrong"), eq("STORED-HASH"))).thenReturn(false);
 
-        assertThatThrownBy(() -> service.login(new LoginRequest("alice", "wrong"), stubRequest()))
+        assertThatThrownBy(
+                        () ->
+                                service.login(
+                                        new LoginRequest("alice", "wrong", TURNSTILE_TOKEN),
+                                        stubRequest()))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.AUTH_INVALID_CREDENTIALS);
@@ -500,7 +539,9 @@ class AuthServiceImplTest {
                 .thenReturn("ACCESS");
         when(refreshTokenService.issue(eq(u.getId()), any(), any(), any())).thenReturn("REFRESH");
 
-        AuthResponse resp = service.login(new LoginRequest("ALICE", TEST_PASSWORD), stubRequest());
+        AuthResponse resp =
+                service.login(
+                        new LoginRequest("ALICE", TEST_PASSWORD, TURNSTILE_TOKEN), stubRequest());
 
         assertThat(resp.accessToken()).isEqualTo("ACCESS");
         assertThat(resp.user().id()).isEqualTo(u.getId());
@@ -521,7 +562,8 @@ class AuthServiceImplTest {
         when(passwordEncoder.encode(TEST_PASSWORD)).thenReturn("HASH");
 
         service.register(
-                new RegisterRequest("MixedCase", "a@b.c", TEST_PASSWORD, null), stubRequest());
+                new RegisterRequest("MixedCase", "a@b.c", TEST_PASSWORD, null, TURNSTILE_TOKEN),
+                stubRequest());
 
         // Deliberate inversion: this asserted the stored value was lowercased. Identity is
         // case-insensitive via idx_users_username_lower, so the column no longer has to carry a
@@ -667,7 +709,8 @@ class AuthServiceImplTest {
 
     @Test
     void resendVerification_delegatesDurableEventRecordingAndEqualizesTiming() {
-        service.resendVerification("alice@example.com");
+        service.resendVerification(
+                new ResendVerificationRequest("alice@example.com", TURNSTILE_TOKEN), CLIENT_IP);
 
         verify(authResendVerificationEventService)
                 .recordResendVerificationRequest("alice@example.com");
@@ -681,7 +724,12 @@ class AuthServiceImplTest {
                 .when(authResendVerificationEventService)
                 .recordResendVerificationRequest("alice@example.com");
 
-        assertThatThrownBy(() -> service.resendVerification("alice@example.com"))
+        assertThatThrownBy(
+                        () ->
+                                service.resendVerification(
+                                        new ResendVerificationRequest(
+                                                "alice@example.com", TURNSTILE_TOKEN),
+                                        CLIENT_IP))
                 .isInstanceOf(IllegalStateException.class);
 
         verify(forgotPasswordTimingEqualizer).equalizeFrom(anyLong());
@@ -689,9 +737,10 @@ class AuthServiceImplTest {
 
     @Test
     void forgotPassword_delegatesDurableEventRecordingAndEqualizesTiming() {
-        ForgotPasswordRequest request = new ForgotPasswordRequest("alice@example.com");
+        ForgotPasswordRequest request =
+                new ForgotPasswordRequest("alice@example.com", TURNSTILE_TOKEN);
 
-        service.forgotPassword(request);
+        service.forgotPassword(request, CLIENT_IP);
 
         verify(authForgotPasswordEventService).recordForgotPasswordRequest(request.email());
         verify(forgotPasswordTimingEqualizer).equalizeFrom(anyLong());
@@ -700,12 +749,13 @@ class AuthServiceImplTest {
 
     @Test
     void forgotPassword_equalizesTimingWhenEventRecordingFails() {
-        ForgotPasswordRequest request = new ForgotPasswordRequest("alice@example.com");
+        ForgotPasswordRequest request =
+                new ForgotPasswordRequest("alice@example.com", TURNSTILE_TOKEN);
         doThrow(new IllegalStateException("db down"))
                 .when(authForgotPasswordEventService)
                 .recordForgotPasswordRequest(request.email());
 
-        assertThatThrownBy(() -> service.forgotPassword(request))
+        assertThatThrownBy(() -> service.forgotPassword(request, CLIENT_IP))
                 .isInstanceOf(IllegalStateException.class);
 
         verify(forgotPasswordTimingEqualizer).equalizeFrom(anyLong());
@@ -723,7 +773,8 @@ class AuthServiceImplTest {
         u.setId(userId);
         when(userRepository.findByIdAndDeletedAtIsNull(userId)).thenReturn(Optional.of(u));
 
-        service.resetPassword(new ResetPasswordRequest(raw, "newPassword1"));
+        service.resetPassword(
+                new ResetPasswordRequest(raw, "newPassword1", TURNSTILE_TOKEN), CLIENT_IP);
 
         verify(refreshTokenService).revokeAllForUser(userId);
         verify(credentialRepository).save(cred);
@@ -739,7 +790,9 @@ class AuthServiceImplTest {
         assertThatThrownBy(
                         () ->
                                 service.resetPassword(
-                                        new ResetPasswordRequest("ghost", "newPassword1")))
+                                        new ResetPasswordRequest(
+                                                "ghost", "newPassword1", TURNSTILE_TOKEN),
+                                        CLIENT_IP))
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode())
                 .isEqualTo(ApiErrorCode.AUTH_RESET_TOKEN_INVALID);
@@ -754,7 +807,9 @@ class AuthServiceImplTest {
         assertThatThrownBy(
                         () ->
                                 service.resetPassword(
-                                        new ResetPasswordRequest("expired-token", "newPassword1")))
+                                        new ResetPasswordRequest(
+                                                "expired-token", "newPassword1", TURNSTILE_TOKEN),
+                                        CLIENT_IP))
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode())
                 .isEqualTo(ApiErrorCode.AUTH_RESET_TOKEN_INVALID);
@@ -775,7 +830,9 @@ class AuthServiceImplTest {
         assertThatThrownBy(
                         () ->
                                 service.resetPassword(
-                                        new ResetPasswordRequest("RESET-RAW", "newPassword1")))
+                                        new ResetPasswordRequest(
+                                                "RESET-RAW", "newPassword1", TURNSTILE_TOKEN),
+                                        CLIENT_IP))
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode())
                 .isEqualTo(ApiErrorCode.AUTH_RESET_TOKEN_INVALID);
