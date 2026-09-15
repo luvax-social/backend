@@ -1,0 +1,402 @@
+{
+  "requests_by_category": {
+    "appeal_ban": [
+      {
+        "subject": "Requesting review of my ban",
+        "body": "My account was banned and I honestly don't understand why. I've had this account for years and never thought I was breaking any rules. Could someone please take a second look at this? I'm happy to explain anything that was flagged."
+      },
+      {
+        "subject": "Ban appeal - think this was a mistake",
+        "body": "I got an email saying my account was banned for policy violations but it didn't say which post or action caused it. I've gone back through my activity and can't find anything that should have triggered this. Please review and let me know what happened."
+      },
+      {
+        "subject": "Please reconsider the ban on my account",
+        "body": "I understand you have rules to enforce, but I think whatever triggered this ban was a misunderstanding. I run a small business through this account and losing it is a real problem for me. Can you tell me specifically what happened so I can address it?"
+      },
+      {
+        "subject": "Account banned, need this reversed",
+        "body": "This account has never been reported before as far as I know. I was banned suddenly with no warning. If this is about a comment I made in an argument last week, I'll admit it got heated but I don't think it crossed a line worth a permanent ban."
+      },
+      {
+        "subject": "Appealing my ban - shared device issue",
+        "body": "I think my account got banned because of something that happened on a shared family device. My younger sibling also uses this phone and I suspect they may have been on my account without me knowing. Is there any way to review the specific activity that led to this?"
+      },
+      {
+        "subject": "Wrongful ban appeal",
+        "body": "I was banned right after reporting someone else for harassment, which feels like a coincidence I want flagged. I didn't do anything against the rules myself. Please look into both the report I filed and the ban on my account."
+      }
+    ],
+    "appeal_suspension": [
+      {
+        "subject": "Suspension appeal - didn't realize this would happen",
+        "body": "I got a suspension notice and I want to understand exactly what I did wrong. I've read through the community guidelines again and I'm still not sure which rule applies to what I posted. Could you point me to the specific post or comment?"
+      },
+      {
+        "subject": "Requesting early review of suspension",
+        "body": "I'm currently suspended and I get that the platform needed to act on something, but I think the length of this suspension is harsh for what actually happened. Is there a process to have the duration reconsidered?"
+      },
+      {
+        "subject": "Suspension seems tied to a report I disagree with",
+        "body": "I believe this suspension came from a report filed by someone I had a disagreement with in the comments. I didn't use any language that should count as harassment. Can you review the actual content that was reported?"
+      },
+      {
+        "subject": "Confused about why I'm suspended",
+        "body": "I woke up to a suspension notice with no other context. I run a small storefront on here and this is affecting orders I already have in progress. Please help me understand what happened so I can avoid it going forward."
+      },
+      {
+        "subject": "First-time suspension, asking for leniency",
+        "body": "This is the first time anything like this has happened to my account in three years of using the platform. I take the rules seriously and would appreciate a chance to explain my side before the suspension runs its full course."
+      },
+      {
+        "subject": "Suspension appeal with additional context",
+        "body": "I want to give some context that I don't think was considered before this suspension was applied. The post in question was quoting someone else's message to report it, not endorsing it. Please re-review with that in mind."
+      }
+    ],
+    "appeal_warning_strike": [
+      {
+        "subject": "Appealing a strike on my account",
+        "body": "I received a strike notice and I'm not clear on what specifically triggered it. My account has been in good standing until now and I'd like to understand the reasoning before it affects anything else."
+      },
+      {
+        "subject": "Warning appeal - post was satire",
+        "body": "The comment that got flagged was clearly meant as a joke between friends who follow each other, not a genuine statement. I understand it can read differently out of context, but I'd like this warning reconsidered."
+      },
+      {
+        "subject": "Strike feels excessive for a first offense",
+        "body": "I got a strike for something I now realize probably did cross a line, but this is genuinely the first time I've had any issue on this account. Is there room to have it downgraded to a warning instead?"
+      },
+      {
+        "subject": "Disputing a warning on a deleted comment",
+        "body": "I deleted the comment in question myself as soon as I realized it might be an issue, before I even got the warning. I'd like that to be taken into account when reviewing this."
+      },
+      {
+        "subject": "Warning was issued to the wrong account I think",
+        "body": "I got a warning referencing a comment I don't remember writing and can't find in my history. Is it possible this was misattributed? I'd appreciate a second look at the specific content in question."
+      },
+      {
+        "subject": "Appealing a strike tied to a group discussion",
+        "body": "The strike references a comment I made in what I thought was a private-feeling thread with people I know well. I understand the platform is public, but the tone was clearly among friends, not a public attack on anyone."
+      }
+    ],
+    "appeal_content_removal": [
+      {
+        "subject": "My post was removed and I don't understand why",
+        "body": "One of my posts got taken down with a generic policy notice. I've looked at it again and I genuinely can't figure out what part violated the rules. Could you tell me specifically what triggered the removal?"
+      },
+      {
+        "subject": "Removed comment appeal",
+        "body": "A comment I left on someone else's post was removed. I was responding to a question they asked and don't think there was anything wrong with what I wrote. Please reconsider."
+      },
+      {
+        "subject": "Story removed without explanation",
+        "body": "My story from yesterday was taken down and I never got a clear reason. It was just a photo from an event I attended with a caption. I'd like to understand what happened."
+      },
+      {
+        "subject": "Message removed in a conversation - unclear why",
+        "body": "One of my messages in a conversation with a friend was flagged and removed. We were just talking about something that happened at work, nothing that should have triggered moderation as far as I can tell."
+      },
+      {
+        "subject": "Content removal appeal - context matters here",
+        "body": "I think the post that was removed was misread out of context. It was actually me quoting a news article to talk about it, not making the statement myself. Please take another look with that context."
+      },
+      {
+        "subject": "Appealing removal of an old post that suddenly got flagged",
+        "body": "This post has been up for over a year and was just removed now. Nothing about it changed on my end. Did something about the policy change, or was this a mistake?"
+      }
+    ],
+    "account_access": [
+      {
+        "subject": "Can't reset my password",
+        "body": "I've tried the password reset link three times now and the email never arrives, even after checking spam. My account email should still be active. Can you help me get back in another way?"
+      },
+      {
+        "subject": "Lost access to my two-factor device",
+        "body": "I set up two-factor authentication a while back and recently lost the phone with the authenticator app on it. I can't get past the login screen now. Is there a way to verify my identity another way and get 2FA reset?"
+      },
+      {
+        "subject": "Email address on my account is outdated",
+        "body": "The email tied to my account belongs to an old job I no longer have access to, so I can't receive verification codes or reset links. I can still log in on a device that's already signed in though - can you help me update it from here?"
+      },
+      {
+        "subject": "Account locked after too many login attempts",
+        "body": "My account got locked after I mistyped my password a few times trying to log in on a new phone. It's been locked for over a day now with no email telling me how to unlock it. What do I need to do?"
+      },
+      {
+        "subject": "Can't verify my phone number",
+        "body": "I'm trying to add a phone number for account recovery but the verification code never seems to arrive, even after multiple attempts and trying a different number. Is this a known issue?"
+      },
+      {
+        "subject": "Signed in on the wrong account by mistake",
+        "body": "I think I accidentally created a second account with a similar username to my real one and now I'm not sure which one my usual login goes to. Can you help me sort out which account is which?"
+      },
+      {
+        "subject": "Login works on the app but not on the website",
+        "body": "I can log in fine from my phone but the same credentials get rejected on the website with an error that doesn't explain anything. I've tried clearing cookies and a different browser already."
+      },
+      {
+        "subject": "Need to change the email on a account I can still access",
+        "body": "I still have an active session on my laptop but I'd like to change the email address on file before it expires, since I no longer use the old inbox. What's the process for that?"
+      }
+    ],
+    "account_data": [
+      {
+        "subject": "Requesting a copy of my data",
+        "body": "I'd like to know what information the platform holds about me and, if possible, get a copy of it. Is there a process for requesting a data export?"
+      },
+      {
+        "subject": "Question about how long you keep deleted content",
+        "body": "I deleted a few old posts a while back and I'm curious whether that content is actually gone or still stored somewhere. Could you explain your retention practices?"
+      },
+      {
+        "subject": "Asking what happens to my data if I deactivate",
+        "body": "I'm considering deactivating my account for a while and want to understand what happens to my posts, messages, and profile information during that time before I do it."
+      },
+      {
+        "subject": "Wondering why my old username is still unavailable",
+        "body": "I changed my username a long time ago and recently tried to give the old one to a friend, but it's still marked as taken. Is there a reason old usernames stay reserved?"
+      },
+      {
+        "subject": "Question about who can see my activity history",
+        "body": "I want to understand exactly what parts of my account activity are visible to other users versus only visible to staff for moderation purposes. Could you clarify the boundaries there?"
+      },
+      {
+        "subject": "Asking about data shared with third parties",
+        "body": "I saw a mention of analytics and recommendation systems in your terms and I'd like more detail on what account data feeds into those and whether I can opt out of any of it."
+      }
+    ],
+    "bug_report": [
+      {
+        "subject": "Comments not loading on some posts",
+        "body": "On a handful of posts in my feed, the comment section just spins and never loads any comments, even though I can see the comment count is nonzero. Refreshing the page doesn't help. Happens on both the app and the website for me."
+      },
+      {
+        "subject": "Story views count seems wrong",
+        "body": "My story said it had been viewed by 12 people, but when I tapped to see who, only 4 names showed up. This has happened on a few different stories now, not just one."
+      },
+      {
+        "subject": "Can't upload a video to a post",
+        "body": "Every time I try to add a video to a new post, the upload bar gets to about 90% and then just fails with a generic error. I've tried two different video files and both did the same thing."
+      },
+      {
+        "subject": "Notifications arriving hours late",
+        "body": "I'm getting push notifications for likes and comments, but they seem to be arriving hours after the actual activity happened rather than close to real time. Wondering if this is a known delay or a bug on my end."
+      },
+      {
+        "subject": "Direct message shows as unread even after opening it",
+        "body": "One specific conversation in my messages keeps showing an unread badge even though I've opened it and read every message inside. Other conversations mark as read normally."
+      },
+      {
+        "subject": "Hashtag search returning nothing for a hashtag I know exists",
+        "body": "Searching for a hashtag that I've used myself and seen other people use is returning zero results for me right now. It was working a few days ago. Not sure if this is temporary."
+      },
+      {
+        "subject": "Profile picture reverting to old photo",
+        "body": "I've updated my profile picture twice this week and both times it reverts back to an old photo after a day or so. The upload appears to succeed at the time I do it."
+      },
+      {
+        "subject": "App crashes when opening the explore tab",
+        "body": "The app consistently crashes for me whenever I tap into the explore or discover tab. It happens every single time, right as the page starts loading content."
+      },
+      {
+        "subject": "Post edit history not showing my most recent edit",
+        "body": "I edited a caption on one of my posts and the edit history shows the original version and one older edit, but not the most recent change I actually made."
+      },
+      {
+        "subject": "Follower count not updating after new followers",
+        "body": "I've gained a few new followers this week that I can see individually in my followers list, but the total follower count on my profile hasn't moved at all."
+      }
+    ],
+    "safety_concern": [
+      {
+        "subject": "Someone is impersonating me off-platform",
+        "body": "I've found an account on another site using my photos and a name close to mine, and they've been messaging people claiming to be me. I don't think this is something a normal content report covers since it's not on your platform, but I wanted to flag it in case it starts affecting my account here too."
+      },
+      {
+        "subject": "Concerned about a pattern of messages, not a single one",
+        "body": "I'm not trying to report one specific message, but I've noticed a pattern of increasingly concerning messages from the same account over the past couple of weeks. I wanted to raise this as a broader safety concern rather than a single content report."
+      },
+      {
+        "subject": "Worried about a minor's account behavior",
+        "body": "I believe I've come across an account that may belong to someone underage based on details they've shared, and some of the interactions I've seen around that account concern me. I wanted to raise this rather than just reporting individual posts."
+      },
+      {
+        "subject": "Someone found and shared my real location",
+        "body": "A person I had a disagreement with online has started posting details that suggest they've figured out roughly where I live, including a comment referencing my neighborhood. This feels like more than something a single content report addresses."
+      },
+      {
+        "subject": "Coordinated harassment across multiple accounts",
+        "body": "I'm being targeted by what looks like several accounts working together to comment negatively on everything I post, right after I post it. Individually the comments might not break rules, but the pattern feels coordinated and I wanted to flag it as a broader concern."
+      },
+      {
+        "subject": "Safety concern about content targeting a public event I'm attending",
+        "body": "I've seen posts referencing a public event I'm scheduled to attend in a way that feels like it's encouraging people to show up and cause a disruption. I wanted to raise this ahead of time rather than after something happens."
+      }
+    ],
+    "other": [
+      {
+        "subject": "Question about upcoming feature availability",
+        "body": "I noticed a feature mentioned in a changelog post that doesn't seem to be available on my account yet. Is this something that rolls out gradually, or should I be seeing it already?"
+      },
+      {
+        "subject": "Feedback on the new profile layout",
+        "body": "This isn't a bug report exactly, just feedback that the new profile layout makes it harder to find the saved posts tab than it used to be. Wanted to pass that along."
+      },
+      {
+        "subject": "Asking about verified badge criteria",
+        "body": "I'm curious what the actual criteria are for getting a verified badge beyond what's listed publicly. Is there a minimum follower count or anything like that?"
+      },
+      {
+        "subject": "General question about community guidelines updates",
+        "body": "I noticed the community guidelines page mentions a recent update but doesn't show what specifically changed. Is there a changelog for the guidelines themselves?"
+      },
+      {
+        "subject": "Question not covered by the other categories",
+        "body": "I wasn't sure which category best fit this, but I wanted to ask whether there are plans to support scheduling posts in advance. Couldn't find anything about it in the help pages."
+      },
+      {
+        "subject": "Thank you note and a small suggestion",
+        "body": "Not really a problem, just wanted to say the recent redesign of the messaging tab has been genuinely nice to use. One small suggestion: it would help to see typing indicators in group-style conversations."
+      }
+    ]
+  },
+  "verification_requests": [
+    {
+      "claimed_name": "Mai Lan Studio",
+      "category_key": "visual_arts",
+      "evidence_website": "https://mailanstudio.example.com",
+      "evidence_other_profile": "https://instagram.com/mailan.studio",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": "Featured in Saigon Design Weekly, March 2026",
+      "evidence_official_listing": null,
+      "evidence_note": "Independent illustrator, work has appeared in two local gallery shows this year."
+    },
+    {
+      "claimed_name": "DJ Kite",
+      "category_key": "music",
+      "evidence_website": null,
+      "evidence_other_profile": "https://open.spotify.com/artist/example-dj-kite",
+      "evidence_email_domain": null,
+      "evidence_published_work": "Two EPs released independently, both distributed through major streaming platforms.",
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Resident DJ at a well-known downtown venue for the past two years."
+    },
+    {
+      "claimed_name": "Dr. Hoang Minh Tu",
+      "category_key": "science",
+      "evidence_website": "https://university.example.edu/faculty/hoangminhtu",
+      "evidence_other_profile": null,
+      "evidence_email_domain": "university.example.edu",
+      "evidence_published_work": "Author of twelve peer-reviewed papers, listed on the university faculty page.",
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": null
+    },
+    {
+      "claimed_name": "Bao Chi Tran - Freelance Journalist",
+      "category_key": "writing",
+      "evidence_website": null,
+      "evidence_other_profile": null,
+      "evidence_email_domain": null,
+      "evidence_published_work": "Bylines in three regional news outlets over the past four years.",
+      "evidence_press": "Quoted as a source in an unrelated media roundup about local reporting.",
+      "evidence_official_listing": "Listed as a contributing writer on the outlet's staff page.",
+      "evidence_note": null
+    },
+    {
+      "claimed_name": "Linh Dao - Actor",
+      "category_key": "screen",
+      "evidence_website": null,
+      "evidence_other_profile": "https://imdb.example.com/name/linhdao",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": "Interviewed for a feature piece about independent film ahead of a festival screening.",
+      "evidence_official_listing": "Listed in the festival's official cast lineup for this year's showcase.",
+      "evidence_note": null
+    },
+    {
+      "claimed_name": "Coach Pham Van Duc",
+      "category_key": "sport",
+      "evidence_website": null,
+      "evidence_other_profile": null,
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": "Named head coach in a regional sports federation announcement.",
+      "evidence_official_listing": "Listed on the federation's official coaching roster.",
+      "evidence_note": "Coached the regional under-18 team to a national semifinal last season."
+    },
+    {
+      "claimed_name": "Nha May Cafe Co.",
+      "category_key": "business",
+      "evidence_website": "https://nhamaycafe.example.com",
+      "evidence_other_profile": null,
+      "evidence_email_domain": "nhamaycafe.example.com",
+      "evidence_published_work": null,
+      "evidence_press": "Covered by a local food blog roundup of new cafes this quarter.",
+      "evidence_official_listing": "Registered business listing under the same name and address.",
+      "evidence_note": null
+    },
+    {
+      "claimed_name": "StreamWithTrang",
+      "category_key": "gaming",
+      "evidence_website": null,
+      "evidence_other_profile": "https://twitch.example.com/streamwithtrang",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": "Listed as a partnered creator on the streaming platform's own directory.",
+      "evidence_note": "Regularly streams to an audience in the low thousands, partnered status granted last year."
+    },
+    {
+      "claimed_name": "Ngoc Anh Photography",
+      "category_key": "visual_arts",
+      "evidence_website": "https://ngocanhphoto.example.com",
+      "evidence_other_profile": "https://instagram.com/ngocanh.photo",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": "Work featured in a regional travel magazine's photo essay.",
+      "evidence_official_listing": null,
+      "evidence_note": null
+    },
+    {
+      "claimed_name": "The Local Angle Podcast",
+      "category_key": "writing",
+      "evidence_website": "https://thelocalangle.example.com",
+      "evidence_other_profile": "https://podcasts.example.com/the-local-angle",
+      "evidence_email_domain": null,
+      "evidence_published_work": "Over eighty published episodes covering local news and culture.",
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Small but consistent listener base built over three years of weekly episodes."
+    }
+  ],
+  "staff_responses_approved": [
+    "Thanks for the detail here - I've reviewed this and everything checks out, so I'm marking it resolved.",
+    "Appreciate you flagging this. I looked into it and you're right, this shouldn't have happened - it's been corrected on our end.",
+    "I went back through the original decision with the extra context you provided and agree it should be reversed. Sorry for the trouble this caused.",
+    "Reviewed and confirmed - this has been fixed. Let us know if you run into anything else.",
+    "Thanks for your patience while we looked into this. It's been handled and you should see the change reflected now.",
+    "You're right that this was a mistake on our end. I've corrected it and added a note to the account so it doesn't get flagged again for the same reason.",
+    "After reviewing the full history here, I agree with your explanation. This has been resolved in your favor.",
+    "Confirmed and fixed. Thanks for taking the time to explain the context - it made this much easier to review properly."
+  ],
+  "staff_responses_rejected": [
+    "I've reviewed this against the original decision and I'm not seeing grounds to reverse it. If you have additional evidence we haven't seen, you're welcome to submit another request.",
+    "After looking into this, the original action stands. I understand this isn't the answer you were hoping for.",
+    "I checked the specifics of what was flagged and the decision was applied correctly based on our guidelines. We won't be reversing it at this time.",
+    "This has been reviewed and the original decision is being upheld. If circumstances change, you're welcome to reach out again.",
+    "I looked at the content in question directly and it does fall within what our guidelines cover, so I'm not able to reverse this one.",
+    "The review confirms the original action was correct. I know that's frustrating to hear, but the decision stands as is.",
+    "I don't see anything in the additional context provided that changes the outcome here. The original decision remains in place.",
+    "This was reviewed carefully and we're keeping the original decision. Thanks for explaining your side, even though the outcome didn't change."
+  ],
+  "escalation_reasons": [
+    "This needs an administrator's decision - I can review the queue but I can't reverse a ban myself.",
+    "Escalating since this is an appeal against a permanent action only an admin can undo.",
+    "The context here is more involved than usual and I'd like an administrator's judgment before we respond either way.",
+    "This appears to be tied to a decision I made myself, so escalating to avoid a conflict of interest.",
+    "Escalating this one - it touches on a suspension that only an admin has the authority to lift early.",
+    "Sending this up since it involves a strike reversal, which is outside what I can decide on my own."
+  ]
+}
