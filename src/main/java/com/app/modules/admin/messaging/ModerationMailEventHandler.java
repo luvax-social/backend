@@ -156,12 +156,6 @@ public class ModerationMailEventHandler {
         }
     }
 
-    /**
-     * Whether the send was refused by the recipient allowlist rather than by the provider.
-     *
-     * @param ex the failure raised by the sender
-     * @return true when this deployment is configured not to send to that recipient
-     */
     private boolean emailVerified(UUID userId) {
         return userCredentialRepository
                 .findByUserId(userId)

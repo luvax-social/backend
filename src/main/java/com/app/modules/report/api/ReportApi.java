@@ -163,7 +163,6 @@ public interface ReportApi {
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int limit);
 
-    /** Returns one report for moderator or administrator review. */
     /** Lists the reports the caller escalated. */
     @Operation(
             summary = "List reports I escalated",
