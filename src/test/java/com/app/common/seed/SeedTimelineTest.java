@@ -118,6 +118,27 @@ class SeedTimelineTest {
         assertThat((double) overnightCount / sampleCount).isLessThan(0.15);
     }
 
+    @Test
+    void supportTicketCreatedAt_returnsInstantOnOrAfterUserCreatedAt() {
+        SeedTimeline timeline = new SeedTimeline(FIXED_SEED, Instant.parse("2026-09-01T00:00:00Z"));
+        Instant userCreatedAt = Instant.parse("2026-01-01T00:00:00Z");
+
+        Instant result = timeline.supportTicketCreatedAt(userCreatedAt);
+
+        assertThat(result).isAfterOrEqualTo(userCreatedAt);
+        assertThat(result).isBeforeOrEqualTo(Instant.parse("2026-09-01T00:00:00Z"));
+    }
+
+    @Test
+    void supportTicketDecidedAt_returnsInstantStrictlyAfterTicketCreatedAt() {
+        SeedTimeline timeline = new SeedTimeline(FIXED_SEED, Instant.parse("2026-09-01T00:00:00Z"));
+        Instant ticketCreatedAt = Instant.parse("2026-08-01T00:00:00Z");
+
+        Instant result = timeline.supportTicketDecidedAt(ticketCreatedAt);
+
+        assertThat(result).isAfter(ticketCreatedAt);
+    }
+
     private PostSeed postWithTimeHint(String timeHint) {
         return new PostSeed(
                 "post_test",
