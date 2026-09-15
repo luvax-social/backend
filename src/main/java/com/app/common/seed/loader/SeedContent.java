@@ -11,6 +11,7 @@ import com.app.common.seed.model.ModerationSupplementaryAction;
 import com.app.common.seed.model.ModerationSupplementaryReport;
 import com.app.common.seed.model.PersonaSeed;
 import com.app.common.seed.model.PostSeed;
+import com.app.common.seed.model.SupportTicketPoolSeed;
 import com.app.common.seed.model.UserSeed;
 
 /**
@@ -27,4 +28,5 @@ public record SeedContent(
         List<ModerationCaseSeed> moderationCases,
         List<ModerationSupplementaryAction> supplementaryModerationActions,
         List<ModerationSupplementaryReport> supplementaryModerationReports,
-        List<MediaManifestEntry> mediaManifest) {}
+        List<MediaManifestEntry> mediaManifest,
+        SupportTicketPoolSeed supportTicketPools) {}

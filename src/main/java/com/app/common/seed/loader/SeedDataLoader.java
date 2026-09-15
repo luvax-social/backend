@@ -25,6 +25,7 @@ import com.app.common.seed.model.ModerationSupplementaryAction;
 import com.app.common.seed.model.ModerationSupplementaryReport;
 import com.app.common.seed.model.PersonaSeed;
 import com.app.common.seed.model.PostSeed;
+import com.app.common.seed.model.SupportTicketPoolSeed;
 import com.app.common.seed.model.UserSeed;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -87,6 +88,8 @@ public class SeedDataLoader {
         List<ModerationSupplementaryReport> supplementaryReports =
                 nullToEmpty(moderationCasesFile.supplementaryReports());
         List<MediaManifestEntry> mediaManifest = readMediaManifest();
+        SupportTicketPoolSeed supportTicketPools =
+                readFile("support/support_ticket_pools.json", SupportTicketPoolSeed.class);
 
         Set<String> usernames = users.stream().map(UserSeed::username).collect(Collectors.toSet());
         Set<String> mediaIds =
@@ -119,7 +122,8 @@ public class SeedDataLoader {
                 moderationCases,
                 supplementaryActions,
                 supplementaryReports,
-                mediaManifest);
+                mediaManifest,
+                supportTicketPools);
     }
 
     private <T> List<T> nullToEmpty(List<T> list) {
