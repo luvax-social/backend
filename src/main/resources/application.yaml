@@ -254,17 +254,28 @@ app:
         initial-delay: ${CAMPAIGN_SENDER_INITIAL_DELAY:60s}
         fixed-delay: ${CAMPAIGN_SENDER_FIXED_DELAY:60s}
         batch-size: ${CAMPAIGN_SENDER_BATCH_SIZE:20}
-    turnstile:
-      # Empty by default, and SupportTurnstileVerifier refuses to verify with a blank secret, so a
-      # deployment that forgets to set TURNSTILE_SECRET_KEY fails the public form closed rather than
-      # silently admitting every submission. The dev profile defaults it to Cloudflare's test key.
-      secret-key: ${TURNSTILE_SECRET_KEY:}
-      verify-url: ${TURNSTILE_VERIFY_URL:https://challenges.cloudflare.com/turnstile/v0/siteverify}
-      # Bounds on the siteverify call. Cloudflare is a hard dependency of the public entry path, so
-      # the timeouts are short: a slow verifier must fail the submission quickly rather than hold a
-      # request thread.
-      connect-timeout: ${TURNSTILE_CONNECT_TIMEOUT:3s}
-      read-timeout: ${TURNSTILE_READ_TIMEOUT:5s}
+
+  # Cloudflare Turnstile. Promoted out of app.support.turnstile because the login, register,
+  # forgot-password, reset-password, resend-verification and report surfaces now verify against the
+  # same credentials and the same siteverify implementation. The environment variable names are
+  # unchanged, so no deployment has to be touched.
+  turnstile:
+    # Empty by default, and TurnstileVerifier reports UNAVAILABLE with a blank secret, so a
+    # deployment that forgets to set TURNSTILE_SECRET_KEY fails the public form closed rather than
+    # silently admitting every submission. The dev profile defaults it to Cloudflare's test key.
+    secret-key: ${TURNSTILE_SECRET_KEY:}
+    verify-url: ${TURNSTILE_VERIFY_URL:https://challenges.cloudflare.com/turnstile/v0/siteverify}
+    # Bounds on the siteverify call. Cloudflare is a hard dependency of the public entry path, so
+    # the timeouts are short: a slow verifier must fail the submission quickly rather than hold a
+    # request thread.
+    connect-timeout: ${TURNSTILE_CONNECT_TIMEOUT:3s}
+    read-timeout: ${TURNSTILE_READ_TIMEOUT:5s}
+    auth:
+      # Operator kill switch for the auth and report surfaces only; the public support form is not
+      # governed by it and stays on unconditionally. Exists so authentication can be restored
+      # without a redeploy if Cloudflare fails in a way the fail-open policy does not cover, such as
+      # answering promptly and wrongly with success: false.
+      enabled: ${TURNSTILE_AUTH_ENABLED:true}
 
   # Platform statistics collection and roll-up.
   #

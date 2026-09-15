@@ -58,6 +58,11 @@ public enum ApiErrorCode {
     AUTH_RESET_TOKEN_USED("AUTH_RESET_TOKEN_USED", "Reset token has already been used", HttpStatus.CONFLICT),
     AUTH_VERIFY_TOKEN_INVALID("AUTH_VERIFY_TOKEN_INVALID", "Email verification token is invalid or has expired", HttpStatus.BAD_REQUEST),
     AUTH_OAUTH2_EXCHANGE_CODE_INVALID("AUTH_OAUTH2_EXCHANGE_CODE_INVALID", "OAuth2 exchange code is invalid or has expired", HttpStatus.BAD_REQUEST),
+    // Raised by every surface behind AuthTurnstileGuard, the report submission included, so there
+    // is one captcha shape for the whole fail-open group rather than one per endpoint. Deliberately
+    // says nothing about which failure occurred: distinguishing a bad token from an expired or
+    // replayed one tells an attacker which of the three to fix.
+    AUTH_CAPTCHA_FAILED("AUTH_CAPTCHA_FAILED", "The verification challenge was not accepted", HttpStatus.BAD_REQUEST),
 
     // Users
     USER_ALREADY_EXISTS("USER_ALREADY_EXISTS", "An account with these details already exists", HttpStatus.CONFLICT),

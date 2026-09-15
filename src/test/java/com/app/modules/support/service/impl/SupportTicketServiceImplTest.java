@@ -27,6 +27,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
 import com.app.common.security.service.RateLimiterService;
+import com.app.common.turnstile.TurnstileOutcome;
+import com.app.common.turnstile.TurnstileVerifier;
 import com.app.modules.admin.repository.AdminActionRepository;
 import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.notification.service.NotificationService;
@@ -56,7 +58,7 @@ class SupportTicketServiceImplTest {
     @Mock private SupportTicketRepository supportTicketRepository;
     @Mock private SupportAuthorizationService supportAuthorizationService;
     @Mock private SupportTokenService supportTokenService;
-    @Mock private SupportTurnstileVerifier turnstileVerifier;
+    @Mock private TurnstileVerifier turnstileVerifier;
     @Mock private SupportConfirmationMailer confirmationMailer;
     @Mock private UserRepository userRepository;
     @Mock private AdminActionRepository adminActionRepository;
@@ -215,13 +217,14 @@ class SupportTicketServiceImplTest {
                 .isEqualTo(ApiErrorCode.SUPPORT_CATEGORY_NOT_PUBLIC);
 
         verify(supportTicketRepository, never()).save(any());
-        verify(turnstileVerifier, never()).verify(any(), any());
+        verify(turnstileVerifier, never()).verify(any(), any(), any());
     }
 
     // Turnstile runs before anything is written, so a failed challenge leaves no row behind.
     @Test
     void createPublic_invalidTurnstileToken_writesNothing() {
-        when(turnstileVerifier.verify(anyString(), any())).thenReturn(false);
+        when(turnstileVerifier.verify(anyString(), any(), any()))
+                .thenReturn(TurnstileOutcome.REJECTED);
 
         assertThatThrownBy(
                         () -> service.createPublic(publicRequest(SupportCategory.OTHER), "1.2.3.4"))
@@ -244,14 +247,15 @@ class SupportTicketServiceImplTest {
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.SUPPORT_CATEGORY_NOT_PUBLIC);
 
-        verify(turnstileVerifier, never()).verify(any(), any());
+        verify(turnstileVerifier, never()).verify(any(), any(), any());
         verify(supportTicketRepository, never()).save(any());
     }
 
     // The submission exists but is invisible to staff until the address is confirmed.
     @Test
     void createPublic_validSubmission_isHeldPendingConfirmation() {
-        when(turnstileVerifier.verify(anyString(), any())).thenReturn(true);
+        when(turnstileVerifier.verify(anyString(), any(), any()))
+                .thenReturn(TurnstileOutcome.VERIFIED);
         when(rateLimiterService.isAllowed(anyString(), anyInt(), anyLong())).thenReturn(true);
         when(userRepository.findByEmailIgnoreCase(EMAIL)).thenReturn(Optional.empty());
         when(supportTokenService.createConfirmationToken(any())).thenReturn("confirm-tok");
@@ -265,7 +269,8 @@ class SupportTicketServiceImplTest {
 
     @Test
     void createPublic_dailyLimitReached_writesNothing() {
-        when(turnstileVerifier.verify(anyString(), any())).thenReturn(true);
+        when(turnstileVerifier.verify(anyString(), any(), any()))
+                .thenReturn(TurnstileOutcome.VERIFIED);
         when(rateLimiterService.isAllowed(anyString(), anyInt(), anyLong())).thenReturn(false);
 
         assertThatThrownBy(
@@ -283,7 +288,8 @@ class SupportTicketServiceImplTest {
     // applies.
     @Test
     void createPublic_appliesTenPerAddressPerDay() {
-        when(turnstileVerifier.verify(anyString(), any())).thenReturn(true);
+        when(turnstileVerifier.verify(anyString(), any(), any()))
+                .thenReturn(TurnstileOutcome.VERIFIED);
         when(rateLimiterService.isAllowed(anyString(), anyInt(), anyLong())).thenReturn(true);
         when(userRepository.findByEmailIgnoreCase(EMAIL)).thenReturn(Optional.empty());
         when(supportTokenService.createConfirmationToken(any())).thenReturn("t");
@@ -311,7 +317,7 @@ class SupportTicketServiceImplTest {
 
         verify(supportTicketRepository, never()).save(any());
         // Refused before the challenge is spent, like the appeal guard above it.
-        verify(turnstileVerifier, never()).verify(any(), any());
+        verify(turnstileVerifier, never()).verify(any(), any(), any());
     }
 
     // P7-BE-003. The appeal link is the only credential a banned account holds and arrives in a

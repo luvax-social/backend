@@ -15,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
 import com.app.common.security.service.RateLimiterService;
+import com.app.common.turnstile.TurnstileOutcome;
+import com.app.common.turnstile.TurnstileSurface;
+import com.app.common.turnstile.TurnstileVerifier;
 import com.app.common.vocabulary.service.VocabularyService;
 import com.app.modules.admin.enums.AdminActionType;
 import com.app.modules.admin.repository.AdminActionRepository;
@@ -62,7 +65,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
     private final SupportTicketRepository supportTicketRepository;
     private final SupportAuthorizationService supportAuthorizationService;
     private final SupportTokenService supportTokenService;
-    private final SupportTurnstileVerifier turnstileVerifier;
+    private final TurnstileVerifier turnstileVerifier;
     private final SupportConfirmationMailer confirmationMailer;
     private final SupportTicketMapper supportTicketMapper;
     private final UserRepository userRepository;
@@ -76,7 +79,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
             SupportTicketRepository supportTicketRepository,
             SupportAuthorizationService supportAuthorizationService,
             SupportTokenService supportTokenService,
-            SupportTurnstileVerifier turnstileVerifier,
+            TurnstileVerifier turnstileVerifier,
             SupportConfirmationMailer confirmationMailer,
             SupportTicketMapper supportTicketMapper,
             UserRepository userRepository,
@@ -188,7 +191,16 @@ public class SupportTicketServiceImpl implements SupportTicketService {
             throw new AppException(ApiErrorCode.SUPPORT_CATEGORY_NOT_PUBLIC);
         }
         // Verified before anything is written, so a failed challenge leaves no row behind.
-        if (!turnstileVerifier.verify(request.turnstileToken(), clientIp)) {
+        //
+        // Fails closed on every outcome that is not a positive confirmation, which is the opposite
+        // of AuthTurnstileGuard and is deliberate. The auth and report surfaces can afford to admit
+        // a request Cloudflare did not answer for, because a per-caller rate-limit rule still
+        // stands behind them. This form has no such rule to fall back on - Turnstile plus the email
+        // confirmation are the whole of its defence - so an outage must stop it rather than open
+        // it. See the TurnstileVerifier class comment for why the reverse would be exploitable.
+        if (turnstileVerifier.verify(
+                        request.turnstileToken(), clientIp, TurnstileSurface.PUBLIC_SUPPORT)
+                != TurnstileOutcome.VERIFIED) {
             throw new AppException(ApiErrorCode.SUPPORT_CAPTCHA_FAILED);
         }
         String email = request.contactEmail().trim().toLowerCase(java.util.Locale.ROOT);

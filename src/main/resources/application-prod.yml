@@ -90,7 +90,11 @@ app:
     # variable inert, exactly as a restated refresh-cookie literal would. Populate the variable
     # with your ingress proxy CIDR(s) before deploying behind a reverse proxy; IpExtractor trusts
     # X-Forwarded-For only when the direct peer matches one. Example: 10.0.0.0/8,172.16.0.0/12
-    max-login-body-bytes: 2048
+    # Raised from 2048 when the auth surfaces took a turnstileToken field. The cap bounds how much
+    # AuthRateLimitFilter buffers to extract the rate-limit identifier; a Turnstile token runs to
+    # about 2048 characters, which does not fit alongside the existing login payload inside 2048
+    # bytes. 4096 remains a bound well under Tomcat's 1 MB limit.
+    max-login-body-bytes: 4096
     # refresh-cookie secure and same-site are intentionally not set here. They are the operator's
     # deployment-time knobs, bound from REFRESH_COOKIE_SECURE and REFRESH_COOKIE_SAME_SITE in
     # application.yaml, which already defaults them fail-closed to true and Lax. Restating them
