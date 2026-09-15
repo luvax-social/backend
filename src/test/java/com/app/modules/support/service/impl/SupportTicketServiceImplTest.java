@@ -38,6 +38,7 @@ import com.app.modules.support.dto.request.CreateSupportTicketRequest;
 import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
+import com.app.modules.support.dto.response.AppealSubmittedResponse;
 import com.app.modules.support.dto.response.SupportTicketResponse;
 import com.app.modules.support.entity.SupportTicket;
 import com.app.modules.support.enums.SupportCategory;
@@ -160,10 +161,10 @@ class SupportTicketServiceImplTest {
                         new SupportTokenService.AppealGrant(
                                 USER_ID, ACTION_ID, SupportCategory.APPEAL_BAN));
 
-        SupportTicketResponse response =
+        AppealSubmittedResponse response =
                 service.createFromSignedLink(new SignedAppealRequest("tok", "Subject", "Body"));
 
-        assertThat(response.source()).isEqualTo(SupportSource.SIGNED_LINK);
+        assertThat(response.ticket().source()).isEqualTo(SupportSource.SIGNED_LINK);
         assertThat(capturedFlushedTicket().getAdminActionId()).isEqualTo(ACTION_ID);
         // The collaborators that would mint a session are not even wired into this service, so the
         // property is structural: there is nothing here that could issue one.
@@ -594,6 +595,129 @@ class SupportTicketServiceImplTest {
             return ((AppException) thrown).getErrorCode();
         }
         throw new AssertionError("expected the call to be refused");
+    }
+
+    // The appeal token is spent by this very call, and the appellant holds no session. Without a
+    // status token they leave the redemption holding nothing at all.
+    @Test
+    void createFromSignedLink_issuesAStatusTokenForTheTicketItJustCreated() {
+        stubUser();
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(false);
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenReturn(
+                        new SupportTokenService.AppealGrant(
+                                USER_ID, ACTION_ID, SupportCategory.APPEAL_BAN));
+        when(supportTokenService.createStatusToken(any())).thenReturn("status-token");
+
+        AppealSubmittedResponse response =
+                service.createFromSignedLink(new SignedAppealRequest("tok", "Subject", "Body"));
+
+        assertThat(response.statusToken()).isEqualTo("status-token");
+        // Minted for the ticket that was actually written, and only after the appeal token is
+        // spent, so a refusal anywhere above issues nothing.
+        InOrder ordered = inOrder(supportTokenService);
+        ordered.verify(supportTokenService).consumeAppealToken("tok");
+        ordered.verify(supportTokenService).createStatusToken(response.ticket().id());
+    }
+
+    @Test
+    void createFromSignedLink_refusedAppeal_issuesNoStatusToken() {
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenThrow(new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID));
+
+        assertThatThrownBy(
+                        () ->
+                                service.createFromSignedLink(
+                                        new SignedAppealRequest("tok", "Subject", "Body")))
+                .isInstanceOf(AppException.class);
+
+        verify(supportTokenService, never()).createStatusToken(any());
+    }
+
+    @Test
+    void readByStatusToken_readsTheTicketInTheOwnerFacingShape() {
+        UUID ticketId = UUID.randomUUID();
+        when(supportTokenService.peekStatusToken("status-token")).thenReturn(ticketId);
+        when(supportTicketRepository.findById(ticketId))
+                .thenReturn(Optional.of(answeredAppeal(ticketId)));
+
+        SupportTicketResponse response = service.readByStatusToken("status-token");
+
+        assertThat(response.id()).isEqualTo(ticketId);
+        assertThat(response.status()).isEqualTo(SupportTicketStatus.ANSWERED);
+        assertThat(response.staffResponse()).isEqualTo("Upheld on review");
+    }
+
+    // The structural guarantee this endpoint rests on. The owner-facing record has no component
+    // for the internal note, the assignee or the escalation reason, so no mapper edit can leak
+    // one to an anonymous caller.
+    @Test
+    void readByStatusToken_neverCarriesTheInternalNoteOrAnyStaffField() {
+        UUID ticketId = UUID.randomUUID();
+        SupportTicket ticket = answeredAppeal(ticketId);
+        ticket.setInternalNote("Third offence, do not reinstate");
+        ticket.setAssignedTo(UUID.randomUUID());
+        ticket.setEscalationReason("Escalated by moderator");
+        when(supportTokenService.peekStatusToken("status-token")).thenReturn(ticketId);
+        when(supportTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+
+        SupportTicketResponse response = service.readByStatusToken("status-token");
+
+        assertThat(
+                        java.util.Arrays.stream(SupportTicketResponse.class.getRecordComponents())
+                                .map(java.lang.reflect.RecordComponent::getName))
+                .doesNotContain("internalNote", "assignedTo", "escalationReason", "respondedBy");
+        assertThat(response.toString()).doesNotContain("Third offence, do not reinstate");
+        assertThat(response.toString()).doesNotContain("Escalated by moderator");
+    }
+
+    @Test
+    void readByStatusToken_repeatedReads_neverConsumeTheToken() {
+        UUID ticketId = UUID.randomUUID();
+        when(supportTokenService.peekStatusToken("status-token")).thenReturn(ticketId);
+        when(supportTicketRepository.findById(ticketId))
+                .thenReturn(Optional.of(answeredAppeal(ticketId)));
+
+        service.readByStatusToken("status-token");
+        service.readByStatusToken("status-token");
+        service.readByStatusToken("status-token");
+
+        // There is no consuming counterpart to peekStatusToken at all, which is what makes this
+        // structural rather than a matter of calling the right method.
+        verify(supportTokenService, never()).consumeAppealToken(anyString());
+        verify(supportTokenService, never()).consumeConfirmationToken(anyString());
+    }
+
+    // Enumeration safety. A token that was never real, a token that expired, and a token naming a
+    // ticket that has since gone must be one answer, or the endpoint reports which guesses landed.
+    @Test
+    void readByStatusToken_everyNegativeCaseAnswersIdentically() {
+        when(supportTokenService.peekStatusToken("unknown"))
+                .thenThrow(new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID));
+        UUID missingTicketId = UUID.randomUUID();
+        when(supportTokenService.peekStatusToken("valid-but-purged")).thenReturn(missingTicketId);
+        when(supportTicketRepository.findById(missingTicketId)).thenReturn(Optional.empty());
+
+        ApiErrorCode unknown = errorCodeOf(() -> service.readByStatusToken("unknown"));
+        ApiErrorCode purged = errorCodeOf(() -> service.readByStatusToken("valid-but-purged"));
+
+        assertThat(unknown).isEqualTo(ApiErrorCode.SUPPORT_TOKEN_INVALID);
+        assertThat(purged).isEqualTo(unknown);
+    }
+
+    private static SupportTicket answeredAppeal(UUID ticketId) {
+        return SupportTicket.builder()
+                .id(ticketId)
+                .userId(USER_ID)
+                .contactEmail(EMAIL)
+                .category(SupportCategory.APPEAL_BAN)
+                .subject("Subject")
+                .body("Body")
+                .status(SupportTicketStatus.ANSWERED)
+                .source(SupportSource.SIGNED_LINK)
+                .adminActionId(ACTION_ID)
+                .staffResponse("Upheld on review")
+                .build();
     }
 
     private void stubUser() {

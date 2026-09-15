@@ -11,6 +11,7 @@ import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.RespondSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
+import com.app.modules.support.dto.response.AppealSubmittedResponse;
 import com.app.modules.support.dto.response.SupportTicketResponse;
 import com.app.modules.support.dto.response.SupportTicketStaffResponse;
 import com.app.modules.support.enums.SupportTicketStatus;
@@ -47,7 +48,7 @@ public interface SupportTicketService {
      *     already redeemed, and {@code SUPPORT_TICKET_ALREADY_OPEN} when the account already holds
      *     a non-terminal ticket
      */
-    SupportTicketResponse createFromSignedLink(SignedAppealRequest request);
+    AppealSubmittedResponse createFromSignedLink(SignedAppealRequest request);
 
     /**
      * Opens an appeal from a session, against an audit row the caller owns.
@@ -76,6 +77,26 @@ public interface SupportTicketService {
      *     holds a non-terminal ticket
      */
     SupportTicketResponse createInProductAppeal(UUID userId, InProductAppealRequest request);
+
+    /**
+     * Reads one appeal for an appellant who holds a status token and nothing else.
+     *
+     * <p>Anonymous, read-only and idempotent. It never consumes the token, because a status link is
+     * meant to be followed repeatedly across the life of the appeal.
+     *
+     * <p>Answers the owner-facing shape, the same record {@code getOwn} returns. Reusing it is the
+     * point: a parallel record for this one caller would be two types that must stay in sync, and
+     * the field they must agree to withhold is {@code internalNote}.
+     *
+     * <p>Every negative case answers identically. An unknown token, an expired token and a token
+     * naming a ticket that no longer exists are indistinguishable, so the endpoint cannot be used
+     * to discover whether a token was ever real.
+     *
+     * @param rawToken the token from the status link
+     * @return the appeal as its author sees it
+     * @throws AppException {@code SUPPORT_TOKEN_INVALID} for every negative case
+     */
+    SupportTicketResponse readByStatusToken(String rawToken);
 
     /**
      * Reports what an appeal link authorises, without redeeming it.

@@ -25,6 +25,7 @@ public class SupportTokenServiceImpl implements SupportTokenService {
 
     private static final String APPEAL_PREFIX = "support:token:appeal:";
     private static final String CONFIRMATION_PREFIX = "support:token:confirmation:";
+    private static final String STATUS_PREFIX = "support:token:appeal-status:";
     private static final String INDEX_INFIX = "subject:";
     private static final String SHA_256 = "SHA-256";
     private static final String VALUE_SEPARATOR = "|";
@@ -41,6 +42,13 @@ public class SupportTokenServiceImpl implements SupportTokenService {
     // Short, because the submitter is sitting at the form when it is sent and a stale confirmation
     // link should not keep an unconfirmed row alive.
     private static final Duration CONFIRMATION_TTL = Duration.ofHours(24);
+
+    // Ninety days, against thirty for the appeal link that precedes it. The appeal window bounds
+    // how long the appellant has to act; this one bounds how long they can watch the result, and
+    // must outlive it. A queue that is slow exactly when it is busiest is the case this exists for,
+    // and an appellant whose status link died before their appeal was decided is back to holding
+    // nothing. It still expires, because a token that never does is a credential.
+    private static final Duration STATUS_TTL = Duration.ofDays(90);
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
@@ -133,6 +141,16 @@ public class SupportTokenServiceImpl implements SupportTokenService {
     public void revokeAppealToken(UUID adminActionId) {
         redisTemplate.execute(
                 revokeScript, List.of(APPEAL_PREFIX + INDEX_INFIX + adminActionId), APPEAL_PREFIX);
+    }
+
+    @Override
+    public String createStatusToken(UUID ticketId) {
+        return create(STATUS_PREFIX, ticketId.toString(), ticketId.toString(), STATUS_TTL);
+    }
+
+    @Override
+    public UUID peekStatusToken(String rawToken) {
+        return parseTicketId(peek(STATUS_PREFIX, rawToken));
     }
 
     @Override

@@ -27,6 +27,7 @@ import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
+import com.app.modules.support.dto.response.AppealSubmittedResponse;
 import com.app.modules.support.dto.response.SupportTicketResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -185,8 +186,44 @@ public interface SupportApi {
     })
     @MalformedBodyErrorResponses
     @PostMapping(ApiConstants.Support.APPEAL)
-    ResponseEntity<ApiResponse<SupportTicketResponse>> createAppeal(
+    ResponseEntity<ApiResponse<AppealSubmittedResponse>> createAppeal(
             @Valid @RequestBody SignedAppealRequest request);
+
+    /** Reads one appeal for an appellant who holds a status token and no session. */
+    @Operation(
+            summary = "Read your appeal with a status token",
+            description =
+                    "Reads one appeal in the shape its own author sees, for an appellant who holds"
+                            + " no session. The appeal token is spent by the redemption that"
+                            + " created the ticket, so this token is the only thing that can reach"
+                            + " it afterwards. Read-only and idempotent: it never consumes the"
+                            + " token, because a status link is meant to be followed repeatedly."
+                            + " Carries no internal note, no assignee and no escalation reason -"
+                            + " it reuses the owner-facing shape, which has no field for any of"
+                            + " them. Every negative case answers identically.",
+            security = {@SecurityRequirement(name = "")})
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "The appeal"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400",
+                description = "The token is unknown or has expired",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "429",
+                description = "Rate limit exceeded",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @GetMapping(ApiConstants.Support.APPEAL_STATUS)
+    ResponseEntity<ApiResponse<SupportTicketResponse>> readAppealStatus(
+            @RequestParam("token") @NotBlank String token);
 
     /** Opens an appeal from a session, against a moderation decision the caller owns. */
     @Operation(

@@ -33,6 +33,7 @@ import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.RespondSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
+import com.app.modules.support.dto.response.AppealSubmittedResponse;
 import com.app.modules.support.dto.response.SupportTicketResponse;
 import com.app.modules.support.dto.response.SupportTicketStaffResponse;
 import com.app.modules.support.entity.SupportTicket;
@@ -128,7 +129,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
 
     @Override
     @Transactional
-    public SupportTicketResponse createFromSignedLink(SignedAppealRequest request) {
+    public AppealSubmittedResponse createFromSignedLink(SignedAppealRequest request) {
         // Redeeming the token mints nothing. No session, no refresh token row, no security context.
         // It authorises exactly one write: this ticket, against the audit row the token names.
         //
@@ -152,7 +153,12 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         // racing this line still create exactly one ticket: the loser is refused here and its
         // insert rolls back with the transaction.
         supportTokenService.consumeAppealToken(request.token());
-        return supportTicketMapper.toOwnerResponse(saved);
+        // Minted only now, after the appeal token is spent. The appellant holds no session and the
+        // credential they arrived with has just been destroyed, so without this they leave with no
+        // way back to the appeal they have only just filed.
+        return new AppealSubmittedResponse(
+                supportTicketMapper.toOwnerResponse(saved),
+                supportTokenService.createStatusToken(saved.getId()));
     }
 
     @Override
@@ -233,6 +239,20 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         // Flushed here so a constraint violation surfaces while the caller's token, if it holds
         // one, is still unspent.
         return supportTicketRepository.saveAndFlush(ticket);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SupportTicketResponse readByStatusToken(String rawToken) {
+        // Peek, never consume: a status link is followed repeatedly over the life of the appeal.
+        UUID ticketId = supportTokenService.peekStatusToken(rawToken);
+        return supportTicketRepository
+                .findById(ticketId)
+                .map(supportTicketMapper::toOwnerResponse)
+                // The same answer an unknown or expired token gets. A ticket that has since been
+                // purged must not be distinguishable from a token that was never real, or the
+                // endpoint tells an anonymous caller which of their guesses existed.
+                .orElseThrow(() -> new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID));
     }
 
     @Override

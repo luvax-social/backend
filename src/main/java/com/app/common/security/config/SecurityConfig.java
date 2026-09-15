@@ -286,6 +286,18 @@ public class SecurityConfig {
                         ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL_VALIDATE)
                 .permitAll();
 
+        // One appeal, read by the appellant who filed it and holds no session. Anonymous for the
+        // same reason every other route here is: the account is banned or suspended and cannot
+        // authenticate. The appeal token was spent by the redemption that created the ticket, so
+        // this token is the only thing that can reach it afterwards. It widens nothing - the
+        // caller must already hold a 32-byte random token - and it answers the owner-facing shape,
+        // which structurally carries no internal note, assignee or escalation reason. Read-only:
+        // it must never consume the token, because the link is meant to be followed repeatedly.
+        auth.requestMatchers(
+                        HttpMethod.GET,
+                        ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL_STATUS)
+                .permitAll();
+
         auth.requestMatchers(PUBLIC_INFRA_PATHS).permitAll();
         // First matching rule wins, so this has to precede the ADMIN rule to have any effect.
         // Absent the opt-in, the metrics endpoint falls through to that rule like every other

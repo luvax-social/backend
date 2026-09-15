@@ -33,6 +33,7 @@ import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
+import com.app.modules.support.dto.response.AppealSubmittedResponse;
 import com.app.modules.support.dto.response.SupportTicketResponse;
 import com.app.modules.support.service.SupportTicketService;
 
@@ -116,7 +117,7 @@ public class SupportController extends BaseController implements SupportApi {
     @Override
     @PostMapping(ApiConstants.Support.APPEAL)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
-    public ResponseEntity<ApiResponse<SupportTicketResponse>> createAppeal(
+    public ResponseEntity<ApiResponse<AppealSubmittedResponse>> createAppeal(
             @Valid @RequestBody SignedAppealRequest request) {
         return ResponseEntity.ok(
                 ApiResponse.success(
@@ -184,6 +185,28 @@ public class SupportController extends BaseController implements SupportApi {
         return ResponseEntity.ok(
                 ApiResponse.success(
                         ApiSuccessCode.OK, supportTicketService.describeSignedLink(token)));
+    }
+
+    /**
+     * Reads one appeal for an appellant holding a status token and no session.
+     *
+     * <p>Anonymous for the same reason the appeal itself is, and read-only by construction: the
+     * token is peeked and never spent, so the link survives being followed as often as the
+     * appellant likes. That is the whole point of it - the appeal token was destroyed by the
+     * redemption that created the ticket.
+     *
+     * <p>Answers the owner-facing shape, which structurally has no field for the internal note, the
+     * assignee or the escalation reason. Every negative case answers alike.
+     */
+    @Override
+    @GetMapping(ApiConstants.Support.APPEAL_STATUS)
+    @StrictQueryParameters
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<SupportTicketResponse>> readAppealStatus(
+            @RequestParam("token") @NotBlank String token) {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        ApiSuccessCode.OK, supportTicketService.readByStatusToken(token)));
     }
 
     /**

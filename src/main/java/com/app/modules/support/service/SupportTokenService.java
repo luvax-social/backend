@@ -82,6 +82,34 @@ public interface SupportTokenService {
     void revokeAppealToken(UUID adminActionId);
 
     /**
+     * Issues the token that lets an appellant with no session read their own appeal.
+     *
+     * <p>The appeal token is spent on redemption by an atomic get-then-delete, so an appellant who
+     * has just filed holds nothing at all and can learn nothing about what happens next. They have
+     * no session either - that is the whole premise of the signed path - so there is no other
+     * credential to read the ticket with.
+     *
+     * <p>Read-only by construction. It is never consumed, so the holder may check as often as they
+     * like, and it grants nothing but that one ticket in the shape its own author sees.
+     *
+     * @param ticketId the appeal just created
+     * @return the raw token to place in the link; only its hash is stored
+     */
+    String createStatusToken(UUID ticketId);
+
+    /**
+     * Resolves a status token to the ticket it reads, without consuming it.
+     *
+     * <p>Deliberately has no consuming counterpart. A status link is meant to be followed
+     * repeatedly over the life of the appeal, so spending it on first use would defeat it.
+     *
+     * @param rawToken the token from the link
+     * @return the ticket the token reads
+     * @throws AppException {@code SUPPORT_TOKEN_INVALID} when the token is unknown or expired
+     */
+    UUID peekStatusToken(String rawToken);
+
+    /**
      * Issues the token that confirms a public submitter controls the address they gave.
      *
      * @param ticketId the ticket held in {@code PENDING_CONFIRMATION}

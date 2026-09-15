@@ -183,6 +183,10 @@ public final class ApiConstants {
         // the landing screen can show a dead-link state before the reader writes their appeal
         // rather than after. Read-only by construction: it must never consume the token.
         public static final String APPEAL_VALIDATE = "/appeal/validate";
+        // Anonymous. Reads one appeal for the appellant who filed it and holds no session. The
+        // appeal token is spent on redemption, so without this they leave holding nothing and can
+        // never learn whether their appeal was read. Read-only: it must never consume its token.
+        public static final String APPEAL_STATUS = "/appeal/status";
         // Authenticated. Opens an appeal against an audit row the caller owns, without the mail
         // round trip a signed link requires. A signed link exists because its holder has no
         // session; an appellant who has one does not need it, and requiring it strands them when
