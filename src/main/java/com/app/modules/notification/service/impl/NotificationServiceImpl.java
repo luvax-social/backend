@@ -213,8 +213,15 @@ public class NotificationServiceImpl implements NotificationService {
             // strike that follows three of them would arrive unexplained.
             // SUPPORT_TICKET_UPDATE joins them for the same reason: an account that could switch
             // it off would ask a question and never be told it had been answered.
+            // The three content-removal types join them on the same ground: each is an
+            // enforcement notice carrying the appeal link for the decision behind it, so an
+            // account that could switch them off would lose its only in-product route to
+            // contest a removal.
             case WARNING,
                             POST_REMOVED,
+                            COMMENT_REMOVED,
+                            STORY_REMOVED,
+                            MESSAGE_REMOVED,
                             REPORT_POST_REMOVED,
                             POST_RESTORED,
                             REPORT_DISMISSED,
