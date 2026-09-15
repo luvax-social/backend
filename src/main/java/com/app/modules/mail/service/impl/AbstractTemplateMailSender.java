@@ -163,13 +163,6 @@ public abstract class AbstractTemplateMailSender implements MailSender {
     }
 
     /**
-     * Renders and delivers the public-form confirmation link.
-     *
-     * @param variables Thymeleaf variables for the confirmation template
-     * @param toEmail the unproven address the submitter gave
-     * @return the provider's identifier for the accepted message, or null
-     */
-    /**
      * Renders and delivers one campaign mail.
      *
      * @param subject the administrator-authored subject

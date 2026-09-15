@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - Seeded 70 support tickets and 10 verification requests, covering every category and status, in the development database seed pipeline, with matching moderation audit rows for staff decisions.
+- `docs/ops/COOLIFY_RUNBOOK.md`, documenting the production Coolify topology, the backend environment variable matrix, a resolved Elasticsearch version-mismatch incident, the Gorse Compose deployment gotchas, and the seed-on-prod toggle sequence.
 - A pull request check that rejects any commit whose subject exceeds the 80-character limit, closing the gap that let six over-length subjects reach develop while only pull request titles were validated.
 - `scripts/regenerate_schema_sql.sh`, which rebuilds `database/schema.sql` from a clean Flyway run and proves the result by replaying it into a second database and comparing both catalogs.
 - `scripts/regenerate_struct_figures.sh`, which regenerates the migration table, the module list, the test-class table, the RabbitMQ topology, the Redis key prefixes and the declared versions from `git ls-files`.
@@ -705,6 +706,7 @@ Existing group conversations are deleted by the upgrade, after being copied into
 - `MailProperties` record from `common/config/` replaced by the standard class at `common/mail/config/`
 - `MailService`, `MailServiceImpl`, and `MailSendException` from `modules/mail/` relocated into `common/mail/`
 - `ErrorResponse` record and the legacy `common/exception/` token and mail exception classes superseded by `ApiException` and the relocated domain exceptions
+- Four stray Javadoc blocks that had drifted from the method they described and no longer matched the code beneath them.
 
 ### Security
 - The mail transport is now resolved from `APP_MAIL_TRANSPORT` in every profile, so the startup guard that refuses the non-network transport outside development is what actually enforces it. The production profile pinned the transport to a literal, which made the variable inert there and left the guard's published refusal unreachable.
