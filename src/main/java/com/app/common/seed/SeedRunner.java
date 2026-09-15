@@ -33,6 +33,7 @@ import com.app.common.seed.writer.NotificationSeedWriter;
 import com.app.common.seed.writer.PostSeedWriter;
 import com.app.common.seed.writer.SocialGraphSeedWriter;
 import com.app.common.seed.writer.StorySeedWriter;
+import com.app.common.seed.writer.SupportSeedWriter;
 import com.app.common.seed.writer.UserSeedWriter;
 
 import lombok.RequiredArgsConstructor;
@@ -101,6 +102,7 @@ public class SeedRunner {
     private final MessageSeedWriter messageSeedWriter;
     private final NotificationSeedWriter notificationSeedWriter;
     private final ModerationSeedWriter moderationSeedWriter;
+    private final SupportSeedWriter supportSeedWriter;
     private final AnalyticsSeedWriter analyticsSeedWriter;
     private final SeedOutboxEmitter seedOutboxEmitter;
     private final SeedProperties seedProperties;
@@ -245,6 +247,7 @@ public class SeedRunner {
         // Must run before NotificationSeedWriter: warning notifications are read back from
         // user_warnings, which this call is what populates.
         moderationSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
+        supportSeedWriter.write(content, usersByUsername, timeline);
         notificationSeedWriter.write(timeline);
         analyticsSeedWriter.write(timeline);
         return new WriterChainResult(usersByUsername, postIdBySeedId);
@@ -355,6 +358,8 @@ public class SeedRunner {
                         "user_warnings",
                         "user_strikes",
                         "hashtags",
+                        "support_tickets",
+                        "verification_requests",
                         "platform_stats",
                         "user_events",
                         "outbox_events");

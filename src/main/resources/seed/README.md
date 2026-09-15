@@ -26,6 +26,7 @@ before reseeding.
 | Moderation cases (full narrative) | 6 |
 | Reports | ~180 (narrative + standalone) |
 | Warnings / strikes | 27 / 14 |
+| Support tickets / verification requests | 70 / 10 |
 | Personas | 10 |
 
 ## Running the seed
@@ -157,6 +158,26 @@ message's `media_ref` is resolved the same way a post's media is: `MediaSeedWrit
 `media_assets` row owned by the message's sender for the referenced manifest entry, reusing entries
 already in `media_manifest.json` rather than provisioning anything new.
 
+## Support tickets
+
+`SupportSeedWriter` seeds 70 `support_tickets` (every `support_category` value, 6-10 tickets each)
+plus 10 `verification_requests` from `support/support_ticket_pools.json`'s pooled request, response
+and escalation prose.
+There is no message thread to seed: the schema carries exactly one `staff_response` and one
+`internal_note` per ticket, never a conversation, so every ticket is written once in its final
+resolved shape.
+Every decision is attributed to one of the two fixed QA staff accounts: `appeal_*` tickets are
+always decided by `admin` (a moderator may claim or escalate one but never decide it), every other
+category is decided by `mod1` unless it went through an escalate-to-admin path, in which case
+`admin` makes the final call.
+`appeal_*` tickets link `admin_action_id` back to a real punitive `admin_actions` row
+`ModerationSeedWriter` already wrote against the target account (for example a `ban_user` row for an
+`appeal_ban` ticket), matching how a real signed-link appeal binds to the audit row it contests.
+Every decision - `respond_support_ticket`, `reject_support_ticket`, `escalate_support_ticket` - also
+writes a matching `admin_actions` row, mirroring `AdminActionRecorder`'s production shape, which is
+what keeps `SeedRunner.assertEnumCoverage()`'s floor for those three action types satisfied. No
+outbox event is ever enqueued for this data.
+
 ## File map
 
 Files used across nearly every writer stay at the top level; everything else is grouped by what it
@@ -172,6 +193,7 @@ describes.
 | `messaging/conversations.json` | 85 conversations and their message history (60 between generated accounts, 25 involving `admin`) | `MessageSeedWriter` |
 | `moderation/moderation_cases.json` | 6 narrative moderation cases plus supplementary actions and reports | `ModerationSeedWriter` |
 | `media/media_manifest.json` | 165 Pexels-sourced media entries already uploaded to R2 (avatars are not in this file - see "Avatars" below) | `MediaSeedWriter`, `UserSeedWriter` (banner `cdn_url` lookup) |
+| `support/support_ticket_pools.json` | Pooled support-ticket request/response/escalation prose and verification claims | `SupportSeedWriter` |
 
 ## Java package map
 
@@ -179,10 +201,10 @@ describes.
 |---------|-------|
 | `com.app.common.seed` | `SeedRunner` (orchestration entry point) and `SeedProperties` |
 | `com.app.common.seed.loader` | `SeedDataLoader` (reads and validates all seed JSON) and `SeedContent` (the loaded, typed result) |
-| `com.app.common.seed.model` | The 14 content record types the JSON files deserialize into |
+| `com.app.common.seed.model` | The 17 content record types the JSON files deserialize into |
 | `com.app.common.seed.time` | `SeedTimeline`, the deterministic timestamp generator |
 | `com.app.common.seed.reset` | `SeedResetService`, the pre-run table truncation |
-| `com.app.common.seed.writer` | The 11 domain writers, one per subsystem |
+| `com.app.common.seed.writer` | The 12 domain writers, one per subsystem |
 | `com.app.common.seed.outbox` | `SeedOutboxEmitter` / `SeedOutboxBatchWriter`, which replay seeded activity through the real transactional outbox |
 
 ## Avatars

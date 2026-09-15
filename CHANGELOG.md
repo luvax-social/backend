@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Seeded 70 support tickets and 10 verification requests, covering every category and status, in the development database seed pipeline, with matching moderation audit rows for staff decisions.
 - `docs/ops/COOLIFY_RUNBOOK.md`, documenting the production Coolify topology, the backend environment variable matrix, a resolved Elasticsearch version-mismatch incident, the Gorse Compose deployment gotchas, and the seed-on-prod toggle sequence.
 - A pull request check that rejects any commit whose subject exceeds the 80-character limit, closing the gap that let six over-length subjects reach develop while only pull request titles were validated.
 - `scripts/regenerate_schema_sql.sh`, which rebuilds `database/schema.sql` from a clean Flyway run and proves the result by replaying it into a second database and comparing both catalogs.
@@ -808,6 +809,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- Added an integration test verifying support ticket seed data volume, category coverage, the one-open-ticket-per-lane constraint, and audit-row coverage.
 - The actuator access test no longer depends on a search tier running on the developer machine; it declared no such container, so its anonymous health probe answered 503 and the class failed wherever that tier was absent.
 - The administrative comment moderation test now asserts the moderation tombstone and that the owner deletion column is left untouched, which is the separation the schema has enforced since the two were split.
 - The unrouted-constant guard now recognises the hashtag by-name lookup and posts-by-hashtag listing as routed, pinning both to their handlers instead of asserting they had been removed.

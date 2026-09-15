@@ -22,6 +22,7 @@ class SeedDataLoaderTest {
         assertThat(content.conversations()).hasSize(1);
         assertThat(content.moderationCases()).hasSize(1);
         assertThat(content.mediaManifest()).hasSize(2);
+        assertThat(content.supportTicketPools().requestsByCategory()).containsKey("bug_report");
     }
 
     @Test

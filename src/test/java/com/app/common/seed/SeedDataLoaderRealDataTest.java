@@ -32,4 +32,23 @@ class SeedDataLoaderRealDataTest {
         // avatar_url field and UserSeedWriter.
         assertThat(content.mediaManifest()).hasSize(125 + 15 + 25);
     }
+
+    @Test
+    void load_realSeedContent_populatesSupportTicketPools() {
+        SeedContent content = new SeedDataLoader().load();
+
+        assertThat(content.supportTicketPools()).isNotNull();
+        assertThat(content.supportTicketPools().requestsByCategory())
+                .containsKeys(
+                        "appeal_ban",
+                        "appeal_suspension",
+                        "appeal_warning_strike",
+                        "appeal_content_removal",
+                        "account_access",
+                        "account_data",
+                        "bug_report",
+                        "safety_concern",
+                        "other");
+        assertThat(content.supportTicketPools().verificationRequests()).isNotEmpty();
+    }
 }
