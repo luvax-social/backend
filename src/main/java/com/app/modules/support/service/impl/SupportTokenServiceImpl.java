@@ -67,14 +67,28 @@ public class SupportTokenServiceImpl implements SupportTokenService {
                     + "redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[4])) "
                     + "return ARGV[1]";
 
+    // Atomic revoke: read the reverse key, then drop the forward and reverse keys together. The
+    // mirror image of CREATE_SCRIPT, minus the new token. KEYS[1] is the reverse key and ARGV[1]
+    // the prefix. Returns nothing the caller needs; revoking a subject that holds no token is the
+    // ordinary case, not an error.
+    private static final String REVOKE_SCRIPT =
+            "local prev = redis.call('GET', KEYS[1]) "
+                    + "if prev then "
+                    + "  redis.call('DEL', ARGV[1] .. prev) "
+                    + "  redis.call('DEL', KEYS[1]) "
+                    + "end "
+                    + "return 1";
+
     private final StringRedisTemplate redisTemplate;
     private final RedisScript<String> consumeScript;
     private final RedisScript<String> createScript;
+    private final RedisScript<Long> revokeScript;
 
     public SupportTokenServiceImpl(StringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
         this.consumeScript = new DefaultRedisScript<>(CONSUME_SCRIPT, String.class);
         this.createScript = new DefaultRedisScript<>(CREATE_SCRIPT, String.class);
+        this.revokeScript = new DefaultRedisScript<>(REVOKE_SCRIPT, Long.class);
     }
 
     @Override
@@ -113,6 +127,12 @@ public class SupportTokenServiceImpl implements SupportTokenService {
         } catch (IllegalArgumentException ex) {
             throw new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID);
         }
+    }
+
+    @Override
+    public void revokeAppealToken(UUID adminActionId) {
+        redisTemplate.execute(
+                revokeScript, List.of(APPEAL_PREFIX + INDEX_INFIX + adminActionId), APPEAL_PREFIX);
     }
 
     @Override

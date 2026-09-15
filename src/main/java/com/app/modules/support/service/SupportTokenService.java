@@ -67,6 +67,21 @@ public interface SupportTokenService {
     AppealGrant peekAppealToken(String rawToken);
 
     /**
+     * Destroys any unspent appeal token for one audit row.
+     *
+     * <p>Called when the in-product appeal path opens an appeal against that row. The two entry
+     * paths lead to the same ticket and one decision gets one appeal, so leaving a signed link live
+     * after the in-product appeal is filed would hand the holder a credential that can only ever be
+     * refused - and, worse, one that survives a rejection.
+     *
+     * <p>Idempotent and silent. The common case is that no token was ever minted for the row, which
+     * is not an error.
+     *
+     * @param adminActionId the audit row whose link is being withdrawn
+     */
+    void revokeAppealToken(UUID adminActionId);
+
+    /**
      * Issues the token that confirms a public submitter controls the address they gave.
      *
      * @param ticketId the ticket held in {@code PENDING_CONFIRMATION}

@@ -29,10 +29,13 @@ import com.app.common.exception.AppException;
 import com.app.common.security.service.RateLimiterService;
 import com.app.common.turnstile.TurnstileOutcome;
 import com.app.common.turnstile.TurnstileVerifier;
+import com.app.modules.admin.entity.AdminAction;
+import com.app.modules.admin.enums.AdminActionType;
 import com.app.modules.admin.repository.AdminActionRepository;
 import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
+import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.SupportTicketResponse;
@@ -414,6 +417,183 @@ class SupportTicketServiceImplTest {
 
         assertThat(response.toString()).doesNotContain("Known abuser");
         assertThat(response.staffResponse()).isEqualTo("Here is our answer.");
+    }
+
+    @Test
+    void createInProductAppeal_owner_opensTheAppealAndDerivesTheCategory() {
+        stubUser();
+        stubAction(AdminActionType.REMOVE_COMMENT, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(false);
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(false);
+
+        SupportTicketResponse response =
+                service.createInProductAppeal(
+                        USER_ID, new InProductAppealRequest(ACTION_ID, "Subject", "Body"));
+
+        assertThat(response.status()).isEqualTo(SupportTicketStatus.OPEN);
+        // AUTHENTICATED because it arrived on a session. admin_action_id being set is what makes
+        // it an appeal, exactly as it is for the signed-link ticket.
+        assertThat(response.source()).isEqualTo(SupportSource.AUTHENTICATED);
+        SupportTicket written = capturedFlushedTicket();
+        assertThat(written.getAdminActionId()).isEqualTo(ACTION_ID);
+        // Derived server-side from the action type, never taken from the request.
+        assertThat(written.getCategory()).isEqualTo(SupportCategory.APPEAL_CONTENT_REMOVAL);
+    }
+
+    // The identifier in the request is not a credential. A caller who is not the target of the row
+    // must get exactly the answer an unknown identifier gets, or the endpoint becomes an oracle
+    // for whether a given id names a real moderation decision.
+    @Test
+    void createInProductAppeal_foreignAction_answersExactlyAsAnUnknownOneDoes() {
+        stubAction(AdminActionType.BAN_USER, UUID.randomUUID());
+
+        ApiErrorCode foreign =
+                errorCodeOf(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")));
+
+        UUID unknownId = UUID.randomUUID();
+        when(adminActionRepository.findById(unknownId)).thenReturn(Optional.empty());
+        ApiErrorCode unknown =
+                errorCodeOf(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(unknownId, "Subject", "Body")));
+
+        assertThat(foreign).isEqualTo(ApiErrorCode.SUPPORT_APPEAL_ACTION_NOT_FOUND);
+        assertThat(unknown).isEqualTo(foreign);
+        verify(supportTicketRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createInProductAppeal_unmappedActionType_isRefused() {
+        // RESTORE_POST is reinstating. There is nothing to contest about being reinstated, so
+        // AppealCategories maps it to nothing.
+        stubAction(AdminActionType.RESTORE_POST, USER_ID);
+
+        assertThatThrownBy(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.SUPPORT_APPEAL_NOT_APPEALABLE);
+
+        verify(supportTicketRepository, never()).saveAndFlush(any());
+    }
+
+    // One decision, one appeal. The open-ticket guard does not cover this: a rejected first appeal
+    // is terminal, so without this check the same row could be appealed again indefinitely.
+    @Test
+    void createInProductAppeal_secondAppealAgainstTheSameDecision_isRefused() {
+        stubUser();
+        stubAction(AdminActionType.WARN_USER, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(true);
+
+        assertThatThrownBy(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.SUPPORT_APPEAL_ALREADY_FILED);
+
+        verify(supportTicketRepository, never()).saveAndFlush(any());
+    }
+
+    // The two entry paths lead to one ticket. Leaving a signed link live after the in-product
+    // appeal is filed would hand its holder a credential that can only ever be refused, and one
+    // that would outlive a rejection of this very appeal.
+    @Test
+    void createInProductAppeal_revokesAnyUnspentSignedLinkForTheSameDecision() {
+        stubUser();
+        stubAction(AdminActionType.SUSPEND_USER, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(false);
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(false);
+
+        service.createInProductAppeal(
+                USER_ID, new InProductAppealRequest(ACTION_ID, "Subject", "Body"));
+
+        // Revoked after the write, so a refusal above leaves the link intact.
+        InOrder ordered = inOrder(supportTicketRepository, supportTokenService);
+        ordered.verify(supportTicketRepository).saveAndFlush(any());
+        ordered.verify(supportTokenService).revokeAppealToken(ACTION_ID);
+    }
+
+    @Test
+    void createInProductAppeal_accountAlreadyHoldsAnOpenTicket_isRefused() {
+        stubUser();
+        stubAction(AdminActionType.BAN_USER, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(false);
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(true);
+
+        assertThatThrownBy(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.SUPPORT_TICKET_ALREADY_OPEN);
+
+        verify(supportTicketRepository, never()).saveAndFlush(any());
+        verify(supportTokenService, never()).revokeAppealToken(any());
+    }
+
+    // Both entries run the same guards because they run the same implementation. If this drifts,
+    // the shared path has been split in two.
+    @Test
+    void bothAppealEntries_refuseASecondAppealAgainstTheSameDecision() {
+        stubUser();
+        stubAction(AdminActionType.REMOVE_STORY, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(true);
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenReturn(
+                        new SupportTokenService.AppealGrant(
+                                USER_ID, ACTION_ID, SupportCategory.APPEAL_CONTENT_REMOVAL));
+
+        ApiErrorCode viaLink =
+                errorCodeOf(
+                        () ->
+                                service.createFromSignedLink(
+                                        new SignedAppealRequest("tok", "Subject", "Body")));
+        ApiErrorCode viaSession =
+                errorCodeOf(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")));
+
+        assertThat(viaLink).isEqualTo(ApiErrorCode.SUPPORT_APPEAL_ALREADY_FILED);
+        assertThat(viaSession).isEqualTo(viaLink);
+        // The signed link survives its refusal, which is the whole reason the token is peeked
+        // rather than consumed.
+        verify(supportTokenService, never()).consumeAppealToken(anyString());
+    }
+
+    private void stubAction(AdminActionType actionType, UUID targetUserId) {
+        when(adminActionRepository.findById(ACTION_ID))
+                .thenReturn(
+                        Optional.of(
+                                AdminAction.builder()
+                                        .id(ACTION_ID)
+                                        .actionType(actionType)
+                                        .targetUserId(targetUserId)
+                                        .build()));
+    }
+
+    private static ApiErrorCode errorCodeOf(org.junit.jupiter.api.function.Executable call) {
+        try {
+            call.execute();
+        } catch (Throwable thrown) {
+            return ((AppException) thrown).getErrorCode();
+        }
+        throw new AssertionError("expected the call to be refused");
     }
 
     private void stubUser() {

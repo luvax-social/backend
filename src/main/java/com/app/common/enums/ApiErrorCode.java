@@ -191,6 +191,19 @@ public enum ApiErrorCode {
     SUPPORT_TOKEN_INVALID("SUPPORT_TOKEN_INVALID", "This link is invalid or has already been used", HttpStatus.BAD_REQUEST),
     SUPPORT_CAPTCHA_FAILED("SUPPORT_CAPTCHA_FAILED", "The verification challenge was not accepted", HttpStatus.BAD_REQUEST),
     SUPPORT_DAILY_LIMIT_REACHED("SUPPORT_DAILY_LIMIT_REACHED", "Too many support requests from this address today", HttpStatus.TOO_MANY_REQUESTS),
+    // One decision, one appeal. A second ticket against the same audit row would give the same
+    // decision two independent verdicts, and a rejected appeal could be reopened indefinitely by
+    // filing again. Distinct from SUPPORT_TICKET_ALREADY_OPEN, which is about the account's
+    // ticket lane rather than about this decision, and which a terminal first appeal would not
+    // trip.
+    SUPPORT_APPEAL_ALREADY_FILED("SUPPORT_APPEAL_ALREADY_FILED", "You have already appealed this decision", HttpStatus.CONFLICT),
+    // Deliberately the same NOT_FOUND answer an unknown id gets. An audit row belonging to
+    // somebody else and an audit row that does not exist must be indistinguishable, or the
+    // endpoint becomes an oracle for whether a given id names a real moderation decision.
+    SUPPORT_APPEAL_ACTION_NOT_FOUND("SUPPORT_APPEAL_ACTION_NOT_FOUND", "No appealable decision was found", HttpStatus.NOT_FOUND),
+    // A moderation action outside the appealable set: the two reinstating actions, the two support
+    // ticket notices, and every administrative action that targets no user.
+    SUPPORT_APPEAL_NOT_APPEALABLE("SUPPORT_APPEAL_NOT_APPEALABLE", "This decision cannot be appealed", HttpStatus.BAD_REQUEST),
 
     // Verification
     // Its own code rather than a generic validation failure, because the three-field rule is a

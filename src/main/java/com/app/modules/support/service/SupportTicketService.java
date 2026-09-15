@@ -6,6 +6,7 @@ import java.util.UUID;
 import com.app.common.exception.AppException;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
 import com.app.modules.support.dto.request.EscalateSupportTicketRequest;
+import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.RespondSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
@@ -47,6 +48,34 @@ public interface SupportTicketService {
      *     a non-terminal ticket
      */
     SupportTicketResponse createFromSignedLink(SignedAppealRequest request);
+
+    /**
+     * Opens an appeal from a session, against an audit row the caller owns.
+     *
+     * <p>The second entry to the same ticket, for the appellant who never lost access. A signed
+     * link exists because its holder has no session; requiring one from somebody who does forces a
+     * mail round trip for no security gain, and leaves them stranded when that mail never arrives.
+     *
+     * <p>Ownership is established here by reading {@code admin_actions.target_user_id}, never from
+     * the request. A caller who is not the target of the named row receives the same answer an
+     * unknown identifier receives, so the endpoint cannot be used to discover whether a given id
+     * names a real decision.
+     *
+     * <p>Shares {@code openAppeal} with {@link #createFromSignedLink}, so the one-open-ticket
+     * guard, the one-appeal-per-decision guard and the resulting ticket shape cannot drift between
+     * the two paths. Any unspent signed link for the same row is revoked, so the two entries can
+     * never both be used against one decision.
+     *
+     * @param userId the authenticated appellant
+     * @param request the audit row and the appeal
+     * @return the ticket as its author sees it
+     * @throws AppException {@code SUPPORT_APPEAL_ACTION_NOT_FOUND} when the row is unknown or
+     *     belongs to another account, {@code SUPPORT_APPEAL_NOT_APPEALABLE} when the action type
+     *     carries no appeal category, {@code SUPPORT_APPEAL_ALREADY_FILED} when the decision has
+     *     already been appealed, and {@code SUPPORT_TICKET_ALREADY_OPEN} when the account already
+     *     holds a non-terminal ticket
+     */
+    SupportTicketResponse createInProductAppeal(UUID userId, InProductAppealRequest request);
 
     /**
      * Reports what an appeal link authorises, without redeeming it.

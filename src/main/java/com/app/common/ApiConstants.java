@@ -183,6 +183,11 @@ public final class ApiConstants {
         // the landing screen can show a dead-link state before the reader writes their appeal
         // rather than after. Read-only by construction: it must never consume the token.
         public static final String APPEAL_VALIDATE = "/appeal/validate";
+        // Authenticated. Opens an appeal against an audit row the caller owns, without the mail
+        // round trip a signed link requires. A signed link exists because its holder has no
+        // session; an appellant who has one does not need it, and requiring it strands them when
+        // the notice mail never arrives.
+        public static final String APPEALS = "/appeals";
         // Anonymous, Turnstile-gated and IP rate-limited.
         public static final String PUBLIC_TICKET = "/public/tickets";
         // Anonymous. Confirms the address a public submission was made from.

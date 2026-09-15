@@ -23,6 +23,7 @@ import com.app.common.config.openapi.MalformedBodyErrorResponses;
 import com.app.common.response.ApiResponse;
 import com.app.common.vocabulary.dto.response.SupportCategoryVocabularyResponse;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
+import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
@@ -186,6 +187,56 @@ public interface SupportApi {
     @PostMapping(ApiConstants.Support.APPEAL)
     ResponseEntity<ApiResponse<SupportTicketResponse>> createAppeal(
             @Valid @RequestBody SignedAppealRequest request);
+
+    /** Opens an appeal from a session, against a moderation decision the caller owns. */
+    @Operation(
+            summary = "Open an appeal against your own moderation decision",
+            description =
+                    "Opens exactly one appeal ticket against an audit row the caller is the target"
+                            + " of. The second entry to the same ticket as the signed link, for the"
+                            + " appellant who still holds a session and therefore never needed one."
+                            + " Ownership is read server-side from the audit row; the identifier in"
+                            + " the request proves nothing. A row belonging to another account"
+                            + " answers exactly as an unknown one does. Any unspent signed link for"
+                            + " the same decision is revoked, so the two entries can never both be"
+                            + " used against one decision.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Appeal opened"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400",
+                description = "That decision carries no appeal",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "No appealable decision was found",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "409",
+                description = "That decision has already been appealed",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "429",
+                description = "Rate limit exceeded",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @MalformedBodyErrorResponses
+    @PostMapping(ApiConstants.Support.APPEALS)
+    ResponseEntity<ApiResponse<SupportTicketResponse>> createInProductAppeal(
+            @Valid @RequestBody InProductAppealRequest request);
 
     /** Accepts a public support request, held invisible to staff until the address is confirmed. */
     @Operation(

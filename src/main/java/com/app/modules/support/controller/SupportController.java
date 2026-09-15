@@ -29,6 +29,7 @@ import com.app.common.vocabulary.service.VocabularyService;
 import com.app.common.web.StrictQueryParameters;
 import com.app.modules.support.api.SupportApi;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
+import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
@@ -121,6 +122,30 @@ public class SupportController extends BaseController implements SupportApi {
                 ApiResponse.success(
                         ApiSuccessCode.CREATED,
                         supportTicketService.createFromSignedLink(request)));
+    }
+
+    /**
+     * Opens an appeal against a moderation decision the authenticated caller owns.
+     *
+     * <p>Authenticated, unlike every other appeal route here, and that is the point of it. The
+     * signed link exists for an appellant who cannot authenticate; one who can should not be sent
+     * through a mail round trip to reach the same ticket, and must not be stranded when the notice
+     * never arrives.
+     *
+     * <p>The audit row identifier in the body is not a credential. Ownership is read from the row
+     * itself, and a row belonging to another account answers exactly as an unknown one does.
+     */
+    @PreAuthorize("isAuthenticated()")
+    @Override
+    @PostMapping(ApiConstants.Support.APPEALS)
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<SupportTicketResponse>> createInProductAppeal(
+            @Valid @RequestBody InProductAppealRequest request) {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        ApiSuccessCode.CREATED,
+                        supportTicketService.createInProductAppeal(
+                                SecurityUtils.getCurrentUserId(), request)));
     }
 
     /**
