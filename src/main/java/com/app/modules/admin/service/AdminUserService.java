@@ -80,25 +80,6 @@ public interface AdminUserService {
     AdminActionResponse forceLogout(UUID actorId, UUID userId, AdminActionRequest request);
 
     /**
-     * Revokes one named session of one account and records the action atomically.
-     *
-     * <p>The session must belong to the named account. Without that the endpoint would end any
-     * session in the system given only an identifier, and the session listing hands identifiers out
-     * freely.
-     *
-     * <p>Idempotent. Revoking a session that is already revoked or expired records the action and
-     * reports success rather than failing, because a reviewer clicking twice has still got what
-     * they asked for. The audit row's metadata says which of the two happened.
-     *
-     * @param actorId the acting administrator
-     * @param userId account the session belongs to
-     * @param sessionId session to end
-     * @param request the audit reason and any linked report
-     * @return the audit row
-     * @throws com.app.common.exception.AppException {@code USER_NOT_FOUND} when the account does
-     *     not exist; {@code NOT_FOUND} when no such session belongs to it
-     */
-    /**
      * Resolves several account identifiers to display information in one call.
      *
      * <p>Queues, audit rows, violation rows and activity rows all carry bare identifiers, and

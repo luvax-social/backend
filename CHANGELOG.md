@@ -704,6 +704,7 @@ Existing group conversations are deleted by the upgrade, after being copied into
 - `MailProperties` record from `common/config/` replaced by the standard class at `common/mail/config/`
 - `MailService`, `MailServiceImpl`, and `MailSendException` from `modules/mail/` relocated into `common/mail/`
 - `ErrorResponse` record and the legacy `common/exception/` token and mail exception classes superseded by `ApiException` and the relocated domain exceptions
+- Four stray Javadoc blocks that had drifted from the method they described and no longer matched the code beneath them.
 
 ### Security
 - The mail transport is now resolved from `APP_MAIL_TRANSPORT` in every profile, so the startup guard that refuses the non-network transport outside development is what actually enforces it. The production profile pinned the transport to a literal, which made the variable inert there and left the guard's published refusal unreachable.
