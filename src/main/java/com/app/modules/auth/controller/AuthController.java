@@ -20,6 +20,7 @@ import com.app.common.enums.ApiSuccessCode;
 import com.app.common.exception.AppException;
 import com.app.common.response.ApiResponse;
 import com.app.common.security.service.RefreshTokenService;
+import com.app.common.security.util.IpExtractor;
 import com.app.modules.auth.api.AuthApi;
 import com.app.modules.auth.cookie.RefreshTokenCookieManager;
 import com.app.modules.auth.dto.request.ForgotPasswordRequest;
@@ -45,16 +46,19 @@ public class AuthController extends BaseController implements AuthApi {
     private final RefreshTokenCookieManager refreshTokenCookieManager;
     private final WebSocketTicketService webSocketTicketService;
     private final RefreshTokenService refreshTokenService;
+    private final IpExtractor ipExtractor;
 
     public AuthController(
             AuthService authService,
             RefreshTokenCookieManager refreshTokenCookieManager,
             WebSocketTicketService webSocketTicketService,
-            RefreshTokenService refreshTokenService) {
+            RefreshTokenService refreshTokenService,
+            IpExtractor ipExtractor) {
         this.authService = authService;
         this.refreshTokenCookieManager = refreshTokenCookieManager;
         this.webSocketTicketService = webSocketTicketService;
         this.refreshTokenService = refreshTokenService;
+        this.ipExtractor = ipExtractor;
     }
 
     /**
@@ -167,8 +171,8 @@ public class AuthController extends BaseController implements AuthApi {
     @Override
     @PostMapping(ApiConstants.Auth.RESEND_VERIFY)
     public ResponseEntity<ApiResponse<Void>> resendVerification(
-            @Valid @RequestBody ResendVerificationRequest request) {
-        authService.resendVerification(request.email());
+            @Valid @RequestBody ResendVerificationRequest request, HttpServletRequest httpRequest) {
+        authService.resendVerification(request, ipExtractor.extract(httpRequest));
         return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK));
     }
 
@@ -179,8 +183,8 @@ public class AuthController extends BaseController implements AuthApi {
     @Override
     @PostMapping(ApiConstants.Auth.FORGOT_PASSWORD)
     public ResponseEntity<ApiResponse<Void>> forgotPassword(
-            @Valid @RequestBody ForgotPasswordRequest request) {
-        authService.forgotPassword(request);
+            @Valid @RequestBody ForgotPasswordRequest request, HttpServletRequest httpRequest) {
+        authService.forgotPassword(request, ipExtractor.extract(httpRequest));
         return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK));
     }
 
@@ -188,8 +192,8 @@ public class AuthController extends BaseController implements AuthApi {
     @Override
     @PostMapping(ApiConstants.Auth.RESET_PASSWORD)
     public ResponseEntity<ApiResponse<Void>> resetPassword(
-            @Valid @RequestBody ResetPasswordRequest request) {
-        authService.resetPassword(request);
+            @Valid @RequestBody ResetPasswordRequest request, HttpServletRequest httpRequest) {
+        authService.resetPassword(request, ipExtractor.extract(httpRequest));
         return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK));
     }
 

@@ -34,7 +34,7 @@ class SecurityPropertiesValidationTest {
 
         assertThat(properties.cookieSigningSecret()).hasSizeGreaterThanOrEqualTo(32);
         assertThat(properties.trustedProxyCidrs()).isEmpty();
-        assertThat(properties.maxLoginBodyBytes()).isEqualTo(2048);
+        assertThat(properties.maxLoginBodyBytes()).isEqualTo(4096);
     }
 
     @Test

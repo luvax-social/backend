@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Metrics for every Turnstile verification, counted by outcome and by submitting surface and timed, so an outage on a fail-open surface is visible rather than silent.
 - Seeded 70 support tickets and 10 verification requests, covering every category and status, in the development database seed pipeline, with matching moderation audit rows for staff decisions.
 - `docs/ops/COOLIFY_RUNBOOK.md`, documenting the production Coolify topology, the backend environment variable matrix, a resolved Elasticsearch version-mismatch incident, the Gorse Compose deployment gotchas, and the seed-on-prod toggle sequence.
 - A pull request check that rejects any commit whose subject exceeds the 80-character limit, closing the gap that let six over-length subjects reach develop while only pull request titles were validated.
@@ -305,6 +306,11 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- A Cloudflare outage no longer blocks authentication: the six new surfaces allow a request through when the verification service cannot be reached, because each already carries a per-caller rate limit as its real defence.
+- The public support form is unchanged and still refuses a submission it cannot positively verify, since it has no per-caller rate limit to fall back on.
+- The Turnstile configuration moved out of the support namespace into a shared one, keeping the same environment variable names so no deployment needs changing.
+- The login request body size cap rose from 2048 to 4096 bytes to make room for the challenge token alongside the existing payload.
+- Each verification attempt now sends an idempotency key, so a retry of the same attempt is not read as a replay of a spent token.
 - The story, notification and admin module data rules now match the shipped schema: administrative story takedown is documented rather than denied, the notification enum is recorded as sixteen values with its dead-letter queues, and the administrative action enum as thirty-six.
 - `.env.example` now states that the thirteen consumer and live-tier switches are profile-controlled rather than deployment inputs; both profiles pin each one as a literal, so a value set in the environment file never reached them.
 - The `[Unreleased]` changelog block carries one of each permitted section instead of 119 repeated heading blocks, with the documentation and continuous-integration entries folded into Changed; every entry is preserved and the rule now says to merge into the existing section rather than prepend a new one.
@@ -483,6 +489,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The OAuth2 code exchange endpoint had no per-caller rate limit under the base configuration, which both deployment profiles had set but the base file had omitted.
 - The commit subject check now fails when it cannot resolve the revision range it was given, instead of reporting that all zero subjects were within the limit and exiting successfully.
 - Addressing a route with a method it does not support now answers `405` with an `Allow` header naming the methods it does, and the generated API document declares that response on every operation. It previously answered a generic `400`, which a client could not tell from a malformed request.
 - Every error response now declares its own JSON content type instead of negotiating one, so a request carrying an `Accept` header the API cannot satisfy receives its real status rather than an empty `500`. An unauthenticated call asking for XML returned `500` with no body.
@@ -709,6 +716,9 @@ Existing group conversations are deleted by the upgrade, after being copied into
 - Four stray Javadoc blocks that had drifted from the method they described and no longer matched the code beneath them.
 
 ### Security
+- Cloudflare Turnstile now guards login, registration, forgot password, reset password, resend verification and report submission, in addition to the public support form it already protected.
+- The OAuth2 code exchange is deliberately excluded, because the browser calls it automatically with no human moment for a challenge and the authorization code it redeems is already proof of an authentication.
+- An operator kill switch can take the challenge off the authentication and report surfaces without a redeploy; it does not govern the public support form, which stays protected unconditionally.
 - The mail transport is now resolved from `APP_MAIL_TRANSPORT` in every profile, so the startup guard that refuses the non-network transport outside development is what actually enforces it. The production profile pinned the transport to a literal, which made the variable inert there and left the guard's published refusal unreachable.
 - The trusted-proxy list can now be set from the environment in every profile. The production profile pinned it to an empty literal that outranked the `.env` file, so `APP_SECURITY_TRUSTED_PROXY_CIDRS` had no effect there and, behind an ingress, every per-IP rate limit collapsed into a single global bucket while `registration_ip` and `last_login_ip` recorded the proxy for every account.
 - Replaying a rotated refresh token now actually terminates every session on the account. The revocation was previously discarded by the same rejection that reported it, so a thief who redeemed the stolen token first kept an indefinitely rotatable session while the logs recorded a remediation that never took effect.

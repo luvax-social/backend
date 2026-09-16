@@ -25,10 +25,13 @@ import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.common.security.service.RefreshTokenService;
 import com.app.common.security.service.TokenBlacklistService;
 import com.app.common.security.util.IpExtractor;
+import com.app.common.turnstile.AuthTurnstileGuard;
+import com.app.common.turnstile.TurnstileSurface;
 import com.app.modules.auth.dto.request.ForgotPasswordRequest;
 import com.app.modules.auth.dto.request.LoginRequest;
 import com.app.modules.auth.dto.request.OAuth2ExchangeRequest;
 import com.app.modules.auth.dto.request.RegisterRequest;
+import com.app.modules.auth.dto.request.ResendVerificationRequest;
 import com.app.modules.auth.dto.request.ResetPasswordRequest;
 import com.app.modules.auth.dto.response.AuthResponse;
 import com.app.modules.auth.entity.UserCredential;
@@ -76,6 +79,7 @@ public class AuthServiceImpl implements AuthService {
     private final OAuth2ExchangeCodeService oauth2ExchangeCodeService;
     private final TransactionTemplate transactionTemplate;
     private final UserEventRecorder userEventRecorder;
+    private final AuthTurnstileGuard turnstileGuard;
 
     // Pre-computed BCrypt hash used to equalize CPU work on login failure paths so that
     // "email not found" is indistinguishable from "wrong password" via response timing.
@@ -100,7 +104,8 @@ public class AuthServiceImpl implements AuthService {
             UserStateValidator userStateValidator,
             OAuth2ExchangeCodeService oauth2ExchangeCodeService,
             TransactionTemplate transactionTemplate,
-            UserEventRecorder userEventRecorder) {
+            UserEventRecorder userEventRecorder,
+            AuthTurnstileGuard turnstileGuard) {
         this.userRepository = userRepository;
         this.credentialRepository = credentialRepository;
         this.settingsRepository = settingsRepository;
@@ -120,6 +125,7 @@ public class AuthServiceImpl implements AuthService {
         this.oauth2ExchangeCodeService = oauth2ExchangeCodeService;
         this.transactionTemplate = transactionTemplate;
         this.userEventRecorder = userEventRecorder;
+        this.turnstileGuard = turnstileGuard;
     }
 
     @PostConstruct
@@ -132,6 +138,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void register(RegisterRequest request, HttpServletRequest httpRequest) {
+        String clientIp = ipExtractor.extract(httpRequest);
+        // First statement in the method, so a rejected challenge costs no uniqueness query and
+        // leaves no account, no credential, no settings row and no mail event behind.
+        turnstileGuard.require(request.turnstileToken(), clientIp, TurnstileSurface.REGISTER);
+
         // Return a single generic conflict code for both email and username collisions so the
         // response cannot be used to enumerate which emails or usernames are already registered.
         if (userRepository.existsByEmail(request.email())
@@ -142,7 +153,7 @@ public class AuthServiceImpl implements AuthService {
         // Hash the password before opening a transaction so the connection is not held during
         // the BCrypt computation (~200-300ms at cost 12).
         String passwordHash = passwordEncoder.encode(request.password());
-        String registrationIp = ipExtractor.extract(httpRequest);
+        String registrationIp = clientIp;
 
         transactionTemplate.executeWithoutResult(
                 status -> {
@@ -196,6 +207,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
+        // Before the account lookup and before BCrypt runs, so a rejected challenge issues no
+        // session and cannot be used to probe whether an identifier exists.
+        turnstileGuard.require(
+                request.turnstileToken(), ipExtractor.extract(httpRequest), TurnstileSurface.LOGIN);
+
         // Usernames cannot contain '@' (enforced by the registration pattern), so an '@' in the
         // identifier unambiguously marks an email; anything else is a username. The username
         // lookup normalizes both sides of the comparison itself, so the identifier is passed
@@ -350,23 +366,37 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public void resendVerification(String email) {
+    public void resendVerification(ResendVerificationRequest request, String clientIp) {
         // Mirrors forgotPassword: the durable event recording runs in a separate transactional
         // delegate and response time is normalised to a floor, so a registered address is not
         // distinguishable from an unregistered one by latency. The equalizer runs on every path,
         // including when the delegate throws.
         long startNanos = System.nanoTime();
         try {
-            authResendVerificationEventService.recordResendVerificationRequest(email);
+            // Inside the equalized window, not before it. The siteverify call takes real and
+            // variable time; measuring from before it would leave that variance outside the floor
+            // and hand back the latency channel the equalizer exists to close. A rejected challenge
+            // throws from here and still leaves through the finally below, so a refusal takes the
+            // same wall time as a success.
+            turnstileGuard.require(
+                    request.turnstileToken(), clientIp, TurnstileSurface.RESEND_VERIFICATION);
+            authResendVerificationEventService.recordResendVerificationRequest(request.email());
         } finally {
             forgotPasswordTimingEqualizer.equalizeFrom(startNanos);
         }
     }
 
     @Override
-    public void forgotPassword(ForgotPasswordRequest request) {
+    public void forgotPassword(ForgotPasswordRequest request, String clientIp) {
         long startNanos = System.nanoTime();
         try {
+            // Inside the equalized window, not before it. The siteverify call takes real and
+            // variable time; measuring from before it would leave that variance outside the floor
+            // and hand back the enumeration channel the equalizer exists to close. A rejected
+            // challenge throws from here and still leaves through the finally below, so a refusal
+            // takes the same wall time as a success and no reset mail is enqueued.
+            turnstileGuard.require(
+                    request.turnstileToken(), clientIp, TurnstileSurface.FORGOT_PASSWORD);
             authForgotPasswordEventService.recordForgotPasswordRequest(request.email());
         } finally {
             forgotPasswordTimingEqualizer.equalizeFrom(startNanos);
@@ -374,7 +404,11 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public void resetPassword(ResetPasswordRequest request) {
+    public void resetPassword(ResetPasswordRequest request, String clientIp) {
+        // Before the reset token is consumed, so a rejected challenge leaves the single-use link
+        // intact and the user can try again with a fresh widget rather than a dead link.
+        turnstileGuard.require(request.turnstileToken(), clientIp, TurnstileSurface.RESET_PASSWORD);
+
         // Hash the new password before opening the transaction so the connection is not
         // held during BCrypt computation.
         String newPasswordHash = passwordEncoder.encode(request.newPassword());

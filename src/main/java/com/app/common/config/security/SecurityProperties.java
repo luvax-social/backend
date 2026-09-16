@@ -29,5 +29,9 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "app.security")
 public record SecurityProperties(
         @NotNull @DefaultValue List<String> trustedProxyCidrs,
-        @PositiveOrZero @DefaultValue("2048") int maxLoginBodyBytes,
+        // Raised from 2048 when the auth surfaces took a turnstileToken field. The cap bounds how
+        // much AuthRateLimitFilter buffers to extract the rate-limit identifier; a Turnstile token
+        // runs to about 2048 characters, which does not fit alongside the existing login payload
+        // inside 2048 bytes. 4096 remains a bound well under Tomcat's 1 MB limit.
+        @PositiveOrZero @DefaultValue("4096") int maxLoginBodyBytes,
         @NotBlank @Size(min = 32) String cookieSigningSecret) {}

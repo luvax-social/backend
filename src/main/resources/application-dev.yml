@@ -52,13 +52,13 @@ app:
     campaign:
       sender:
         enabled: true
-    turnstile:
-      # Cloudflare's published always-passes test key, defaulted the same way
-      # app.security.cookie-signing-secret is: TURNSTILE_SECRET_KEY still outranks it, so a real key
-      # configured in the environment wins, while a checkout with no .env boots and the test suite
-      # makes no outbound call. It verifies every token it is given, so it must never reach
-      # production, which is why the base profile defaults it to empty instead.
-      secret-key: ${TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA}
+  turnstile:
+    # Cloudflare's published always-passes test key, defaulted the same way
+    # app.security.cookie-signing-secret is: TURNSTILE_SECRET_KEY still outranks it, so a real key
+    # configured in the environment wins, while a checkout with no .env boots and the test suite
+    # makes no outbound call. It verifies every token it is given, so it must never reach
+    # production, which is why the base profile defaults it to empty instead.
+    secret-key: ${TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA}
   admin:
     consumer:
       enabled: true
@@ -105,7 +105,11 @@ app:
       # A request over loopback arrives as the IPv6 form on most local setups; without this
       # entry the IPv4 entry above never actually matches during local testing.
       - "::1"
-    max-login-body-bytes: 2048
+    # Raised from 2048 when the auth surfaces took a turnstileToken field. The cap bounds how much
+    # AuthRateLimitFilter buffers to extract the rate-limit identifier; a Turnstile token runs to
+    # about 2048 characters, which does not fit alongside the existing login payload inside 2048
+    # bytes. 4096 remains a bound well under Tomcat's 1 MB limit.
+    max-login-body-bytes: 4096
     # Written as a defaulted placeholder, not a bare literal. Profile config outranks the base
     # application.yaml, so a literal here silently made APP_COOKIE_SIGNING_SECRET inert: the
     # OAuth2 state cookie was HMAC-signed with a value published in this repository and the

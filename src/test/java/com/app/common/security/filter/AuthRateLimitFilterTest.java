@@ -5,11 +5,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
+import org.springframework.mock.web.DelegatingServletInputStream;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import com.app.common.ApiConstants;
@@ -402,5 +407,64 @@ class AuthRateLimitFilterTest {
         verify(rateLimiterService, times(2)).isAllowed(keyCaptor.capture(), anyInt(), anyLong());
         List<String> keys = keyCaptor.getAllValues();
         assertThat(keys.get(0)).isEqualTo(keys.get(1));
+    }
+
+    @Test
+    void doFilterInternal_loginBodyBetween2048And4096Bytes_isAccepted() throws Exception {
+        // 2048 was the cap before the auth surfaces took a turnstileToken field. A Turnstile token
+        // runs to roughly 2048 characters on its own, so a legitimate login payload now lands in
+        // this range and must not be refused as oversized.
+        String body = loginBodyOfAtLeast(3000);
+        assertThat(body.getBytes(StandardCharsets.UTF_8).length).isBetween(2049, 4096);
+
+        MockHttpServletResponse response = bodyLimitedLoginRequest(body);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        verify(chain).doFilter(any(), any());
+    }
+
+    @Test
+    void doFilterInternal_loginBodyAbove4096Bytes_isStillRefused() throws Exception {
+        String body = loginBodyOfAtLeast(5000);
+        assertThat(body.getBytes(StandardCharsets.UTF_8).length).isGreaterThan(4096);
+
+        MockHttpServletResponse response = bodyLimitedLoginRequest(body);
+
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThat(response.getContentAsString()).contains("BAD_REQUEST");
+        verify(chain, never()).doFilter(any(), any());
+    }
+
+    private static String loginBodyOfAtLeast(int tokenChars) {
+        return "{\"identifier\":\"a@b.c\",\"password\":\"p\",\"turnstileToken\":\""
+                + "t".repeat(tokenChars)
+                + "\"}";
+    }
+
+    /** Drives one POST to the login path through a filter carrying the production 4096 cap. */
+    private MockHttpServletResponse bodyLimitedLoginRequest(String body) throws Exception {
+        AuthRateLimitFilter cappedFilter =
+                new AuthRateLimitFilter(
+                        rateLimiterService,
+                        new RateLimitProperties(Map.of(LOGIN_PATH, LOGIN_RULE)),
+                        objectMapper,
+                        ipExtractor,
+                        new SecurityProperties(
+                                java.util.List.of(),
+                                4096,
+                                "test-cookie-signing-secret-placeholder-32ch"));
+        when(request.getRequestURI()).thenReturn(LOGIN_PATH);
+        when(request.getMethod()).thenReturn("POST");
+        when(request.getInputStream())
+                .thenReturn(
+                        new DelegatingServletInputStream(
+                                new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8))));
+        // Under the cap the request reaches the limiter, which must not be what refuses it here.
+        lenient()
+                .when(rateLimiterService.isAllowed(anyString(), anyInt(), anyLong()))
+                .thenReturn(true);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        cappedFilter.doFilterInternal(request, response, chain);
+        return response;
     }
 }

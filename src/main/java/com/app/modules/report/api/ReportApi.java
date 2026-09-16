@@ -2,6 +2,7 @@ package com.app.modules.report.api;
 
 import java.util.UUID;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -87,7 +88,7 @@ public interface ReportApi {
     @AuthenticationRequiredResponse
     @PostMapping
     ResponseEntity<ApiResponse<ReportResponse>> submitReport(
-            @Valid @RequestBody CreateReportRequest request);
+            @Valid @RequestBody CreateReportRequest request, HttpServletRequest httpRequest);
 
     /** Lists reports for moderators and administrators using optional filters. */
     @Operation(

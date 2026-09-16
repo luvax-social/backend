@@ -2,6 +2,7 @@ package com.app.modules.report.controller;
 
 import java.util.UUID;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -22,6 +23,7 @@ import com.app.common.base.BaseController;
 import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
 import com.app.common.response.CursorPageResponse;
+import com.app.common.security.util.IpExtractor;
 import com.app.common.security.util.SecurityUtils;
 import com.app.common.web.StrictQueryParameters;
 import com.app.modules.report.api.ReportApi;
@@ -41,9 +43,11 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 public class ReportController extends BaseController implements ReportApi {
 
     private final ReportService reportService;
+    private final IpExtractor ipExtractor;
 
-    public ReportController(ReportService reportService) {
+    public ReportController(ReportService reportService, IpExtractor ipExtractor) {
         this.reportService = reportService;
+        this.ipExtractor = ipExtractor;
     }
 
     /** Submits a validated report for the authenticated caller and returns the pending record. */
@@ -51,9 +55,12 @@ public class ReportController extends BaseController implements ReportApi {
     @PostMapping
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<ReportResponse>> submitReport(
-            @Valid @RequestBody CreateReportRequest request) {
+            @Valid @RequestBody CreateReportRequest request, HttpServletRequest httpRequest) {
         ReportResponse response =
-                reportService.submitReport(SecurityUtils.getCurrentUserId(), request);
+                reportService.submitReport(
+                        SecurityUtils.getCurrentUserId(),
+                        request,
+                        ipExtractor.extract(httpRequest));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(ApiSuccessCode.CREATED, response));
     }
