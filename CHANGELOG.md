@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- An appeal can now be opened from a signed-in session against a moderation decision the caller owns, so an appellant who never lost access no longer needs the emailed link to reach the same ticket.
+- A replacement appeal link can be requested from the public support entry when the original moderation notice never arrived, behind a captcha that fails closed and an answer that is identical whether or not the address matches an account.
+- An appellant with no session is given a read-only status link when they file, so they can follow their own appeal instead of hearing nothing after the single-use link is spent.
+- Removing a comment, a story or a message now notifies the owner in-product, which previously happened only for post removal and left the other three removals silent for someone still signed in.
 - Metrics for every Turnstile verification, counted by outcome and by submitting surface and timed, so an outage on a fail-open surface is visible rather than silent.
 - Seeded 70 support tickets and 10 verification requests, covering every category and status, in the development database seed pipeline, with matching moderation audit rows for staff decisions.
 - `docs/ops/COOLIFY_RUNBOOK.md`, documenting the production Coolify topology, the backend environment variable matrix, a resolved Elasticsearch version-mismatch incident, the Gorse Compose deployment gotchas, and the seed-on-prod toggle sequence.
@@ -716,6 +720,9 @@ Existing group conversations are deleted by the upgrade, after being copied into
 - Four stray Javadoc blocks that had drifted from the method they described and no longer matched the code beneath them.
 
 ### Security
+- Authenticated support ticket routes now carry a per-caller rate limit; they previously relied only on a process-wide backstop that one caller could exhaust for everybody.
+- Opening an appeal from a session revokes any unspent emailed link for the same decision, so one decision can never be contested through two routes at once.
+- A decision can now be appealed only once, in any status, closing a route by which a rejected appeal could be refiled indefinitely.
 - Cloudflare Turnstile now guards login, registration, forgot password, reset password, resend verification and report submission, in addition to the public support form it already protected.
 - The OAuth2 code exchange is deliberately excluded, because the browser calls it automatically with no human moment for a challenge and the authorization code it redeems is already proof of an authentication.
 - An operator kill switch can take the challenge off the authentication and report surfaces without a redeploy; it does not govern the public support form, which stays protected unconditionally.
@@ -819,6 +826,8 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- Coverage proving the anonymous appeal status read never carries the staff-only note, never consumes its token, and answers every negative case identically.
+- Coverage proving the appeal link recovery path answers the same for a matching and a non-matching address, equalizes both, and verifies the captcha inside that equalized window.
 - Added an integration test verifying support ticket seed data volume, category coverage, the one-open-ticket-per-lane constraint, and audit-row coverage.
 - The actuator access test no longer depends on a search tier running on the developer machine; it declared no such container, so its anonymous health probe answered 503 and the class failed wherever that tier was absent.
 - The administrative comment moderation test now asserts the moderation tombstone and that the owner deletion column is left untouched, which is the separation the schema has enforced since the two were split.
