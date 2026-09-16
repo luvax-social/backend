@@ -187,6 +187,11 @@ public final class ApiConstants {
         // appeal token is spent on redemption, so without this they leave holding nothing and can
         // never learn whether their appeal was read. Read-only: it must never consume its token.
         public static final String APPEAL_STATUS = "/appeal/status";
+        // Anonymous, Turnstile-gated and timing-equalized. Re-mints the appeal link for the most
+        // recent un-appealed decision on the account holding the given address. The link contesting
+        // a decision exists only inside one email, so a bounced or filtered notice otherwise
+        // removed that account's only route to contest it, permanently.
+        public static final String APPEAL_RESEND = "/appeal/resend";
         // Authenticated. Opens an appeal against an audit row the caller owns, without the mail
         // round trip a signed link requires. A signed link exists because its holder has no
         // session; an appellant who has one does not need it, and requiring it strands them when

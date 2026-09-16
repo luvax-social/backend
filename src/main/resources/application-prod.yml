@@ -142,6 +142,12 @@ app:
       # One appeal, read by the appellant who filed it and holds no session. Same band as
       # appeal/validate: both are anonymous reads behind a 32-byte random token, and this one is
       # followed repeatedly over the life of an appeal rather than once.
+      # Replacement appeal links. The hardest bound in the support tree, because a single request
+      # causes mail to be sent to an address the caller chooses. Three an hour is enough for
+      # somebody who mistyped their address once; it is not enough to mail a list.
+      "[/api/v1/support/appeal/resend]":
+        max-attempts: 3
+        window-seconds: 3600
       "[/api/v1/support/appeal/status]":
         max-attempts: 30
         window-seconds: 3600

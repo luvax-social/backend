@@ -14,7 +14,8 @@ public enum TurnstileSurface {
     RESET_PASSWORD("reset_password"),
     RESEND_VERIFICATION("resend_verification"),
     REPORT("report"),
-    PUBLIC_SUPPORT("public_support");
+    PUBLIC_SUPPORT("public_support"),
+    RESEND_APPEAL_LINK("resend_appeal_link");
 
     private final String tag;
 

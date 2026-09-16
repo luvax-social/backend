@@ -25,6 +25,7 @@ import com.app.common.vocabulary.dto.response.SupportCategoryVocabularyResponse;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
 import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
+import com.app.modules.support.dto.request.ResendAppealLinkRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
 import com.app.modules.support.dto.response.AppealSubmittedResponse;
@@ -188,6 +189,43 @@ public interface SupportApi {
     @PostMapping(ApiConstants.Support.APPEAL)
     ResponseEntity<ApiResponse<AppealSubmittedResponse>> createAppeal(
             @Valid @RequestBody SignedAppealRequest request);
+
+    /** Re-sends the appeal link for the most recent un-appealed decision on an account. */
+    @Operation(
+            summary = "Request a replacement appeal link",
+            description =
+                    "Re-mints the appeal link for the most recent decision on the account holding"
+                            + " the given address that has not already been contested, and mails it"
+                            + " to that account's own verified address. The answer is identical"
+                            + " whether or not the address matches anything, in body, in status"
+                            + " code and in elapsed time, so the route cannot be used to test"
+                            + " whether an address is registered. Turnstile is required and fails"
+                            + " closed: this route has no per-caller identity and it sends mail, so"
+                            + " the challenge is its only real control.",
+            security = {@SecurityRequirement(name = "")})
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Accepted. Answers the same whether or not the address matched."),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400",
+                description = "The verification challenge was not accepted",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "429",
+                description = "Rate limit exceeded",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @MalformedBodyErrorResponses
+    @PostMapping(ApiConstants.Support.APPEAL_RESEND)
+    ResponseEntity<ApiResponse<Void>> resendAppealLink(
+            @Valid @RequestBody ResendAppealLinkRequest request, HttpServletRequest servletRequest);
 
     /** Reads one appeal for an appellant who holds a status token and no session. */
     @Operation(

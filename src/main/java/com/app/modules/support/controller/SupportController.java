@@ -31,10 +31,12 @@ import com.app.modules.support.api.SupportApi;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
 import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
+import com.app.modules.support.dto.request.ResendAppealLinkRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
 import com.app.modules.support.dto.response.AppealSubmittedResponse;
 import com.app.modules.support.dto.response.SupportTicketResponse;
+import com.app.modules.support.service.AppealRecoveryService;
 import com.app.modules.support.service.SupportTicketService;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
@@ -54,14 +56,17 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 public class SupportController extends BaseController implements SupportApi {
 
     private final SupportTicketService supportTicketService;
+    private final AppealRecoveryService appealRecoveryService;
     private final IpExtractor ipExtractor;
     private final VocabularyService vocabularyService;
 
     public SupportController(
             SupportTicketService supportTicketService,
+            AppealRecoveryService appealRecoveryService,
             IpExtractor ipExtractor,
             VocabularyService vocabularyService) {
         this.supportTicketService = supportTicketService;
+        this.appealRecoveryService = appealRecoveryService;
         this.ipExtractor = ipExtractor;
         this.vocabularyService = vocabularyService;
     }
@@ -185,6 +190,23 @@ public class SupportController extends BaseController implements SupportApi {
         return ResponseEntity.ok(
                 ApiResponse.success(
                         ApiSuccessCode.OK, supportTicketService.describeSignedLink(token)));
+    }
+
+    /**
+     * Re-sends the appeal link for the most recent un-appealed decision on an account.
+     *
+     * <p>Returns no body and the same status for every outcome. Telling an anonymous caller that an
+     * address matched would make this a registration oracle, and the address it is asked about is
+     * chosen by that caller.
+     */
+    @Override
+    @PostMapping(ApiConstants.Support.APPEAL_RESEND)
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<Void>> resendAppealLink(
+            @Valid @RequestBody ResendAppealLinkRequest request,
+            HttpServletRequest servletRequest) {
+        appealRecoveryService.resendAppealLink(request, ipExtractor.extract(servletRequest));
+        return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, null));
     }
 
     /**

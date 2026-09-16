@@ -12,7 +12,11 @@ import lombok.Getter;
  */
 @Getter
 public enum SupportMailTemplate {
-    CONFIRM_SUPPORT_REQUEST("mail/support/confirm-support-request", "Confirm your support request");
+    CONFIRM_SUPPORT_REQUEST("mail/support/confirm-support-request", "Confirm your support request"),
+    // Subject and body both deliberately say nothing about the decision. Anyone who knows
+    // an address can cause this mail to be sent, so anything it explains is explained to
+    // them. It links; it does not describe.
+    RESEND_APPEAL_LINK("mail/support/resend-appeal-link", "Your link to contest a decision");
 
     private final String templatePath;
     private final String defaultSubject;

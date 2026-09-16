@@ -264,6 +264,7 @@ public class SecurityConfig {
                         ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL,
                         ApiConstants.Support.ROOT + ApiConstants.Support.PUBLIC_TICKET,
                         ApiConstants.Support.ROOT + ApiConstants.Support.CONFIRM,
+                        ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL_RESEND,
                         ApiConstants.Support.ROOT + ApiConstants.Support.UNSUBSCRIBE)
                 .permitAll();
 
