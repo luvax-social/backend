@@ -308,6 +308,7 @@ public interface SupportApi {
                                 mediaType = "application/json",
                                 schema = @Schema(implementation = ApiResponse.class)))
     })
+    @AuthenticationRequiredResponse
     @MalformedBodyErrorResponses
     @PostMapping(ApiConstants.Support.APPEALS)
     ResponseEntity<ApiResponse<SupportTicketResponse>> createInProductAppeal(
