@@ -42,6 +42,7 @@ import com.app.modules.support.enums.SupportSource;
 import com.app.modules.support.enums.SupportTicketStatus;
 import com.app.modules.support.mapper.SupportTicketMapper;
 import com.app.modules.support.repository.SupportTicketRepository;
+import com.app.modules.support.service.AppealStatusMailer;
 import com.app.modules.support.service.SupportAuthorizationService;
 import com.app.modules.support.service.SupportAuthorizationService.StaffAction;
 import com.app.modules.support.service.SupportConfirmationMailer;
@@ -71,6 +72,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
     private final SupportTokenService supportTokenService;
     private final TurnstileVerifier turnstileVerifier;
     private final SupportConfirmationMailer confirmationMailer;
+    private final AppealStatusMailer appealStatusMailer;
     private final SupportTicketMapper supportTicketMapper;
     private final UserRepository userRepository;
     private final AdminActionRepository adminActionRepository;
@@ -85,6 +87,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
             SupportTokenService supportTokenService,
             TurnstileVerifier turnstileVerifier,
             SupportConfirmationMailer confirmationMailer,
+            AppealStatusMailer appealStatusMailer,
             SupportTicketMapper supportTicketMapper,
             UserRepository userRepository,
             AdminActionRepository adminActionRepository,
@@ -97,6 +100,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         this.supportTokenService = supportTokenService;
         this.turnstileVerifier = turnstileVerifier;
         this.confirmationMailer = confirmationMailer;
+        this.appealStatusMailer = appealStatusMailer;
         this.supportTicketMapper = supportTicketMapper;
         this.userRepository = userRepository;
         this.adminActionRepository = adminActionRepository;
@@ -156,9 +160,17 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         // Minted only now, after the appeal token is spent. The appellant holds no session and the
         // credential they arrived with has just been destroyed, so without this they leave with no
         // way back to the appeal they have only just filed.
-        return new AppealSubmittedResponse(
-                supportTicketMapper.toOwnerResponse(saved),
-                supportTokenService.createStatusToken(saved.getId()));
+        String statusToken = supportTokenService.createStatusToken(saved.getId());
+        // Mailed as well as returned. The response carries the token only as long as the tab that
+        // received it, and the client may not persist a bearer credential to browser storage, so
+        // without this the appellant loses the status link the moment they close the page. The
+        // address is the one the original appeal link was sent to, and that link was a write
+        // credential; a read-only link to the same address is strictly the weaker of the two.
+        //
+        // Last, after the write and the token spend. It refuses silently for an unverified address
+        // and swallows a transport failure, so nothing it does can fail an appeal already filed.
+        appealStatusMailer.sendStatusLink(saved.getUserId(), saved.getContactEmail(), statusToken);
+        return new AppealSubmittedResponse(supportTicketMapper.toOwnerResponse(saved), statusToken);
     }
 
     @Override

@@ -46,6 +46,7 @@ import com.app.modules.support.enums.SupportSource;
 import com.app.modules.support.enums.SupportTicketStatus;
 import com.app.modules.support.mapper.SupportTicketMapper;
 import com.app.modules.support.repository.SupportTicketRepository;
+import com.app.modules.support.service.AppealStatusMailer;
 import com.app.modules.support.service.SupportAuthorizationService;
 import com.app.modules.support.service.SupportConfirmationMailer;
 import com.app.modules.support.service.SupportTokenService;
@@ -64,6 +65,7 @@ class SupportTicketServiceImplTest {
     @Mock private SupportTokenService supportTokenService;
     @Mock private TurnstileVerifier turnstileVerifier;
     @Mock private SupportConfirmationMailer confirmationMailer;
+    @Mock private AppealStatusMailer appealStatusMailer;
     @Mock private UserRepository userRepository;
     @Mock private AdminActionRepository adminActionRepository;
     @Mock private AdminActionRecorder adminActionRecorder;
@@ -82,6 +84,7 @@ class SupportTicketServiceImplTest {
                         supportTokenService,
                         turnstileVerifier,
                         confirmationMailer,
+                        appealStatusMailer,
                         new SupportTicketMapper(),
                         userRepository,
                         adminActionRepository,
@@ -632,6 +635,42 @@ class SupportTicketServiceImplTest {
                 .isInstanceOf(AppException.class);
 
         verify(supportTokenService, never()).createStatusToken(any());
+    }
+
+    // The response carries the status token only as long as the tab that received it, and the
+    // client may not persist a bearer credential to browser storage. Without the mail, closing
+    // the page loses the only way back to an appeal that has just been filed.
+    @Test
+    void createFromSignedLink_mailsTheStatusLinkItJustMinted() {
+        stubUser();
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(false);
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenReturn(
+                        new SupportTokenService.AppealGrant(
+                                USER_ID, ACTION_ID, SupportCategory.APPEAL_BAN));
+        when(supportTokenService.createStatusToken(any())).thenReturn("status-token");
+
+        AppealSubmittedResponse response =
+                service.createFromSignedLink(new SignedAppealRequest("tok", "Subject", "Body"));
+
+        // The same token the response carries, addressed to the account the ticket records. A
+        // second mint here would hand the reader a link the screen never showed them.
+        verify(appealStatusMailer).sendStatusLink(USER_ID, EMAIL, "status-token");
+        assertThat(response.statusToken()).isEqualTo("status-token");
+    }
+
+    @Test
+    void createFromSignedLink_refusedAppeal_mailsNoStatusLink() {
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenThrow(new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID));
+
+        assertThatThrownBy(
+                        () ->
+                                service.createFromSignedLink(
+                                        new SignedAppealRequest("tok", "Subject", "Body")))
+                .isInstanceOf(AppException.class);
+
+        verify(appealStatusMailer, never()).sendStatusLink(any(), anyString(), anyString());
     }
 
     @Test

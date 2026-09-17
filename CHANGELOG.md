@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A warning listed on the account's own settings screen now carries the identifier of the decision behind it, so it can be contested from where it is read.
 - A replacement appeal link can be requested from the public support entry when the original moderation notice never arrived, behind a captcha that fails closed and an answer that is identical whether or not the address matches an account.
 - An appellant with no session is given a read-only status link when they file, so they can follow their own appeal instead of hearing nothing after the single-use link is spent.
+- The read-only status link is now also emailed to the address the original appeal notice was sent to, so an appellant who closes the page still holds a way back to the appeal they filed.
 - Removing a comment, a story or a message now notifies the owner in-product, which previously happened only for post removal and left the other three removals silent for someone still signed in.
 - Metrics for every Turnstile verification, counted by outcome and by submitting surface and timed, so an outage on a fail-open surface is visible rather than silent.
 - Seeded 70 support tickets and 10 verification requests, covering every category and status, in the development database seed pipeline, with matching moderation audit rows for staff decisions.
