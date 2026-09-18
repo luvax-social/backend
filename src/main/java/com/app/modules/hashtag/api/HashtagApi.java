@@ -1,5 +1,7 @@
 package com.app.modules.hashtag.api;
 
+import java.util.List;
+
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -19,6 +21,7 @@ import com.app.common.response.PageResponse;
 import com.app.modules.hashtag.dto.response.HashtagDetailResponse;
 import com.app.modules.hashtag.dto.response.HashtagResponse;
 import com.app.modules.hashtag.dto.response.HashtagTrendingResponse;
+import com.app.modules.hashtag.dto.response.TrendingPreviewResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -195,4 +198,41 @@ public interface HashtagApi {
                     @Min(1)
                     @Max(100)
                     int size);
+
+    /** Trending hashtags paired with one post cover each, for the in-feed trending card. */
+    @Operation(
+            summary = "Trending hashtags with a post preview",
+            description =
+                    "Trending hashtags, each paired with the cover image of its newest published"
+                            + " post, for the in-feed trending card. Exists so a client does not issue"
+                            + " one posts request per hashtag. A hashtag whose top post carries no"
+                            + " renderable media, or whose candidate posts all belong to private"
+                            + " accounts, is still returned with a null previewUrl rather than being"
+                            + " dropped.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Trending hashtags with covers, pinned first"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "429",
+                description = "Rate limit exceeded",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @GetMapping(ApiConstants.Hashtags.TRENDING_PREVIEWS)
+    ResponseEntity<ApiResponse<List<TrendingPreviewResponse>>> trendingPreviews(
+            @Parameter(description = "How many hashtags to return; maximum 10")
+                    @RequestParam(defaultValue = "3")
+                    @Min(1)
+                    @Max(10)
+                    int size,
+            @Parameter(
+                            description =
+                                    "for-you for the personalised blend, platform for the"
+                                            + " platform-wide snapshot")
+                    @RequestParam(defaultValue = "for-you")
+                    String scope);
 }
