@@ -45,6 +45,7 @@ import com.app.common.outbox.service.OutboxPublisherService;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.post.consumer.PostIndexSyncConsumer;
 import com.app.modules.post.search.PostDocument;
+import com.app.modules.recommendation.client.GorseClient;
 import com.rabbitmq.client.Channel;
 
 @SpringBootTest(
@@ -124,6 +125,11 @@ class PostControllerIT {
         r.add("app.hashtag.seed.enabled", () -> false);
         r.add("app.post.seed.enabled", () -> false);
     }
+
+    // Gorse is an external HTTP service with no container in this test, and the post index-sync
+    // path calls it before writing to Elasticsearch. Left real, every upsert fails on connection
+    // refused, the message is dead-lettered, and nothing is ever indexed.
+    @MockitoBean private GorseClient gorseClient;
 
     @MockitoBean private MailService mailService;
 
