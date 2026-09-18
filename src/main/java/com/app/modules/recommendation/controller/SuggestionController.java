@@ -18,10 +18,10 @@ import com.app.common.ApiConstants;
 import com.app.common.base.BaseController;
 import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
-import com.app.common.response.UserListItemResponse;
 import com.app.common.security.util.SecurityUtils;
 import com.app.common.web.StrictQueryParameters;
 import com.app.modules.recommendation.api.SuggestionApi;
+import com.app.modules.recommendation.dto.response.SuggestedUserResponse;
 import com.app.modules.recommendation.service.SuggestionService;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
@@ -47,7 +47,7 @@ public class SuggestionController extends BaseController implements SuggestionAp
     @GetMapping(ApiConstants.Recommendations.SUGGESTIONS)
     @StrictQueryParameters
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
-    public ResponseEntity<ApiResponse<List<UserListItemResponse>>> suggestions(
+    public ResponseEntity<ApiResponse<List<SuggestedUserResponse>>> suggestions(
             @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit) {
         return ResponseEntity.ok(
                 ApiResponse.success(

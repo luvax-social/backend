@@ -298,4 +298,39 @@ public interface UserSuggestionRepository extends JpaRepository<UserSuggestion, 
                             + " ORDER BY u.id",
             nativeQuery = true)
     List<UUID> findViewersToCompute();
+
+    /**
+     * The stored source labels for a set of candidates, for the reason line on the suggestion card.
+     *
+     * <p>Kept separate from {@link #findVisibleSuggestions} rather than folded into its projection.
+     * That query is also the candidate source for story discovery, which has no use for the labels,
+     * and widening it would make both call sites pay for one.
+     *
+     * <p>A cold-start candidate has no row here at all: it was never precomputed, so no reason for
+     * it was ever recorded. That is not the same as a row whose labels are empty.
+     *
+     * @param viewerId the account reading its own suggestions
+     * @param ids the candidates to label
+     * @return rows of [suggested_id, sources]
+     */
+    @Query(
+            value =
+                    "SELECT s.suggested_id, s.sources FROM user_suggestions s"
+                            + " WHERE s.user_id = :viewerId AND s.suggested_id IN (:ids)",
+            nativeQuery = true)
+    List<Object[]> findSourcesFor(@Param("viewerId") UUID viewerId, @Param("ids") List<UUID> ids);
+
+    /**
+     * Banner urls for a set of accounts.
+     *
+     * <p>An account with no banner yields a null column rather than a missing row, so the caller
+     * distinguishes "has no banner" from "is not in this set" without a second query.
+     *
+     * @param ids the accounts to read
+     * @return rows of [id, banner_url]
+     */
+    @Query(
+            value = "SELECT u.id, u.banner_url FROM users u WHERE u.id IN (:ids)",
+            nativeQuery = true)
+    List<Object[]> findBannerUrls(@Param("ids") List<UUID> ids);
 }

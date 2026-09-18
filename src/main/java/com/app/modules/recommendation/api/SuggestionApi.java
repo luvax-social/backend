@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import com.app.common.ApiConstants;
 import com.app.common.config.openapi.AuthenticationRequiredResponse;
 import com.app.common.response.ApiResponse;
-import com.app.common.response.UserListItemResponse;
+import com.app.modules.recommendation.dto.response.SuggestedUserResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -49,7 +49,9 @@ public interface SuggestionApi {
                             + " on rank rather than on scores. Blocked, already-followed, dismissed"
                             + " and opted-out accounts are removed at read time. An account with no"
                             + " follows and no history is served the verified cold-start list"
-                            + " instead of an empty one.")
+                            + " instead of an empty one. Each row carries the account's banner url"
+                            + " and the comma-separated source labels behind the suggestion; both"
+                            + " are null for a cold-start row.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "200",
@@ -71,7 +73,7 @@ public interface SuggestionApi {
     })
     @AuthenticationRequiredResponse
     @GetMapping(ApiConstants.Recommendations.SUGGESTIONS)
-    ResponseEntity<ApiResponse<List<UserListItemResponse>>> suggestions(
+    ResponseEntity<ApiResponse<List<SuggestedUserResponse>>> suggestions(
             @Parameter(description = "How many accounts to return", example = "10")
                     @RequestParam(defaultValue = "10")
                     @Min(1)
