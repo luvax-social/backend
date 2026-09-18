@@ -19,17 +19,21 @@ import com.app.common.turnstile.TurnstileOutcome;
 import com.app.common.turnstile.TurnstileSurface;
 import com.app.common.turnstile.TurnstileVerifier;
 import com.app.common.vocabulary.service.VocabularyService;
+import com.app.modules.admin.entity.AdminAction;
 import com.app.modules.admin.enums.AdminActionType;
+import com.app.modules.admin.messaging.AppealCategories;
 import com.app.modules.admin.repository.AdminActionRepository;
 import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
 import com.app.modules.support.dto.request.EscalateSupportTicketRequest;
+import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.RespondSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
+import com.app.modules.support.dto.response.AppealSubmittedResponse;
 import com.app.modules.support.dto.response.SupportTicketResponse;
 import com.app.modules.support.dto.response.SupportTicketStaffResponse;
 import com.app.modules.support.entity.SupportTicket;
@@ -38,6 +42,7 @@ import com.app.modules.support.enums.SupportSource;
 import com.app.modules.support.enums.SupportTicketStatus;
 import com.app.modules.support.mapper.SupportTicketMapper;
 import com.app.modules.support.repository.SupportTicketRepository;
+import com.app.modules.support.service.AppealStatusMailer;
 import com.app.modules.support.service.SupportAuthorizationService;
 import com.app.modules.support.service.SupportAuthorizationService.StaffAction;
 import com.app.modules.support.service.SupportConfirmationMailer;
@@ -67,6 +72,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
     private final SupportTokenService supportTokenService;
     private final TurnstileVerifier turnstileVerifier;
     private final SupportConfirmationMailer confirmationMailer;
+    private final AppealStatusMailer appealStatusMailer;
     private final SupportTicketMapper supportTicketMapper;
     private final UserRepository userRepository;
     private final AdminActionRepository adminActionRepository;
@@ -81,6 +87,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
             SupportTokenService supportTokenService,
             TurnstileVerifier turnstileVerifier,
             SupportConfirmationMailer confirmationMailer,
+            AppealStatusMailer appealStatusMailer,
             SupportTicketMapper supportTicketMapper,
             UserRepository userRepository,
             AdminActionRepository adminActionRepository,
@@ -93,6 +100,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         this.supportTokenService = supportTokenService;
         this.turnstileVerifier = turnstileVerifier;
         this.confirmationMailer = confirmationMailer;
+        this.appealStatusMailer = appealStatusMailer;
         this.supportTicketMapper = supportTicketMapper;
         this.userRepository = userRepository;
         this.adminActionRepository = adminActionRepository;
@@ -125,7 +133,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
 
     @Override
     @Transactional
-    public SupportTicketResponse createFromSignedLink(SignedAppealRequest request) {
+    public AppealSubmittedResponse createFromSignedLink(SignedAppealRequest request) {
         // Redeeming the token mints nothing. No session, no refresh token row, no security context.
         // It authorises exactly one write: this ticket, against the audit row the token names.
         //
@@ -135,28 +143,128 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         // not cost them the whole thirty-day window. Consumption happens last, below.
         SupportTokenService.AppealGrant grant =
                 supportTokenService.peekAppealToken(request.token());
-        User user = requireUser(grant.userId());
-        requireNoOpenTicket(grant.userId());
-        SupportTicket ticket =
-                SupportTicket.builder()
-                        .userId(grant.userId())
-                        .contactEmail(user.getEmail())
-                        // From the token, never from the request. A client-supplied category would
-                        // let the submitter appeal something the token did not authorise.
-                        .category(grant.category())
-                        .subject(request.subject())
-                        .body(request.body())
-                        .status(SupportTicketStatus.OPEN)
-                        .source(SupportSource.SIGNED_LINK)
-                        .adminActionId(grant.adminActionId())
-                        .build();
-        // Flushed here so a constraint violation surfaces while the token is still unspent.
-        SupportTicket saved = supportTicketRepository.saveAndFlush(ticket);
+        // The category comes from the token, never from the request. A client-supplied category
+        // would let the submitter appeal something the token did not authorise.
+        SupportTicket saved =
+                openAppeal(
+                        grant.userId(),
+                        grant.adminActionId(),
+                        grant.category(),
+                        request.subject(),
+                        request.body(),
+                        SupportSource.SIGNED_LINK);
         // Spent last, once nothing above can still refuse. The consume is atomic, so two requests
         // racing this line still create exactly one ticket: the loser is refused here and its
         // insert rolls back with the transaction.
         supportTokenService.consumeAppealToken(request.token());
+        // Minted only now, after the appeal token is spent. The appellant holds no session and the
+        // credential they arrived with has just been destroyed, so without this they leave with no
+        // way back to the appeal they have only just filed.
+        String statusToken = supportTokenService.createStatusToken(saved.getId());
+        // Mailed as well as returned. The response carries the token only as long as the tab that
+        // received it, and the client may not persist a bearer credential to browser storage, so
+        // without this the appellant loses the status link the moment they close the page. The
+        // address is the one the original appeal link was sent to, and that link was a write
+        // credential; a read-only link to the same address is strictly the weaker of the two.
+        //
+        // Last, after the write and the token spend. It refuses silently for an unverified address
+        // and swallows a transport failure, so nothing it does can fail an appeal already filed.
+        appealStatusMailer.sendStatusLink(saved.getUserId(), saved.getContactEmail(), statusToken);
+        return new AppealSubmittedResponse(supportTicketMapper.toOwnerResponse(saved), statusToken);
+    }
+
+    @Override
+    @Transactional
+    public SupportTicketResponse createInProductAppeal(
+            UUID userId, InProductAppealRequest request) {
+        // The audit row is read here and its owner compared server-side. The identifier in the
+        // request proves nothing: unlike a signed token it is not a credential, and treating it as
+        // one would let any authenticated caller appeal any decision by replaying an id. Resolved
+        // by primary key, so this is one index lookup.
+        AdminAction action =
+                adminActionRepository
+                        .findById(request.adminActionId())
+                        .filter(found -> userId.equals(found.getTargetUserId()))
+                        // One answer for both cases. An audit row owned by somebody else and an
+                        // audit row that does not exist are deliberately indistinguishable, or the
+                        // endpoint becomes an oracle for whether an id names a real decision.
+                        .orElseThrow(
+                                () ->
+                                        new AppException(
+                                                ApiErrorCode.SUPPORT_APPEAL_ACTION_NOT_FOUND));
+        SupportCategory category = AppealCategories.forAction(action.getActionType());
+        if (category == null) {
+            throw new AppException(ApiErrorCode.SUPPORT_APPEAL_NOT_APPEALABLE);
+        }
+        SupportTicket saved =
+                openAppeal(
+                        userId,
+                        action.getId(),
+                        category,
+                        request.subject(),
+                        request.body(),
+                        // AUTHENTICATED rather than a fourth source value: the enum records how the
+                        // ticket arrived, and this one arrived on a session. What makes it an
+                        // appeal is admin_action_id being set, which is the same thing that makes
+                        // the signed-link ticket one.
+                        SupportSource.AUTHENTICATED);
+        // A notice may already have minted a signed link for this row. Leaving it live would hand
+        // its holder a credential that can now only ever be refused, and one that would outlive a
+        // rejection of this very appeal. Revoking is idempotent; the common case is no token.
+        supportTokenService.revokeAppealToken(action.getId());
         return supportTicketMapper.toOwnerResponse(saved);
+    }
+
+    /**
+     * The one ticket-creation path behind both appeal entry points.
+     *
+     * <p>Shared deliberately. The two entries differ only in how they establish that the appellant
+     * owns the decision - a single-use token for the appellant with no session, a server-side
+     * ownership read for the one who has - and everything after that point is identical. Two
+     * implementations would drift, and the guards below are exactly the ones that must not.
+     */
+    private SupportTicket openAppeal(
+            UUID userId,
+            UUID adminActionId,
+            SupportCategory category,
+            String subject,
+            String body,
+            SupportSource source) {
+        User user = requireUser(userId);
+        // One decision, one appeal, in any status. The open-ticket guard below does not cover this:
+        // a rejected first appeal is terminal and would let the same row be appealed again.
+        if (supportTicketRepository.hasAppealForAction(adminActionId)) {
+            throw new AppException(ApiErrorCode.SUPPORT_APPEAL_ALREADY_FILED);
+        }
+        requireNoOpenTicket(userId);
+        SupportTicket ticket =
+                SupportTicket.builder()
+                        .userId(userId)
+                        .contactEmail(user.getEmail())
+                        .category(category)
+                        .subject(subject)
+                        .body(body)
+                        .status(SupportTicketStatus.OPEN)
+                        .source(source)
+                        .adminActionId(adminActionId)
+                        .build();
+        // Flushed here so a constraint violation surfaces while the caller's token, if it holds
+        // one, is still unspent.
+        return supportTicketRepository.saveAndFlush(ticket);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SupportTicketResponse readByStatusToken(String rawToken) {
+        // Peek, never consume: a status link is followed repeatedly over the life of the appeal.
+        UUID ticketId = supportTokenService.peekStatusToken(rawToken);
+        return supportTicketRepository
+                .findById(ticketId)
+                .map(supportTicketMapper::toOwnerResponse)
+                // The same answer an unknown or expired token gets. A ticket that has since been
+                // purged must not be distinguishable from a token that was never real, or the
+                // endpoint tells an anonymous caller which of their guesses existed.
+                .orElseThrow(() -> new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID));
     }
 
     @Override

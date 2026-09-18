@@ -482,6 +482,7 @@ public class AdminServiceImpl implements AdminService {
                         null);
         if (!restore) {
             resolveLinkedReport(linkedReport, actorId, request.reason());
+            notifyContentRemoved(ownerId, NotificationType.COMMENT_REMOVED, action, request);
         }
         return action;
     }
@@ -518,6 +519,7 @@ public class AdminServiceImpl implements AdminService {
                         null);
         if (!restore) {
             resolveLinkedReport(linkedReport, actorId, request.reason());
+            notifyContentRemoved(ownerId, NotificationType.STORY_REMOVED, action, request);
         }
         return action;
     }
@@ -554,6 +556,7 @@ public class AdminServiceImpl implements AdminService {
                         null);
         if (!restore) {
             resolveLinkedReport(linkedReport, actorId, request.reason());
+            notifyContentRemoved(senderId, NotificationType.MESSAGE_REMOVED, action, request);
         }
         return action;
     }
@@ -707,6 +710,28 @@ public class AdminServiceImpl implements AdminService {
         report.setReviewedAt(OffsetDateTime.now());
         report.setResolutionNote(reason.trim());
         reportRepository.save(report);
+    }
+
+    /**
+     * Tells a content owner their comment, story or message was removed, and by which decision.
+     *
+     * <p>{@code entityType} is the audit row rather than the removed content, and that is the deep
+     * link: the in-product appeal endpoint opens an appeal against an {@code admin_actions} id, so
+     * pointing the notification at the removed row would leave the client with nothing to appeal
+     * against. The removed content is gone and has no surface to navigate to in any case.
+     *
+     * <p>{@code recipientId} is null for a message whose sender's account was permanently deleted
+     * (V32). That is a legitimate moderation target with nobody left to notify.
+     */
+    private void notifyContentRemoved(
+            UUID recipientId,
+            NotificationType type,
+            AdminActionResponse action,
+            AdminActionRequest request) {
+        if (recipientId == null) {
+            return;
+        }
+        notifySystem(recipientId, type, "admin_action", action.id(), null, request.reason());
     }
 
     private void notifySystem(

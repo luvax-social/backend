@@ -29,12 +29,16 @@ import com.app.common.exception.AppException;
 import com.app.common.security.service.RateLimiterService;
 import com.app.common.turnstile.TurnstileOutcome;
 import com.app.common.turnstile.TurnstileVerifier;
+import com.app.modules.admin.entity.AdminAction;
+import com.app.modules.admin.enums.AdminActionType;
 import com.app.modules.admin.repository.AdminActionRepository;
 import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
+import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
+import com.app.modules.support.dto.response.AppealSubmittedResponse;
 import com.app.modules.support.dto.response.SupportTicketResponse;
 import com.app.modules.support.entity.SupportTicket;
 import com.app.modules.support.enums.SupportCategory;
@@ -42,6 +46,7 @@ import com.app.modules.support.enums.SupportSource;
 import com.app.modules.support.enums.SupportTicketStatus;
 import com.app.modules.support.mapper.SupportTicketMapper;
 import com.app.modules.support.repository.SupportTicketRepository;
+import com.app.modules.support.service.AppealStatusMailer;
 import com.app.modules.support.service.SupportAuthorizationService;
 import com.app.modules.support.service.SupportConfirmationMailer;
 import com.app.modules.support.service.SupportTokenService;
@@ -60,6 +65,7 @@ class SupportTicketServiceImplTest {
     @Mock private SupportTokenService supportTokenService;
     @Mock private TurnstileVerifier turnstileVerifier;
     @Mock private SupportConfirmationMailer confirmationMailer;
+    @Mock private AppealStatusMailer appealStatusMailer;
     @Mock private UserRepository userRepository;
     @Mock private AdminActionRepository adminActionRepository;
     @Mock private AdminActionRecorder adminActionRecorder;
@@ -78,6 +84,7 @@ class SupportTicketServiceImplTest {
                         supportTokenService,
                         turnstileVerifier,
                         confirmationMailer,
+                        appealStatusMailer,
                         new SupportTicketMapper(),
                         userRepository,
                         adminActionRepository,
@@ -157,10 +164,10 @@ class SupportTicketServiceImplTest {
                         new SupportTokenService.AppealGrant(
                                 USER_ID, ACTION_ID, SupportCategory.APPEAL_BAN));
 
-        SupportTicketResponse response =
+        AppealSubmittedResponse response =
                 service.createFromSignedLink(new SignedAppealRequest("tok", "Subject", "Body"));
 
-        assertThat(response.source()).isEqualTo(SupportSource.SIGNED_LINK);
+        assertThat(response.ticket().source()).isEqualTo(SupportSource.SIGNED_LINK);
         assertThat(capturedFlushedTicket().getAdminActionId()).isEqualTo(ACTION_ID);
         // The collaborators that would mint a session are not even wired into this service, so the
         // property is structural: there is nothing here that could issue one.
@@ -414,6 +421,342 @@ class SupportTicketServiceImplTest {
 
         assertThat(response.toString()).doesNotContain("Known abuser");
         assertThat(response.staffResponse()).isEqualTo("Here is our answer.");
+    }
+
+    @Test
+    void createInProductAppeal_owner_opensTheAppealAndDerivesTheCategory() {
+        stubUser();
+        stubAction(AdminActionType.REMOVE_COMMENT, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(false);
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(false);
+
+        SupportTicketResponse response =
+                service.createInProductAppeal(
+                        USER_ID, new InProductAppealRequest(ACTION_ID, "Subject", "Body"));
+
+        assertThat(response.status()).isEqualTo(SupportTicketStatus.OPEN);
+        // AUTHENTICATED because it arrived on a session. admin_action_id being set is what makes
+        // it an appeal, exactly as it is for the signed-link ticket.
+        assertThat(response.source()).isEqualTo(SupportSource.AUTHENTICATED);
+        SupportTicket written = capturedFlushedTicket();
+        assertThat(written.getAdminActionId()).isEqualTo(ACTION_ID);
+        // Derived server-side from the action type, never taken from the request.
+        assertThat(written.getCategory()).isEqualTo(SupportCategory.APPEAL_CONTENT_REMOVAL);
+    }
+
+    // The identifier in the request is not a credential. A caller who is not the target of the row
+    // must get exactly the answer an unknown identifier gets, or the endpoint becomes an oracle
+    // for whether a given id names a real moderation decision.
+    @Test
+    void createInProductAppeal_foreignAction_answersExactlyAsAnUnknownOneDoes() {
+        stubAction(AdminActionType.BAN_USER, UUID.randomUUID());
+
+        ApiErrorCode foreign =
+                errorCodeOf(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")));
+
+        UUID unknownId = UUID.randomUUID();
+        when(adminActionRepository.findById(unknownId)).thenReturn(Optional.empty());
+        ApiErrorCode unknown =
+                errorCodeOf(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(unknownId, "Subject", "Body")));
+
+        assertThat(foreign).isEqualTo(ApiErrorCode.SUPPORT_APPEAL_ACTION_NOT_FOUND);
+        assertThat(unknown).isEqualTo(foreign);
+        verify(supportTicketRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createInProductAppeal_unmappedActionType_isRefused() {
+        // RESTORE_POST is reinstating. There is nothing to contest about being reinstated, so
+        // AppealCategories maps it to nothing.
+        stubAction(AdminActionType.RESTORE_POST, USER_ID);
+
+        assertThatThrownBy(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.SUPPORT_APPEAL_NOT_APPEALABLE);
+
+        verify(supportTicketRepository, never()).saveAndFlush(any());
+    }
+
+    // One decision, one appeal. The open-ticket guard does not cover this: a rejected first appeal
+    // is terminal, so without this check the same row could be appealed again indefinitely.
+    @Test
+    void createInProductAppeal_secondAppealAgainstTheSameDecision_isRefused() {
+        stubUser();
+        stubAction(AdminActionType.WARN_USER, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(true);
+
+        assertThatThrownBy(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.SUPPORT_APPEAL_ALREADY_FILED);
+
+        verify(supportTicketRepository, never()).saveAndFlush(any());
+    }
+
+    // The two entry paths lead to one ticket. Leaving a signed link live after the in-product
+    // appeal is filed would hand its holder a credential that can only ever be refused, and one
+    // that would outlive a rejection of this very appeal.
+    @Test
+    void createInProductAppeal_revokesAnyUnspentSignedLinkForTheSameDecision() {
+        stubUser();
+        stubAction(AdminActionType.SUSPEND_USER, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(false);
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(false);
+
+        service.createInProductAppeal(
+                USER_ID, new InProductAppealRequest(ACTION_ID, "Subject", "Body"));
+
+        // Revoked after the write, so a refusal above leaves the link intact.
+        InOrder ordered = inOrder(supportTicketRepository, supportTokenService);
+        ordered.verify(supportTicketRepository).saveAndFlush(any());
+        ordered.verify(supportTokenService).revokeAppealToken(ACTION_ID);
+    }
+
+    @Test
+    void createInProductAppeal_accountAlreadyHoldsAnOpenTicket_isRefused() {
+        stubUser();
+        stubAction(AdminActionType.BAN_USER, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(false);
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(true);
+
+        assertThatThrownBy(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.SUPPORT_TICKET_ALREADY_OPEN);
+
+        verify(supportTicketRepository, never()).saveAndFlush(any());
+        verify(supportTokenService, never()).revokeAppealToken(any());
+    }
+
+    // Both entries run the same guards because they run the same implementation. If this drifts,
+    // the shared path has been split in two.
+    @Test
+    void bothAppealEntries_refuseASecondAppealAgainstTheSameDecision() {
+        stubUser();
+        stubAction(AdminActionType.REMOVE_STORY, USER_ID);
+        when(supportTicketRepository.hasAppealForAction(ACTION_ID)).thenReturn(true);
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenReturn(
+                        new SupportTokenService.AppealGrant(
+                                USER_ID, ACTION_ID, SupportCategory.APPEAL_CONTENT_REMOVAL));
+
+        ApiErrorCode viaLink =
+                errorCodeOf(
+                        () ->
+                                service.createFromSignedLink(
+                                        new SignedAppealRequest("tok", "Subject", "Body")));
+        ApiErrorCode viaSession =
+                errorCodeOf(
+                        () ->
+                                service.createInProductAppeal(
+                                        USER_ID,
+                                        new InProductAppealRequest(ACTION_ID, "Subject", "Body")));
+
+        assertThat(viaLink).isEqualTo(ApiErrorCode.SUPPORT_APPEAL_ALREADY_FILED);
+        assertThat(viaSession).isEqualTo(viaLink);
+        // The signed link survives its refusal, which is the whole reason the token is peeked
+        // rather than consumed.
+        verify(supportTokenService, never()).consumeAppealToken(anyString());
+    }
+
+    private void stubAction(AdminActionType actionType, UUID targetUserId) {
+        when(adminActionRepository.findById(ACTION_ID))
+                .thenReturn(
+                        Optional.of(
+                                AdminAction.builder()
+                                        .id(ACTION_ID)
+                                        .actionType(actionType)
+                                        .targetUserId(targetUserId)
+                                        .build()));
+    }
+
+    private static ApiErrorCode errorCodeOf(org.junit.jupiter.api.function.Executable call) {
+        try {
+            call.execute();
+        } catch (Throwable thrown) {
+            return ((AppException) thrown).getErrorCode();
+        }
+        throw new AssertionError("expected the call to be refused");
+    }
+
+    // The appeal token is spent by this very call, and the appellant holds no session. Without a
+    // status token they leave the redemption holding nothing at all.
+    @Test
+    void createFromSignedLink_issuesAStatusTokenForTheTicketItJustCreated() {
+        stubUser();
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(false);
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenReturn(
+                        new SupportTokenService.AppealGrant(
+                                USER_ID, ACTION_ID, SupportCategory.APPEAL_BAN));
+        when(supportTokenService.createStatusToken(any())).thenReturn("status-token");
+
+        AppealSubmittedResponse response =
+                service.createFromSignedLink(new SignedAppealRequest("tok", "Subject", "Body"));
+
+        assertThat(response.statusToken()).isEqualTo("status-token");
+        // Minted for the ticket that was actually written, and only after the appeal token is
+        // spent, so a refusal anywhere above issues nothing.
+        InOrder ordered = inOrder(supportTokenService);
+        ordered.verify(supportTokenService).consumeAppealToken("tok");
+        ordered.verify(supportTokenService).createStatusToken(response.ticket().id());
+    }
+
+    @Test
+    void createFromSignedLink_refusedAppeal_issuesNoStatusToken() {
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenThrow(new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID));
+
+        assertThatThrownBy(
+                        () ->
+                                service.createFromSignedLink(
+                                        new SignedAppealRequest("tok", "Subject", "Body")))
+                .isInstanceOf(AppException.class);
+
+        verify(supportTokenService, never()).createStatusToken(any());
+    }
+
+    // The response carries the status token only as long as the tab that received it, and the
+    // client may not persist a bearer credential to browser storage. Without the mail, closing
+    // the page loses the only way back to an appeal that has just been filed.
+    @Test
+    void createFromSignedLink_mailsTheStatusLinkItJustMinted() {
+        stubUser();
+        when(supportTicketRepository.hasOpenTicket(USER_ID)).thenReturn(false);
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenReturn(
+                        new SupportTokenService.AppealGrant(
+                                USER_ID, ACTION_ID, SupportCategory.APPEAL_BAN));
+        when(supportTokenService.createStatusToken(any())).thenReturn("status-token");
+
+        AppealSubmittedResponse response =
+                service.createFromSignedLink(new SignedAppealRequest("tok", "Subject", "Body"));
+
+        // The same token the response carries, addressed to the account the ticket records. A
+        // second mint here would hand the reader a link the screen never showed them.
+        verify(appealStatusMailer).sendStatusLink(USER_ID, EMAIL, "status-token");
+        assertThat(response.statusToken()).isEqualTo("status-token");
+    }
+
+    @Test
+    void createFromSignedLink_refusedAppeal_mailsNoStatusLink() {
+        when(supportTokenService.peekAppealToken("tok"))
+                .thenThrow(new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID));
+
+        assertThatThrownBy(
+                        () ->
+                                service.createFromSignedLink(
+                                        new SignedAppealRequest("tok", "Subject", "Body")))
+                .isInstanceOf(AppException.class);
+
+        verify(appealStatusMailer, never()).sendStatusLink(any(), anyString(), anyString());
+    }
+
+    @Test
+    void readByStatusToken_readsTheTicketInTheOwnerFacingShape() {
+        UUID ticketId = UUID.randomUUID();
+        when(supportTokenService.peekStatusToken("status-token")).thenReturn(ticketId);
+        when(supportTicketRepository.findById(ticketId))
+                .thenReturn(Optional.of(answeredAppeal(ticketId)));
+
+        SupportTicketResponse response = service.readByStatusToken("status-token");
+
+        assertThat(response.id()).isEqualTo(ticketId);
+        assertThat(response.status()).isEqualTo(SupportTicketStatus.ANSWERED);
+        assertThat(response.staffResponse()).isEqualTo("Upheld on review");
+    }
+
+    // The structural guarantee this endpoint rests on. The owner-facing record has no component
+    // for the internal note, the assignee or the escalation reason, so no mapper edit can leak
+    // one to an anonymous caller.
+    @Test
+    void readByStatusToken_neverCarriesTheInternalNoteOrAnyStaffField() {
+        UUID ticketId = UUID.randomUUID();
+        SupportTicket ticket = answeredAppeal(ticketId);
+        ticket.setInternalNote("Third offence, do not reinstate");
+        ticket.setAssignedTo(UUID.randomUUID());
+        ticket.setEscalationReason("Escalated by moderator");
+        when(supportTokenService.peekStatusToken("status-token")).thenReturn(ticketId);
+        when(supportTicketRepository.findById(ticketId)).thenReturn(Optional.of(ticket));
+
+        SupportTicketResponse response = service.readByStatusToken("status-token");
+
+        assertThat(
+                        java.util.Arrays.stream(SupportTicketResponse.class.getRecordComponents())
+                                .map(java.lang.reflect.RecordComponent::getName))
+                .doesNotContain("internalNote", "assignedTo", "escalationReason", "respondedBy");
+        assertThat(response.toString()).doesNotContain("Third offence, do not reinstate");
+        assertThat(response.toString()).doesNotContain("Escalated by moderator");
+    }
+
+    @Test
+    void readByStatusToken_repeatedReads_neverConsumeTheToken() {
+        UUID ticketId = UUID.randomUUID();
+        when(supportTokenService.peekStatusToken("status-token")).thenReturn(ticketId);
+        when(supportTicketRepository.findById(ticketId))
+                .thenReturn(Optional.of(answeredAppeal(ticketId)));
+
+        service.readByStatusToken("status-token");
+        service.readByStatusToken("status-token");
+        service.readByStatusToken("status-token");
+
+        // There is no consuming counterpart to peekStatusToken at all, which is what makes this
+        // structural rather than a matter of calling the right method.
+        verify(supportTokenService, never()).consumeAppealToken(anyString());
+        verify(supportTokenService, never()).consumeConfirmationToken(anyString());
+    }
+
+    // Enumeration safety. A token that was never real, a token that expired, and a token naming a
+    // ticket that has since gone must be one answer, or the endpoint reports which guesses landed.
+    @Test
+    void readByStatusToken_everyNegativeCaseAnswersIdentically() {
+        when(supportTokenService.peekStatusToken("unknown"))
+                .thenThrow(new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID));
+        UUID missingTicketId = UUID.randomUUID();
+        when(supportTokenService.peekStatusToken("valid-but-purged")).thenReturn(missingTicketId);
+        when(supportTicketRepository.findById(missingTicketId)).thenReturn(Optional.empty());
+
+        ApiErrorCode unknown = errorCodeOf(() -> service.readByStatusToken("unknown"));
+        ApiErrorCode purged = errorCodeOf(() -> service.readByStatusToken("valid-but-purged"));
+
+        assertThat(unknown).isEqualTo(ApiErrorCode.SUPPORT_TOKEN_INVALID);
+        assertThat(purged).isEqualTo(unknown);
+    }
+
+    private static SupportTicket answeredAppeal(UUID ticketId) {
+        return SupportTicket.builder()
+                .id(ticketId)
+                .userId(USER_ID)
+                .contactEmail(EMAIL)
+                .category(SupportCategory.APPEAL_BAN)
+                .subject("Subject")
+                .body("Body")
+                .status(SupportTicketStatus.ANSWERED)
+                .source(SupportSource.SIGNED_LINK)
+                .adminActionId(ACTION_ID)
+                .staffResponse("Upheld on review")
+                .build();
     }
 
     private void stubUser() {

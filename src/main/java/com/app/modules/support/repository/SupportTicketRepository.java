@@ -214,6 +214,26 @@ public interface SupportTicketRepository extends JpaRepository<SupportTicket, UU
             @Param("status") com.app.modules.support.enums.SupportTicketStatus status,
             Pageable pageable);
 
+    /**
+     * Whether this decision has already been appealed, in any status.
+     *
+     * <p>One decision, one appeal. A terminal first appeal does not trip the one-open-ticket guard,
+     * so without this a rejected appeal could be refiled indefinitely and the same audit row could
+     * accumulate contradictory verdicts.
+     *
+     * <p>Served by {@code idx_support_tickets_admin_action} (V100), whose {@code admin_action_id IS
+     * NOT NULL} predicate this query satisfies because the parameter is never null here.
+     *
+     * @param adminActionId the audit row being appealed
+     * @return true when a ticket already appeals that row
+     */
+    @Query(
+            value =
+                    "SELECT EXISTS (SELECT 1 FROM support_tickets"
+                            + " WHERE admin_action_id = :adminActionId)",
+            nativeQuery = true)
+    boolean hasAppealForAction(@Param("adminActionId") UUID adminActionId);
+
     /** Reads a ticket only when it is visible to staff. */
     @Query(
             "SELECT t FROM SupportTicket t WHERE t.id = :ticketId AND t.status <> com.app.modules"

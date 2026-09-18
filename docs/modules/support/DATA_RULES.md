@@ -193,7 +193,9 @@ Two independent controls, both required:
 2. **Email confirmation.** The ticket is written in `pending_confirmation` and is invisible to every staff query until the confirmation link is followed. Turnstile proves the submitter is probably not a bot; only this proves they can read the mailbox they named, which is what stops the form opening tickets in someone else's name.
 
 Appeal categories are refused on this path with `SUPPORT_CATEGORY_NOT_PUBLIC`.
-An appeal needs an audit row to appeal against, which only a signed link supplies.
+An appeal needs an audit row to appeal against, and this form supplies no way to name one.
+Path B supplies it inside a signed token and path D reads it from the caller's own session; a category posted to this form names nothing at all.
+What this form now offers instead is path E, which does not open an appeal but re-sends the link that opens one.
 
 **Turnstile fails closed.**
 When Cloudflare is unreachable, times out, or answers anything other than a clear success, the submission is refused.
@@ -201,6 +203,74 @@ Failing open would keep appeals flowing during an outage, but it would also mean
 Failing closed makes an outage visible and temporary: the public form stops, while the two authenticated paths and every appeal link already in existing moderation mail keep working, so nobody who was actually mailed a decision loses their route to contest it.
 
 An unconfigured secret is treated the same way, and refuses, so a deployment that forgets `TURNSTILE_SECRET_KEY` fails the form closed rather than silently removing the control.
+
+### Path D - in-product appeal
+
+`POST /api/v1/support/appeals`, authenticated.
+
+A signed link exists because its holder has no session.
+An appellant who still has one does not need one, and routing them through a mail round trip made the emailed notice a single point of failure for them too.
+This path is the same ticket by a second door, not a second kind of ticket: it shares one implementation with path B, so the one-open-ticket guard, the resulting ticket shape and the one-appeal-per-decision guard cannot drift between the two.
+
+Ownership is read from `admin_actions.target_user_id` server-side.
+The identifier in the request body is not a credential and proves nothing.
+A row belonging to another account answers `SUPPORT_APPEAL_ACTION_NOT_FOUND`, which is the identical answer an unknown identifier gets, so the route cannot be used to discover whether an identifier names a real decision.
+
+The category is derived from the action type through `AppealCategories`, never taken from the request, for the same reason path B takes it from the token.
+An action type outside the appealable set is refused with `SUPPORT_APPEAL_NOT_APPEALABLE`.
+
+The resulting ticket carries `source = authenticated`, because that is how it arrived.
+`admin_action_id` being populated is what makes it an appeal, exactly as it is for a path B ticket.
+
+**One decision, one appeal**, in any status, enforced by `SUPPORT_APPEAL_ALREADY_FILED`.
+The one-open-ticket guard does not cover this: a rejected first appeal is terminal, so without it the same decision could be contested again indefinitely.
+
+Opening an appeal here **revokes any unspent signed link for the same decision**.
+Leaving it live would hand its holder a credential that can only ever be refused, and one that would outlive a rejection of this very appeal.
+
+### Path E - appeal link recovery
+
+`POST /api/v1/support/appeal/resend`, anonymous.
+
+The gap it closes: before it, the link contesting a specific decision existed only inside one email.
+A bounced, filtered or deleted notice therefore removed that account's only route to contest the decision, permanently, and a banned or suspended account cannot reach any authenticated surface to recover it.
+
+It re-mints the link for the most recent appealable decision on the account that has not already been appealed, and mails it to **that account's own stored address**, never to the address the caller typed.
+
+**The answer is identical whether or not the address matches anything** - same body, same status, same elapsed time.
+Response time is equalized by `ForgotPasswordTimingEqualizer`, the same component the forgot-password path uses, and the Turnstile verification runs **inside** that window rather than before it.
+A remote verification takes real and variable time; measuring from before it would leave that variance outside the floor and hand back the enumeration channel the equalizer exists to close.
+
+**Turnstile fails closed here**, matching path C rather than the auth surfaces.
+Those can afford to admit a request Cloudflare did not answer for because a per-caller rule stands behind them.
+This route has no per-caller identity at all and it triggers mail, so the challenge is its only real control.
+
+An **unverified** address is refused silently, the same refusal `ModerationMailEventHandler` applies and for the same reason.
+The platform has never proved an unverified address belongs to the account, so mailing it would tell whoever owns that mailbox both that the address is registered here and that a moderation decision concerns its supposed owner.
+That is worse here than in the notice path, because here an anonymous caller chooses the address.
+
+Re-minting goes through the ordinary issue path, so the reverse-key contract destroys the previous link for that decision.
+One decision never holds two live links, however often a replacement is requested.
+
+The selecting query is bounded and indexed rather than a scan: `idx_admin_actions_target_created` (V82) serves both the filter and the ordering, `idx_support_tickets_admin_action` (V100) serves the anti-join, and the query takes one row.
+
+### Appeal status token
+
+The appeal token is spent by the atomic get-then-delete that redeems it, and the appellant holds no session.
+After filing they therefore held nothing at all and could never learn whether the appeal was read.
+
+Redemption now also mints a **status token** and returns it alongside the ticket.
+Key family `support:token:appeal-status:`, following the other two exactly, TTL **90 days**.
+Ninety against the appeal link's thirty: the appeal window bounds how long the appellant has to act, this one bounds how long they can watch the result, and it must outlive it.
+
+`GET /api/v1/support/appeal/status` is anonymous, read-only and idempotent.
+It **peeks and never consumes**, because a status link is meant to be followed repeatedly over the life of an appeal, and there is deliberately no consuming counterpart on the interface at all.
+
+It answers `SupportTicketResponse`, the same record the owner-facing read returns.
+Reusing it is the point: a parallel record for this one caller would be two types obliged to stay in sync, and the field they must agree to withhold is `internal_note`.
+That record structurally has no component for `internal_note`, `assigned_to`, `responded_by` or `escalation_reason`, so no later mapper edit can leak one to an anonymous caller.
+
+An unknown token, an expired token and a token naming a ticket that no longer exists all answer `SUPPORT_TOKEN_INVALID`, so the route cannot report which guesses landed.
 
 ### Rate limits on path C
 

@@ -25,6 +25,7 @@ public class SupportTokenServiceImpl implements SupportTokenService {
 
     private static final String APPEAL_PREFIX = "support:token:appeal:";
     private static final String CONFIRMATION_PREFIX = "support:token:confirmation:";
+    private static final String STATUS_PREFIX = "support:token:appeal-status:";
     private static final String INDEX_INFIX = "subject:";
     private static final String SHA_256 = "SHA-256";
     private static final String VALUE_SEPARATOR = "|";
@@ -41,6 +42,13 @@ public class SupportTokenServiceImpl implements SupportTokenService {
     // Short, because the submitter is sitting at the form when it is sent and a stale confirmation
     // link should not keep an unconfirmed row alive.
     private static final Duration CONFIRMATION_TTL = Duration.ofHours(24);
+
+    // Ninety days, against thirty for the appeal link that precedes it. The appeal window bounds
+    // how long the appellant has to act; this one bounds how long they can watch the result, and
+    // must outlive it. A queue that is slow exactly when it is busiest is the case this exists for,
+    // and an appellant whose status link died before their appeal was decided is back to holding
+    // nothing. It still expires, because a token that never does is a credential.
+    private static final Duration STATUS_TTL = Duration.ofDays(90);
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
@@ -67,14 +75,28 @@ public class SupportTokenServiceImpl implements SupportTokenService {
                     + "redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[4])) "
                     + "return ARGV[1]";
 
+    // Atomic revoke: read the reverse key, then drop the forward and reverse keys together. The
+    // mirror image of CREATE_SCRIPT, minus the new token. KEYS[1] is the reverse key and ARGV[1]
+    // the prefix. Returns nothing the caller needs; revoking a subject that holds no token is the
+    // ordinary case, not an error.
+    private static final String REVOKE_SCRIPT =
+            "local prev = redis.call('GET', KEYS[1]) "
+                    + "if prev then "
+                    + "  redis.call('DEL', ARGV[1] .. prev) "
+                    + "  redis.call('DEL', KEYS[1]) "
+                    + "end "
+                    + "return 1";
+
     private final StringRedisTemplate redisTemplate;
     private final RedisScript<String> consumeScript;
     private final RedisScript<String> createScript;
+    private final RedisScript<Long> revokeScript;
 
     public SupportTokenServiceImpl(StringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
         this.consumeScript = new DefaultRedisScript<>(CONSUME_SCRIPT, String.class);
         this.createScript = new DefaultRedisScript<>(CREATE_SCRIPT, String.class);
+        this.revokeScript = new DefaultRedisScript<>(REVOKE_SCRIPT, Long.class);
     }
 
     @Override
@@ -113,6 +135,22 @@ public class SupportTokenServiceImpl implements SupportTokenService {
         } catch (IllegalArgumentException ex) {
             throw new AppException(ApiErrorCode.SUPPORT_TOKEN_INVALID);
         }
+    }
+
+    @Override
+    public void revokeAppealToken(UUID adminActionId) {
+        redisTemplate.execute(
+                revokeScript, List.of(APPEAL_PREFIX + INDEX_INFIX + adminActionId), APPEAL_PREFIX);
+    }
+
+    @Override
+    public String createStatusToken(UUID ticketId) {
+        return create(STATUS_PREFIX, ticketId.toString(), ticketId.toString(), STATUS_TTL);
+    }
+
+    @Override
+    public UUID peekStatusToken(String rawToken) {
+        return parseTicketId(peek(STATUS_PREFIX, rawToken));
     }
 
     @Override

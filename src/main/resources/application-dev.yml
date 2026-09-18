@@ -122,6 +122,20 @@ app:
       secure: false
   rate-limit:
     endpoint-rules:
+      # Authenticated ticket creation and the caller's own ticket reads. Every other support
+      # path already carried a per-caller Redis rule; this sub-tree carried only the JVM-wide
+      # Resilience4j backstop, which is a global circuit rather than a per-caller bound, so one
+      # abusive caller could exhaust it for everybody. The literal collection route takes the
+      # exact-match fast path and gets its own bucket; the sub-tree pattern covers
+      # /tickets/{ticketId}. An hour-long window, matching the other support rules rather than
+      # the minute-long auth convention, because opening a ticket is a human action already
+      # bounded upstream by the one-open-ticket guard.
+      "[/api/v1/support/tickets]":
+        max-attempts: 60
+        window-seconds: 3600
+      "[/api/v1/support/tickets/**]":
+        max-attempts: 60
+        window-seconds: 3600
       # Followed from a mail client, sometimes twice by a prefetcher, so this is bounded rather
       # than tight. Opting out is idempotent, so a replay is harmless.
       "[/api/v1/support/unsubscribe]":
@@ -146,6 +160,18 @@ app:
       # Reading whether an appeal link is still valid, which the landing screen does on
       # mount. Generous relative to the appeal itself: a reader may open the link, reload it
       # and come back to a restored tab, and none of that redeems anything.
+      # One appeal, read by the appellant who filed it and holds no session. Same band as
+      # appeal/validate: both are anonymous reads behind a 32-byte random token, and this one is
+      # followed repeatedly over the life of an appeal rather than once.
+      # Replacement appeal links. The hardest bound in the support tree, because a single request
+      # causes mail to be sent to an address the caller chooses. Three an hour is enough for
+      # somebody who mistyped their address once; it is not enough to mail a list.
+      "[/api/v1/support/appeal/resend]":
+        max-attempts: 10
+        window-seconds: 3600
+      "[/api/v1/support/appeal/status]":
+        max-attempts: 30
+        window-seconds: 3600
       "[/api/v1/support/appeal/validate]":
         max-attempts: 30
         window-seconds: 3600

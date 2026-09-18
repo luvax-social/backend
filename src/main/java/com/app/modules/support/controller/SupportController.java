@@ -29,10 +29,14 @@ import com.app.common.vocabulary.service.VocabularyService;
 import com.app.common.web.StrictQueryParameters;
 import com.app.modules.support.api.SupportApi;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
+import com.app.modules.support.dto.request.InProductAppealRequest;
 import com.app.modules.support.dto.request.PublicSupportTicketRequest;
+import com.app.modules.support.dto.request.ResendAppealLinkRequest;
 import com.app.modules.support.dto.request.SignedAppealRequest;
 import com.app.modules.support.dto.response.AppealLinkResponse;
+import com.app.modules.support.dto.response.AppealSubmittedResponse;
 import com.app.modules.support.dto.response.SupportTicketResponse;
+import com.app.modules.support.service.AppealRecoveryService;
 import com.app.modules.support.service.SupportTicketService;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
@@ -52,14 +56,17 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 public class SupportController extends BaseController implements SupportApi {
 
     private final SupportTicketService supportTicketService;
+    private final AppealRecoveryService appealRecoveryService;
     private final IpExtractor ipExtractor;
     private final VocabularyService vocabularyService;
 
     public SupportController(
             SupportTicketService supportTicketService,
+            AppealRecoveryService appealRecoveryService,
             IpExtractor ipExtractor,
             VocabularyService vocabularyService) {
         this.supportTicketService = supportTicketService;
+        this.appealRecoveryService = appealRecoveryService;
         this.ipExtractor = ipExtractor;
         this.vocabularyService = vocabularyService;
     }
@@ -115,12 +122,36 @@ public class SupportController extends BaseController implements SupportApi {
     @Override
     @PostMapping(ApiConstants.Support.APPEAL)
     @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
-    public ResponseEntity<ApiResponse<SupportTicketResponse>> createAppeal(
+    public ResponseEntity<ApiResponse<AppealSubmittedResponse>> createAppeal(
             @Valid @RequestBody SignedAppealRequest request) {
         return ResponseEntity.ok(
                 ApiResponse.success(
                         ApiSuccessCode.CREATED,
                         supportTicketService.createFromSignedLink(request)));
+    }
+
+    /**
+     * Opens an appeal against a moderation decision the authenticated caller owns.
+     *
+     * <p>Authenticated, unlike every other appeal route here, and that is the point of it. The
+     * signed link exists for an appellant who cannot authenticate; one who can should not be sent
+     * through a mail round trip to reach the same ticket, and must not be stranded when the notice
+     * never arrives.
+     *
+     * <p>The audit row identifier in the body is not a credential. Ownership is read from the row
+     * itself, and a row belonging to another account answers exactly as an unknown one does.
+     */
+    @PreAuthorize("isAuthenticated()")
+    @Override
+    @PostMapping(ApiConstants.Support.APPEALS)
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<SupportTicketResponse>> createInProductAppeal(
+            @Valid @RequestBody InProductAppealRequest request) {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        ApiSuccessCode.CREATED,
+                        supportTicketService.createInProductAppeal(
+                                SecurityUtils.getCurrentUserId(), request)));
     }
 
     /**
@@ -159,6 +190,45 @@ public class SupportController extends BaseController implements SupportApi {
         return ResponseEntity.ok(
                 ApiResponse.success(
                         ApiSuccessCode.OK, supportTicketService.describeSignedLink(token)));
+    }
+
+    /**
+     * Re-sends the appeal link for the most recent un-appealed decision on an account.
+     *
+     * <p>Returns no body and the same status for every outcome. Telling an anonymous caller that an
+     * address matched would make this a registration oracle, and the address it is asked about is
+     * chosen by that caller.
+     */
+    @Override
+    @PostMapping(ApiConstants.Support.APPEAL_RESEND)
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<Void>> resendAppealLink(
+            @Valid @RequestBody ResendAppealLinkRequest request,
+            HttpServletRequest servletRequest) {
+        appealRecoveryService.resendAppealLink(request, ipExtractor.extract(servletRequest));
+        return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, null));
+    }
+
+    /**
+     * Reads one appeal for an appellant holding a status token and no session.
+     *
+     * <p>Anonymous for the same reason the appeal itself is, and read-only by construction: the
+     * token is peeked and never spent, so the link survives being followed as often as the
+     * appellant likes. That is the whole point of it - the appeal token was destroyed by the
+     * redemption that created the ticket.
+     *
+     * <p>Answers the owner-facing shape, which structurally has no field for the internal note, the
+     * assignee or the escalation reason. Every negative case answers alike.
+     */
+    @Override
+    @GetMapping(ApiConstants.Support.APPEAL_STATUS)
+    @StrictQueryParameters
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<SupportTicketResponse>> readAppealStatus(
+            @RequestParam("token") @NotBlank String token) {
+        return ResponseEntity.ok(
+                ApiResponse.success(
+                        ApiSuccessCode.OK, supportTicketService.readByStatusToken(token)));
     }
 
     /**

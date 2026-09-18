@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Following your appeal</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #FFFFFF; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #0F0F0F; line-height: 1.6;">
+<div style="max-width: 560px; margin: 0 auto; padding: 48px 24px;">
+
+    <span th:text="${appName}" style="display: block; font-size: 16px; font-weight: 700; color: #0F0F0F; margin-bottom: 40px;">Luvax</span>
+
+    <h2 style="font-size: 22px; font-weight: 600; color: #0F0F0F; margin: 0 0 16px;">Following your appeal</h2>
+
+    <p style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0 0 16px;">Your appeal was received. Keep this link. It is how you check the appeal without signing in.</p>
+
+    <p style="margin: 0 0 24px;">
+        <a th:href="${statusUrl}" style="display: inline-block; padding: 12px 20px; background-color: #0F0F0F; color: #FFFFFF; text-decoration: none; border-radius: 6px; font-size: 15px;">Check my appeal</a>
+    </p>
+
+    <p style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0 0 16px;">The page behind the link shows the current status and any reply. This email does not, because it carries nothing that would be worth reading to someone it was not meant for.</p>
+
+    <p style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0;">The link only reads. Nothing on the account can be changed through it.</p>
+
+    <hr style="border: none; border-top: 1px solid #E8E8E8; margin: 36px 0;">
+
+    <p style="font-size: 12px; color: #8C8C8C; line-height: 1.6; margin: 0;">This link can be followed as often as you need, for ninety days. Treat it as private: anyone who has it can read the appeal.</p>
+
+</div>
+</body>
+</html>

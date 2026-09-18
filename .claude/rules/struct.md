@@ -44,7 +44,7 @@ app/
 │   │   │   ├── modules/            # 15 domain modules (see §2)
 │   │   │   └── Application.java    # @SpringBootApplication @ConfigurationPropertiesScan
 │   │   └── resources/
-│   │       ├── db/migration/       # Flyway V01-V111 SQL migrations
+│   │       ├── db/migration/       # Flyway V01-V113 SQL migrations
 │   │       ├── elasticsearch/
 │   │       │   └── settings/       # hashtags.json, posts.json (Elasticsearch index settings)
 │   │       ├── resilience/
@@ -339,7 +339,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 ### Database
 
 - Engine: **PostgreSQL** (docker-compose builds `./docker/postgres` on the `postgres:latest` base)
-- Migration: **Flyway** (`out-of-order: false`); 111 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109 and V110 build their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those sixteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V111 all exist.
+- Migration: **Flyway** (`out-of-order: false`); 113 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109 and V110 build their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those sixteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V113 all exist.
 
 | Migration | Description |
 |-----------|-------------|
@@ -454,6 +454,8 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | V109 | add_verification_and_suggestion_indexes |
 | V110 | add_user_hashtag_affinity_hashtag_index |
 | V111 | add_campaign_recipient_suppressed_status |
+| V112 | add_content_removal_notification_types |
+| V113 | add_content_removal_notification_configs |
 
 - Reference schema: `database/schema.sql` (authoritative final-state; not applied by Flyway)
 - Extensions: `pgcrypto` (UUID gen), `pg_trgm` (fuzzy username search), `btree_gin` (composite GIN indexes)
@@ -475,7 +477,7 @@ means a migration: these are domain primitives, not configuration.
 | `mail_campaign_status` | `draft`, `scheduled`, `sending`, `sent`, `cancelled`, `failed` (6 values). |
 | `media_type` | `image`, `video` (2 values). |
 | `message_type` | `text`, `image`, `video`, `post_share`, `story_share` (5 values). |
-| `notification_type` | `like_post`, `like_comment`, `comment_post`, `reply_comment`, `follow`, `follow_request`, `mention_post`, `mention_comment`, `story_view`, `message`, `warning`, `post_removed`, `report_post_removed`, `post_restored`, `report_dismissed`, `support_ticket_update` (16 values). |
+| `notification_type` | `like_post`, `like_comment`, `comment_post`, `reply_comment`, `follow`, `follow_request`, `mention_post`, `mention_comment`, `story_view`, `message`, `warning`, `post_removed`, `report_post_removed`, `post_restored`, `report_dismissed`, `support_ticket_update`, `comment_removed`, `story_removed`, `message_removed` (19 values). |
 | `oauth_provider` | `google`, `facebook`, `apple` (3 values). |
 | `post_status` | `draft`, `published`, `archived`, `removed` (4 values). |
 | `post_type` | `image`, `video`, `carousel`, `text` (4 values). |
@@ -509,6 +511,8 @@ means a migration: these are domain primitives, not configuration.
 | `auth:ratelimit:mail:moderation:{sha256(email)}` | 1h sliding | `ModerationMailThrottleImpl` |
 | `support:token:appeal:{sha256}` | 30d | `SupportTokenServiceImpl` |
 | `support:token:appeal:subject:{adminActionId}` | 30d (reverse index) | `SupportTokenServiceImpl` |
+| `support:token:appeal-status:{sha256}` | 90d | `SupportTokenServiceImpl` |
+| `support:token:appeal-status:subject:{ticketId}` | 90d (reverse index) | `SupportTokenServiceImpl` |
 | `support:token:confirmation:{sha256}` | 24h | `SupportTokenServiceImpl` |
 | `support:token:confirmation:subject:{ticketId}` | 24h (reverse index) | `SupportTokenServiceImpl` |
 | `auth:ratelimit:support:public:daily:{email}` | 24h sliding, 10 per address | `SupportTicketServiceImpl` |

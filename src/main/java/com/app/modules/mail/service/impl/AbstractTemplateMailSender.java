@@ -181,6 +181,18 @@ public abstract class AbstractTemplateMailSender implements MailSender {
         return dispatch(toEmail, subject, mailTemplateRenderer.renderCampaign(variables));
     }
 
+    public String sendAppealLink(Map<String, Object> variables, String toEmail) {
+        String html =
+                mailTemplateRenderer.render(SupportMailTemplate.RESEND_APPEAL_LINK, variables);
+        return dispatch(toEmail, SupportMailTemplate.RESEND_APPEAL_LINK.getDefaultSubject(), html);
+    }
+
+    public String sendAppealStatusLink(Map<String, Object> variables, String toEmail) {
+        String html =
+                mailTemplateRenderer.render(SupportMailTemplate.APPEAL_STATUS_LINK, variables);
+        return dispatch(toEmail, SupportMailTemplate.APPEAL_STATUS_LINK.getDefaultSubject(), html);
+    }
+
     public String sendSupportConfirmation(Map<String, Object> variables, String toEmail) {
         String html =
                 mailTemplateRenderer.render(SupportMailTemplate.CONFIRM_SUPPORT_REQUEST, variables);
