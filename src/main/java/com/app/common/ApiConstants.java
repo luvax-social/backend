@@ -63,6 +63,7 @@ public final class ApiConstants {
         public static final String SEARCH = "/search";
         public static final String COMMENTS = "/{postId}/comments";
         public static final String FEED = "/feed";
+        public static final String DISCOVERY = "/discovery";
         public static final String USER_POSTS = "/user/{userId}";
     }
 
@@ -83,6 +84,7 @@ public final class ApiConstants {
         public static final String BY_ID = "/{storyId}";
         public static final String USER_STORIES = "/user/{userId}";
         public static final String FEED = "/feed";
+        public static final String DISCOVERY = "/discovery";
         public static final String VIEWS = "/{storyId}/views";
         public static final String LIKES = "/{storyId}/likes";
     }
@@ -145,6 +147,7 @@ public final class ApiConstants {
 
         public static final String ROOT = API_V1 + "/recommendations";
         public static final String FEED = "/feed";
+        public static final String DISCOVERY = "/discovery";
         public static final String IMPRESSIONS = "/impressions";
         // People you may know, and the per-viewer permanent removal of one row from it.
         public static final String SUGGESTIONS = "/suggestions";

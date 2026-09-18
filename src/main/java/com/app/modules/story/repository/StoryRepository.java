@@ -33,6 +33,60 @@ public interface StoryRepository extends JpaRepository<Story, UUID> {
                     + " ORDER BY s.createdAt ASC")
     List<Story> findActiveByUser(UUID userId, OffsetDateTime now);
 
+    /**
+     * Public accounts with an active story that the viewer does not follow, drawn from their
+     * suggestion list.
+     *
+     * <p>Every exclusion lives here rather than in the service because each one is a privacy rule,
+     * and a filter the database applies cannot be forgotten by a later caller. The clauses mirror
+     * {@code UserSuggestionRepository.findVisibleSuggestions} - block in either direction,
+     * dismissal, existing follow, deleted or non-active account, {@code suggestible} opt-out - plus
+     * the three this surface adds.
+     *
+     * <p>{@code is_private = FALSE} is the first: a private account's story is never visible to a
+     * non-follower, and unlike the suggestions rail, which may legitimately offer a private account
+     * to follow, this surface renders the story itself.
+     *
+     * <p>The other two are the story's own tombstones. This query is native, so it does not inherit
+     * the {@code @SQLRestriction} on {@link com.app.modules.story.entity.Story} that hides a
+     * deleted or administratively removed row on every JPQL read; it restates both. A live {@code
+     * expires_at} check is required for the same reason expiry is checked everywhere else: an
+     * expired row outlives the story until the cleanup job runs.
+     *
+     * @param viewerId the account discovering
+     * @param now the current instant, in UTC
+     * @param limit maximum authors
+     * @return author ids in suggestion rank order
+     */
+    @Query(
+            value =
+                    "SELECT s.suggested_id FROM user_suggestions s"
+                            + " JOIN users u ON u.id = s.suggested_id"
+                            + " JOIN user_settings st ON st.user_id = s.suggested_id"
+                            + " WHERE s.user_id = :viewerId"
+                            + " AND s.suggested_id <> :viewerId"
+                            + " AND u.deleted_at IS NULL"
+                            + " AND u.status = 'active'"
+                            + " AND u.is_private = FALSE"
+                            + " AND st.suggestible = TRUE"
+                            + " AND EXISTS (SELECT 1 FROM stories t"
+                            + "   WHERE t.user_id = s.suggested_id AND t.expires_at > :now"
+                            + "   AND t.deleted_at IS NULL AND t.admin_removed_at IS NULL)"
+                            + " AND NOT EXISTS (SELECT 1 FROM follows f"
+                            + "   WHERE f.follower_id = :viewerId AND f.following_id = s.suggested_id)"
+                            + " AND NOT EXISTS (SELECT 1 FROM blocks b"
+                            + "   WHERE (b.blocker_id = :viewerId AND b.blocked_id = s.suggested_id)"
+                            + "   OR (b.blocker_id = s.suggested_id AND b.blocked_id = :viewerId))"
+                            + " AND NOT EXISTS (SELECT 1 FROM suggestion_dismissals d"
+                            + "   WHERE d.user_id = :viewerId AND d.dismissed_id = s.suggested_id)"
+                            + " ORDER BY s.rank ASC"
+                            + " LIMIT :limit",
+            nativeQuery = true)
+    List<UUID> findDiscoverableAuthors(
+            @Param("viewerId") UUID viewerId,
+            @Param("now") OffsetDateTime now,
+            @Param("limit") int limit);
+
     /** Active stories of the given authors, grouped per author in playback order. */
     @Query(
             "SELECT s FROM Story s WHERE s.userId IN :authorIds AND s.expiresAt > :now"

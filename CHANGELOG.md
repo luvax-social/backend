@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - Suggested accounts now carry the account's banner image and the reason it is being suggested, so a client can show who an account is rather than only its name.
+- Stories from suggested accounts can be discovered without following them first, so a new account has somewhere for its story rail to start. Private accounts never appear, and blocked, dismissed and opted-out accounts are excluded.
 - Trending hashtags can be read with one post cover image each, so a client can preview what a tag looks like without a separate request per tag. A tag whose posts are all text or all from private accounts keeps its place with no cover.
 - An appeal can now be opened from a signed-in session against a moderation decision the caller owns, so an appellant who never lost access no longer needs the emailed link to reach the same ticket.
 - A warning listed on the account's own settings screen now carries the identifier of the decision behind it, so it can be contested from where it is read.
