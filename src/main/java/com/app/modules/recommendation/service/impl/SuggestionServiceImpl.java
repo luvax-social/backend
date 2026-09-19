@@ -18,9 +18,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.app.common.response.UserListItemResponse;
 import com.app.common.response.UserSummaryResponse;
 import com.app.common.response.ViewerRelationshipResponse;
+import com.app.modules.recommendation.dto.response.SuggestedUserResponse;
 import com.app.modules.recommendation.repository.SuggestionDismissalRepository;
 import com.app.modules.recommendation.repository.UserSuggestionRepository;
 import com.app.modules.recommendation.service.SuggestionService;
@@ -107,7 +107,7 @@ public class SuggestionServiceImpl implements SuggestionService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<UserListItemResponse> suggestionsFor(UUID viewerId, int limit) {
+    public List<SuggestedUserResponse> suggestionsFor(UUID viewerId, int limit) {
         int size = Math.max(1, Math.min(limit, MAX_PAGE_SIZE));
         List<UUID> ids = userSuggestionRepository.findVisibleSuggestions(viewerId, size);
         if (ids.isEmpty()) {
@@ -121,14 +121,43 @@ public class SuggestionServiceImpl implements SuggestionService {
         Map<UUID, UserSummaryResponse> summaries = userSummaryService.loadSummaries(ids);
         Map<UUID, ViewerRelationshipResponse> relationships =
                 socialService.loadRelationships(viewerId, ids);
-        List<UserListItemResponse> rows = new ArrayList<>(ids.size());
+        List<Object[]> cardFields = userSuggestionRepository.findProfileCardFields(ids);
+        Map<UUID, String> banners = indexNullable(cardFields);
+        Map<UUID, Integer> followerCounts = new HashMap<>();
+        for (Object[] row : cardFields) {
+            followerCounts.put((UUID) row[0], ((Number) row[2]).intValue());
+        }
+        // A cold-start candidate has no row here, because it was never precomputed and no reason
+        // for it was ever recorded. The client omits the line rather than inventing one.
+        Map<UUID, String> sources =
+                indexNullable(userSuggestionRepository.findSourcesFor(viewerId, ids));
+        List<SuggestedUserResponse> rows = new ArrayList<>(ids.size());
         for (UUID id : ids) {
             rows.add(
-                    new UserListItemResponse(
+                    new SuggestedUserResponse(
                             summaries.get(id),
-                            relationships.getOrDefault(id, ViewerRelationshipResponse.NONE)));
+                            relationships.getOrDefault(id, ViewerRelationshipResponse.NONE),
+                            banners.get(id),
+                            sources.get(id),
+                            followerCounts.getOrDefault(id, 0)));
         }
         return rows;
+    }
+
+    /**
+     * Indexes [uuid, nullable text] rows by id, keeping a null value out of the map entirely.
+     *
+     * <p>A null value and an absent key mean the same thing to every caller here - no banner, no
+     * recorded reason - so collapsing them avoids null-value handling at each read.
+     */
+    private static Map<UUID, String> indexNullable(List<Object[]> rows) {
+        Map<UUID, String> byId = new HashMap<>();
+        for (Object[] row : rows) {
+            if (row[1] != null) {
+                byId.put((UUID) row[0], (String) row[1]);
+            }
+        }
+        return byId;
     }
 
     @Override

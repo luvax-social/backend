@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +23,7 @@ import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
 import com.app.common.response.CursorPageResponse;
 import com.app.common.security.util.SecurityUtils;
+import com.app.common.web.StrictQueryParameters;
 import com.app.modules.story.api.StoryApi;
 import com.app.modules.story.dto.request.CreateStoryRequest;
 import com.app.modules.story.dto.response.StoryFeedItemResponse;
@@ -69,6 +72,18 @@ public class StoryController extends BaseController implements StoryApi {
     public ResponseEntity<ApiResponse<List<StoryFeedItemResponse>>> getStoryFeed() {
         List<StoryFeedItemResponse> body =
                 storyService.getStoryFeed(SecurityUtils.getCurrentUserId());
+        return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
+    }
+
+    /** Returns active stories from suggested accounts the caller does not follow. */
+    @Override
+    @GetMapping(ApiConstants.Stories.ROOT + ApiConstants.Stories.DISCOVERY)
+    @StrictQueryParameters
+    @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<List<StoryFeedItemResponse>>> discoverStories(
+            @RequestParam(defaultValue = "8") @Min(1) @Max(20) int limit) {
+        List<StoryFeedItemResponse> body =
+                storyService.discoverStories(SecurityUtils.getCurrentUserId(), limit);
         return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
     }
 

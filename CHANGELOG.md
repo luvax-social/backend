@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Suggested accounts now carry the account's banner image, follower count and the reason it is being suggested, so a client can show who an account is rather than only its name.
+- Stories in the feed are drawn from followed accounts and suggested ones alike, followed accounts first, and a story the reader has already opened is never offered again. A private account appears only to an accepted follower; blocked, dismissed and opted-out accounts are excluded.
+- Trending hashtags can be read with one post cover image each, so a client can preview what a tag looks like without a separate request per tag. A tag whose posts are all text or all from private accounts keeps its place with no cover.
 - An appeal can now be opened from a signed-in session against a moderation decision the caller owns, so an appellant who never lost access no longer needs the emailed link to reach the same ticket.
 - A warning listed on the account's own settings screen now carries the identifier of the decision behind it, so it can be contested from where it is read.
 - A replacement appeal link can be requested from the public support entry when the original moderation notice never arrived, behind a captcha that fails closed and an answer that is identical whether or not the address matches an account.
@@ -828,6 +831,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- The post index-sync integration tests now stub the Gorse recommender client, which is an external HTTP service with no container in those tests; left real, every post upsert failed on a refused connection and nothing reached Elasticsearch.
 - Coverage proving the anonymous appeal status read never carries the staff-only note, never consumes its token, and answers every negative case identically.
 - Coverage proving the appeal link recovery path answers the same for a matching and a non-matching address, equalizes both, and verifies the captcha inside that equalized window.
 - Added an integration test verifying support ticket seed data volume, category coverage, the one-open-ticket-per-lane constraint, and audit-row coverage.

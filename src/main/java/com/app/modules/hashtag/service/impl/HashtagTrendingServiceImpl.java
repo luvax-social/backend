@@ -5,6 +5,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -21,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.app.common.response.PageResponse;
 import com.app.modules.hashtag.config.HashtagProperties;
 import com.app.modules.hashtag.dto.response.HashtagTrendingResponse;
+import com.app.modules.hashtag.dto.response.TrendingPreviewResponse;
 import com.app.modules.hashtag.entity.Hashtag;
 import com.app.modules.hashtag.entity.HashtagTrending;
 import com.app.modules.hashtag.entity.HashtagTrendingId;
@@ -193,6 +195,31 @@ public class HashtagTrendingServiceImpl implements HashtagTrendingService {
         long total = hashtagTrendingRepository.countByIdPeriodStart(latest);
         Page<HashtagTrendingResponse> page = new PageImpl<>(content, pageable, total);
         return PageResponse.from(page);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TrendingPreviewResponse> attachCovers(List<HashtagTrendingResponse> entries) {
+        if (entries.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> ids = entries.stream().map(HashtagTrendingResponse::hashtagId).toList();
+        Map<UUID, String> covers = new HashMap<>();
+        for (Object[] row : hashtagTrendingRepository.findCoverUrls(ids)) {
+            if (row[1] != null) {
+                covers.put((UUID) row[0], (String) row[1]);
+            }
+        }
+        return entries.stream()
+                .map(
+                        entry ->
+                                new TrendingPreviewResponse(
+                                        entry.hashtagId(),
+                                        entry.name(),
+                                        entry.postCount(),
+                                        entry.pinned(),
+                                        covers.get(entry.hashtagId())))
+                .toList();
     }
 
     @Override

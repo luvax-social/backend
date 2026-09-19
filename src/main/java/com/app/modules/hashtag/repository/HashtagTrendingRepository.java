@@ -70,4 +70,43 @@ public interface HashtagTrendingRepository
             @Param("periodStart") OffsetDateTime periodStart,
             @Param("limit") int limit,
             @Param("offset") int offset);
+
+    /**
+     * One cover image per hashtag: the newest published post carrying it that has media.
+     *
+     * <p>A lateral join rather than a group-by, so each hashtag costs one index seek into {@code
+     * post_hashtags} and stops at the first row. A hashtag whose posts are all text, all removed or
+     * all from private accounts yields a null url and keeps its row, because dropping the tag would
+     * silently shorten the card instead of showing the tag with its fallback.
+     *
+     * <p>The author predicates are load-bearing rather than defensive. This thumbnail is rendered
+     * with no per-post visibility pass behind it, so whatever this query returns is shown to
+     * everyone; a private account's photograph must never be reachable through it. {@code status =
+     * 'published'} covers moderation removal too, because a removal moves the old status into
+     * {@code status_before_moderation} and sets {@code status} to {@code removed}.
+     *
+     * @param ids the hashtags to find covers for
+     * @return rows of [hashtag_id, cover_url]; cover_url may be null
+     */
+    @Query(
+            value =
+                    "SELECT h.id, cover.cdn_url FROM hashtags h"
+                            + " LEFT JOIN LATERAL ("
+                            + "   SELECT ma.cdn_url FROM post_hashtags ph"
+                            + "   JOIN posts p ON p.id = ph.post_id"
+                            + "   JOIN users au ON au.id = p.user_id"
+                            + "   JOIN post_media pm ON pm.post_id = p.id"
+                            + "   JOIN media_assets ma ON ma.id = pm.media_asset_id"
+                            + "   WHERE ph.hashtag_id = h.id"
+                            + "     AND p.status = 'published'"
+                            + "     AND p.deleted_at IS NULL"
+                            + "     AND au.is_private = FALSE"
+                            + "     AND au.deleted_at IS NULL"
+                            + "     AND au.status = 'active'"
+                            + "   ORDER BY p.created_at DESC, pm.\"position\" ASC"
+                            + "   LIMIT 1"
+                            + " ) cover ON TRUE"
+                            + " WHERE h.id IN (:ids)",
+            nativeQuery = true)
+    List<Object[]> findCoverUrls(@Param("ids") List<UUID> ids);
 }

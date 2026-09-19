@@ -33,6 +33,77 @@ public interface StoryRepository extends JpaRepository<Story, UUID> {
                     + " ORDER BY s.createdAt ASC")
     List<Story> findActiveByUser(UUID userId, OffsetDateTime now);
 
+    /**
+     * Authors with at least one active story the viewer has not already seen.
+     *
+     * <p>Candidates come from two tiers, and the union is the point. The accounts the viewer
+     * follows come first, because a story from somebody they chose to follow is the one they most
+     * want; suggested accounts follow, which is what keeps the surface populated for an account
+     * that follows nobody. Ordering by tier then suggestion rank preserves both.
+     *
+     * <p>Every exclusion lives here rather than in the service because each one is a privacy rule,
+     * and a filter the database applies cannot be forgotten by a later caller.
+     *
+     * <p>Privacy is the reason the private-account clause is a disjunction rather than a flat
+     * exclusion. A private account's story is visible to an accepted follower and to nobody else,
+     * so it is admitted only on that follow existing. Blocks in either direction remove the account
+     * entirely, matching the stealth-block model. A dismissed suggestion is dropped, but a followed
+     * account is not subject to dismissal or to the {@code suggestible} opt-out: both govern being
+     * *offered* to strangers, not being read by somebody who already follows you.
+     *
+     * <p>The unseen predicate is what stops the feed offering the same story twice. An author whose
+     * every active story the viewer has already opened drops out rather than being re-suggested.
+     *
+     * <p>This query is native, so it does not inherit the {@code @SQLRestriction} on {@link
+     * com.app.modules.story.entity.Story} that hides a deleted or administratively removed row on
+     * every JPQL read; it restates both. The live {@code expires_at} check is required for the same
+     * reason expiry is checked everywhere else: an expired row outlives the story until the cleanup
+     * job runs.
+     *
+     * @param viewerId the account reading
+     * @param now the current instant, in UTC
+     * @param limit maximum authors
+     * @return author ids, followed accounts first then by suggestion rank
+     */
+    @Query(
+            value =
+                    "SELECT c.author_id FROM ("
+                            + "   SELECT f.following_id AS author_id, 0 AS tier, 0 AS rank"
+                            + "     FROM follows f"
+                            + "    WHERE f.follower_id = :viewerId AND f.status = 'accepted'"
+                            + "   UNION ALL"
+                            + "   SELECT s.suggested_id, 1 AS tier, s.rank"
+                            + "     FROM user_suggestions s"
+                            + "    WHERE s.user_id = :viewerId"
+                            + "      AND NOT EXISTS (SELECT 1 FROM suggestion_dismissals d"
+                            + "        WHERE d.user_id = :viewerId AND d.dismissed_id = s.suggested_id)"
+                            + "      AND EXISTS (SELECT 1 FROM user_settings st"
+                            + "        WHERE st.user_id = s.suggested_id AND st.suggestible = TRUE)"
+                            + " ) c"
+                            + " JOIN users u ON u.id = c.author_id"
+                            + " WHERE c.author_id <> :viewerId"
+                            + " AND u.deleted_at IS NULL"
+                            + " AND u.status = 'active'"
+                            + " AND (u.is_private = FALSE OR EXISTS (SELECT 1 FROM follows pf"
+                            + "   WHERE pf.follower_id = :viewerId AND pf.following_id = c.author_id"
+                            + "   AND pf.status = 'accepted'))"
+                            + " AND EXISTS (SELECT 1 FROM stories t"
+                            + "   WHERE t.user_id = c.author_id AND t.expires_at > :now"
+                            + "   AND t.deleted_at IS NULL AND t.admin_removed_at IS NULL"
+                            + "   AND NOT EXISTS (SELECT 1 FROM story_views sv"
+                            + "     WHERE sv.story_id = t.id AND sv.viewer_id = :viewerId))"
+                            + " AND NOT EXISTS (SELECT 1 FROM blocks b"
+                            + "   WHERE (b.blocker_id = :viewerId AND b.blocked_id = c.author_id)"
+                            + "   OR (b.blocker_id = c.author_id AND b.blocked_id = :viewerId))"
+                            + " GROUP BY c.author_id"
+                            + " ORDER BY MIN(c.tier) ASC, MIN(c.rank) ASC, c.author_id"
+                            + " LIMIT :limit",
+            nativeQuery = true)
+    List<UUID> findDiscoverableAuthors(
+            @Param("viewerId") UUID viewerId,
+            @Param("now") OffsetDateTime now,
+            @Param("limit") int limit);
+
     /** Active stories of the given authors, grouped per author in playback order. */
     @Query(
             "SELECT s FROM Story s WHERE s.userId IN :authorIds AND s.expiresAt > :now"

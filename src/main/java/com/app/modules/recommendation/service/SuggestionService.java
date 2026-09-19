@@ -3,7 +3,7 @@ package com.app.modules.recommendation.service;
 import java.util.List;
 import java.util.UUID;
 
-import com.app.common.response.UserListItemResponse;
+import com.app.modules.recommendation.dto.response.SuggestedUserResponse;
 
 /** People you may know: the read surface, the dismissal, and the blend behind them. */
 public interface SuggestionService {
@@ -16,11 +16,14 @@ public interface SuggestionService {
      * followed, blocked or dismissed. Both are the same situation from the reader's point of view:
      * there is nothing personalised to show yet.
      *
+     * <p>Each row carries the account's banner url and the stored source labels, which the in-feed
+     * suggestion card renders; both are null for a cold-start row.
+     *
      * @param viewerId the account reading
      * @param limit maximum rows, bounded by the service
      * @return suggested accounts with the viewer's relationship to each
      */
-    List<UserListItemResponse> suggestionsFor(UUID viewerId, int limit);
+    List<SuggestedUserResponse> suggestionsFor(UUID viewerId, int limit);
 
     /**
      * Permanently removes one account from the caller's suggestions.

@@ -83,6 +83,7 @@ public final class ApiConstants {
         public static final String BY_ID = "/{storyId}";
         public static final String USER_STORIES = "/user/{userId}";
         public static final String FEED = "/feed";
+        public static final String DISCOVERY = "/discovery";
         public static final String VIEWS = "/{storyId}/views";
         public static final String LIKES = "/{storyId}/likes";
     }
@@ -132,6 +133,7 @@ public final class ApiConstants {
         public static final String ROOT = API_V1 + "/hashtags";
         public static final String TRENDING = "/trending";
         public static final String TRENDING_FOR_YOU = "/trending/for-you";
+        public static final String TRENDING_PREVIEWS = "/trending/previews";
         public static final String SEARCH = "/search";
         public static final String BY_NAME = "/name/{name}";
         // Absolute rather than relative: the handler lives in the post module, which has no

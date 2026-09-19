@@ -8,6 +8,7 @@ import org.springframework.data.domain.Pageable;
 
 import com.app.common.response.PageResponse;
 import com.app.modules.hashtag.dto.response.HashtagTrendingResponse;
+import com.app.modules.hashtag.dto.response.TrendingPreviewResponse;
 import com.app.modules.hashtag.entity.HashtagTrending;
 
 /** Computes and serves periodic hashtag trending snapshots. */
@@ -36,6 +37,23 @@ public interface HashtagTrendingService {
      * @return the offset-paginated trending response
      */
     PageResponse<HashtagTrendingResponse> getTrending(Pageable pageable);
+
+    /**
+     * Pairs each trending entry with the cover image of its newest visible post.
+     *
+     * <p>Takes already-ranked entries rather than choosing a source itself, because the two sources
+     * are this service and {@code PersonalisedTrendingService}, and that service already depends on
+     * this one. Injecting it back would close a dependency cycle. The caller picks the source, the
+     * same way the two existing trending endpoints already do.
+     *
+     * <p>An entry whose posts are all text, all removed, or all from private accounts keeps its
+     * place with a null {@code previewUrl}. Dropping it would silently shorten the card instead of
+     * showing the tag with its fallback.
+     *
+     * @param entries trending entries in the order they should be rendered
+     * @return one preview per entry, in the same order
+     */
+    List<TrendingPreviewResponse> attachCovers(List<HashtagTrendingResponse> entries);
 
     /**
      * Describes hashtags that are not in the current trending snapshot, for a list that mixes
