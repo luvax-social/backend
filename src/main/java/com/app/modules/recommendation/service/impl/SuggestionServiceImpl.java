@@ -121,7 +121,12 @@ public class SuggestionServiceImpl implements SuggestionService {
         Map<UUID, UserSummaryResponse> summaries = userSummaryService.loadSummaries(ids);
         Map<UUID, ViewerRelationshipResponse> relationships =
                 socialService.loadRelationships(viewerId, ids);
-        Map<UUID, String> banners = indexNullable(userSuggestionRepository.findBannerUrls(ids));
+        List<Object[]> cardFields = userSuggestionRepository.findProfileCardFields(ids);
+        Map<UUID, String> banners = indexNullable(cardFields);
+        Map<UUID, Integer> followerCounts = new HashMap<>();
+        for (Object[] row : cardFields) {
+            followerCounts.put((UUID) row[0], ((Number) row[2]).intValue());
+        }
         // A cold-start candidate has no row here, because it was never precomputed and no reason
         // for it was ever recorded. The client omits the line rather than inventing one.
         Map<UUID, String> sources =
@@ -133,7 +138,8 @@ public class SuggestionServiceImpl implements SuggestionService {
                             summaries.get(id),
                             relationships.getOrDefault(id, ViewerRelationshipResponse.NONE),
                             banners.get(id),
-                            sources.get(id)));
+                            sources.get(id),
+                            followerCounts.getOrDefault(id, 0)));
         }
         return rows;
     }

@@ -54,6 +54,13 @@ class SuggestionRowMappingTest {
         return rows;
     }
 
+    /** One profile-card projection row: [id, banner_url, follower_count]. */
+    private static List<Object[]> oneCardRow(UUID id, String banner, int followerCount) {
+        List<Object[]> rows = new ArrayList<>();
+        rows.add(new Object[] {id, banner, followerCount});
+        return rows;
+    }
+
     @BeforeEach
     void setUp() {
         service =
@@ -76,8 +83,8 @@ class SuggestionRowMappingTest {
 
     @Test
     void suggestionsFor_accountHasBanner_carriesBannerUrl() {
-        when(userSuggestionRepository.findBannerUrls(List.of(CANDIDATE)))
-                .thenReturn(oneRow(CANDIDATE, "https://cdn.example/banner.jpg"));
+        when(userSuggestionRepository.findProfileCardFields(List.of(CANDIDATE)))
+                .thenReturn(oneCardRow(CANDIDATE, "https://cdn.example/banner.jpg", 1240));
         when(userSuggestionRepository.findSourcesFor(VIEWER, List.of(CANDIDATE)))
                 .thenReturn(oneRow(CANDIDATE, "graph"));
 
@@ -94,8 +101,8 @@ class SuggestionRowMappingTest {
 
     @Test
     void suggestionsFor_accountHasNoBanner_reportsNullBanner() {
-        when(userSuggestionRepository.findBannerUrls(List.of(CANDIDATE)))
-                .thenReturn(oneRow(CANDIDATE, null));
+        when(userSuggestionRepository.findProfileCardFields(List.of(CANDIDATE)))
+                .thenReturn(oneCardRow(CANDIDATE, null, 7));
         when(userSuggestionRepository.findSourcesFor(VIEWER, List.of(CANDIDATE)))
                 .thenReturn(oneRow(CANDIDATE, "graph"));
 
@@ -106,8 +113,8 @@ class SuggestionRowMappingTest {
 
     @Test
     void suggestionsFor_severalSourceLabels_carriesThemAll() {
-        when(userSuggestionRepository.findBannerUrls(List.of(CANDIDATE)))
-                .thenReturn(oneRow(CANDIDATE, null));
+        when(userSuggestionRepository.findProfileCardFields(List.of(CANDIDATE)))
+                .thenReturn(oneCardRow(CANDIDATE, null, 7));
         when(userSuggestionRepository.findSourcesFor(VIEWER, List.of(CANDIDATE)))
                 .thenReturn(oneRow(CANDIDATE, "affinity,graph"));
 
@@ -119,9 +126,23 @@ class SuggestionRowMappingTest {
     }
 
     @Test
+    void suggestionsFor_anyRow_carriesTheFollowerCount() {
+        when(userSuggestionRepository.findProfileCardFields(List.of(CANDIDATE)))
+                .thenReturn(oneCardRow(CANDIDATE, null, 1240));
+        when(userSuggestionRepository.findSourcesFor(VIEWER, List.of(CANDIDATE)))
+                .thenReturn(oneRow(CANDIDATE, "graph"));
+
+        List<SuggestedUserResponse> rows = service.suggestionsFor(VIEWER, 10);
+
+        assertThat(rows)
+                .singleElement()
+                .satisfies(row -> assertThat(row.followerCount()).isEqualTo(1240));
+    }
+
+    @Test
     void suggestionsFor_coldStartRow_reportsNullSources() {
-        when(userSuggestionRepository.findBannerUrls(List.of(CANDIDATE)))
-                .thenReturn(oneRow(CANDIDATE, null));
+        when(userSuggestionRepository.findProfileCardFields(List.of(CANDIDATE)))
+                .thenReturn(oneCardRow(CANDIDATE, null, 7));
         // No row at all: a cold-start candidate was never precomputed, so no reason was recorded.
         when(userSuggestionRepository.findSourcesFor(VIEWER, List.of(CANDIDATE)))
                 .thenReturn(List.of());

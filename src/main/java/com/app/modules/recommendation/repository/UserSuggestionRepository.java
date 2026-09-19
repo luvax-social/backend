@@ -321,16 +321,20 @@ public interface UserSuggestionRepository extends JpaRepository<UserSuggestion, 
     List<Object[]> findSourcesFor(@Param("viewerId") UUID viewerId, @Param("ids") List<UUID> ids);
 
     /**
-     * Banner urls for a set of accounts.
+     * The profile fields a suggestion card renders beyond the shared identity summary.
+     *
+     * <p>Banner and follower count travel together in one query rather than two, because the card
+     * needs both for the same set of accounts and a second round trip would buy nothing.
      *
      * <p>An account with no banner yields a null column rather than a missing row, so the caller
-     * distinguishes "has no banner" from "is not in this set" without a second query.
+     * distinguishes "has no banner" from "is not in this set". {@code follower_count} is the
+     * trigger-maintained denormalised counter on {@code users} and is never null.
      *
      * @param ids the accounts to read
-     * @return rows of [id, banner_url]
+     * @return rows of [id, banner_url, follower_count]
      */
     @Query(
-            value = "SELECT u.id, u.banner_url FROM users u WHERE u.id IN (:ids)",
+            value = "SELECT u.id, u.banner_url, u.follower_count FROM users u WHERE u.id IN (:ids)",
             nativeQuery = true)
-    List<Object[]> findBannerUrls(@Param("ids") List<UUID> ids);
+    List<Object[]> findProfileCardFields(@Param("ids") List<UUID> ids);
 }

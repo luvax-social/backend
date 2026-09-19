@@ -34,4 +34,10 @@ public record SuggestedUserResponse(
                                         + " precomputed and therefore has no recorded reason.",
                         example = "affinity,graph",
                         nullable = true)
-                String sources) {}
+                String sources,
+        @Schema(
+                        description =
+                                "Follower count, read from the trigger-maintained counter on the"
+                                        + " account. Present for every row.",
+                        example = "1240")
+                int followerCount) {}
