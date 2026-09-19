@@ -19,7 +19,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Discovery widens who a story can be found by; it must not widen who may see one.
+ * The in-feed story surface draws from followed accounts and suggested ones alike; it must not
+ * widen who may see a story.
  *
  * <p>Every exclusion here mirrors a rule {@code listUserStories} already enforces for a direct
  * profile visit. The query is native, so it bypasses the {@code @SQLRestriction} on {@code Story}
@@ -60,13 +61,69 @@ class StoryDiscoveryIT {
     }
 
     @Test
-    void findDiscoverableAuthors_privateAccount_isExcluded() {
+    void findDiscoverableAuthors_privateAccountNotFollowed_isExcluded() {
         UUID viewer = insertUser("discprivviewer", false);
         UUID author = insertUser("discprivauthor", true);
         suggest(viewer, author);
         insertStory(author, false, false, false);
 
         assertThat(discover(viewer)).isEmpty();
+    }
+
+    @Test
+    void findDiscoverableAuthors_privateAccountFollowed_isIncluded() {
+        UUID viewer = insertUser("discprivfollowviewer", false);
+        UUID author = insertUser("discprivfollowauthor", true);
+        follow(viewer, author);
+        insertStory(author, false, false, false);
+
+        assertThat(discover(viewer)).containsExactly(author);
+    }
+
+    @Test
+    void findDiscoverableAuthors_followedAccount_isIncluded() {
+        UUID viewer = insertUser("discfollowedviewer", false);
+        UUID author = insertUser("discfollowedauthor", false);
+        follow(viewer, author);
+        insertStory(author, false, false, false);
+
+        assertThat(discover(viewer)).containsExactly(author);
+    }
+
+    @Test
+    void findDiscoverableAuthors_everyStorySeen_isExcluded() {
+        UUID viewer = insertUser("discseenviewer", false);
+        UUID author = insertUser("discseenauthor", false);
+        follow(viewer, author);
+        UUID story = insertStory(author, false, false, false);
+        markSeen(story, viewer);
+
+        assertThat(discover(viewer)).isEmpty();
+    }
+
+    @Test
+    void findDiscoverableAuthors_oneStorySeenOneUnseen_isIncluded() {
+        UUID viewer = insertUser("discpartseenviewer", false);
+        UUID author = insertUser("discpartseenauthor", false);
+        follow(viewer, author);
+        UUID seen = insertStory(author, false, false, false);
+        insertStory(author, false, false, false);
+        markSeen(seen, viewer);
+
+        assertThat(discover(viewer)).containsExactly(author);
+    }
+
+    @Test
+    void findDiscoverableAuthors_followedAccountsLeadSuggestedOnes() {
+        UUID viewer = insertUser("disctierviewer", false);
+        UUID followed = insertUser("disctierfollowed", false);
+        UUID suggested = insertUser("disctiersuggested", false);
+        follow(viewer, followed);
+        suggest(viewer, suggested);
+        insertStory(followed, false, false, false);
+        insertStory(suggested, false, false, false);
+
+        assertThat(discover(viewer)).containsExactly(followed, suggested);
     }
 
     @Test
@@ -80,17 +137,6 @@ class StoryDiscoveryIT {
         insertStory(blockingViewer, false, false, false);
         block(viewer, blockedByViewer);
         block(blockingViewer, viewer);
-
-        assertThat(discover(viewer)).isEmpty();
-    }
-
-    @Test
-    void findDiscoverableAuthors_alreadyFollowed_isExcludedBecauseTheTrayHasIt() {
-        UUID viewer = insertUser("discfollowviewer", false);
-        UUID author = insertUser("discfollowauthor", false);
-        suggest(viewer, author);
-        insertStory(author, false, false, false);
-        follow(viewer, author);
 
         assertThat(discover(viewer)).isEmpty();
     }
@@ -240,7 +286,15 @@ class StoryDiscoveryIT {
                 .update();
     }
 
-    private void insertStory(
+    private void markSeen(UUID storyId, UUID viewer) {
+        jdbcClient
+                .sql("INSERT INTO story_views (story_id, viewer_id) VALUES (:storyId, :viewerId)")
+                .param("storyId", storyId)
+                .param("viewerId", viewer)
+                .update();
+    }
+
+    private UUID insertStory(
             UUID author, boolean expired, boolean ownerDeleted, boolean adminRemoved) {
         UUID media = UUID.randomUUID();
         jdbcClient
@@ -252,16 +306,19 @@ class StoryDiscoveryIT {
                 .param("userId", author)
                 .param("key", "story/" + media)
                 .update();
+        UUID storyId = UUID.randomUUID();
         jdbcClient
                 .sql(
                         "INSERT INTO stories (id, user_id, media_asset_id, expires_at, deleted_at,"
-                                + " admin_removed_at) VALUES (gen_random_uuid(), :userId, :mediaId,"
+                                + " admin_removed_at) VALUES (:id, :userId, :mediaId,"
                                 + " NOW() + CAST(:offset AS INTERVAL), :deletedAt, :adminRemovedAt)")
+                .param("id", storyId)
                 .param("userId", author)
                 .param("mediaId", media)
                 .param("offset", expired ? "-1 hour" : "12 hours")
                 .param("deletedAt", ownerDeleted ? OffsetDateTime.now(ZoneOffset.UTC) : null)
                 .param("adminRemovedAt", adminRemoved ? OffsetDateTime.now(ZoneOffset.UTC) : null)
                 .update();
+        return storyId;
     }
 }
