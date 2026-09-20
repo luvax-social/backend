@@ -26,8 +26,6 @@
 # the seeded dataset's fabricated addresses, consuming send quota and risking a bounce-driven
 # suspension of the sending domain. There is no local sink to absorb that traffic any more, so
 # this line is the only thing standing between a seed run and exactly that outcome.
-# support.campaign.sender is disabled for the same reason again: it dispatches through the same
-# transport, and a seeded campaign reaching a real send would mail fabricated addresses.
 # admin.moderation-mail is disabled for exactly that reason and no other. It dispatches through the
 # same transport, and the seeded dataset contains moderation cases, so a replay that reached it
 # would mail ban and removal notices to fabricated addresses.
@@ -43,10 +41,6 @@ app:
       enabled: false
     moderation-mail:
       consumer:
-        enabled: false
-  support:
-    campaign:
-      sender:
         enabled: false
   story:
     consumer:

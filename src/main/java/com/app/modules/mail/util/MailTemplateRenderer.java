@@ -59,16 +59,6 @@ public class MailTemplateRenderer {
         return process(template.getTemplatePath(), variables);
     }
 
-    /**
-     * Renders the shared campaign layout around an already-sanitized body.
-     *
-     * @param variables the subject, application name, sanitized body HTML and unsubscribe link
-     * @return rendered HTML string
-     */
-    public String renderCampaign(Map<String, Object> variables) {
-        return process("mail/campaign/layout", variables);
-    }
-
     private String process(String templatePath, Map<String, Object> variables) {
         Context context = new Context(Locale.ENGLISH);
         context.setVariables(variables);

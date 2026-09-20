@@ -247,14 +247,6 @@ app:
       consumer:
         enabled: ${MODERATION_MAIL_CONSUMER_ENABLED:false}
 
-  support:
-    campaign:
-      sender:
-        enabled: ${CAMPAIGN_SENDER_ENABLED:false}
-        initial-delay: ${CAMPAIGN_SENDER_INITIAL_DELAY:60s}
-        fixed-delay: ${CAMPAIGN_SENDER_FIXED_DELAY:60s}
-        batch-size: ${CAMPAIGN_SENDER_BATCH_SIZE:20}
-
   # Cloudflare Turnstile. Promoted out of app.support.turnstile because the login, register,
   # forgot-password, reset-password, resend-verification and report surfaces now verify against the
   # same credentials and the same siteverify implementation. The environment variable names are
@@ -348,11 +340,6 @@ app:
         window-seconds: 3600
       "[/api/v1/support/tickets/**]":
         max-attempts: 10
-        window-seconds: 3600
-      # Followed from a mail client, sometimes twice by a prefetcher, so this is bounded rather
-      # than tight. Opting out is idempotent, so a replay is harmless.
-      "[/api/v1/support/unsubscribe]":
-        max-attempts: 20
         window-seconds: 3600
       # The public support form. Three per hour keyed on the caller's IP, which is the hourly half
       # of the bound; the daily half of ten is enforced in SupportTicketServiceImpl on the same

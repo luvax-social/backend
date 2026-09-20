@@ -707,6 +707,7 @@ A conversation that already has messages in it is kept, because unfollowing some
 - `CustomOidcUserService.resolveUniqueUsername` random-suffix branch now re-checks uniqueness via `ThreadLocalRandom` and a bounded retry loop, preventing the rare unique-constraint violation that previously surfaced as a 500.
 
 ### Removed
+- Mail campaigns, along with the administrator composer, the scheduled sender, the read-only Markdown samples and the per-account campaign email opt-out. Account, security, moderation and support mail are unaffected, and the send log that records every delivery attempt is unchanged.
 - The `ci-test.yml` CI workflow, which had been unintentionally disabled and was reporting a permanent failure on every push and pull request; its coverage was already fully subsumed by `sonarcloud.yml`.
 - The local SMTP mail transport and its Mailpit sink.
 - The original development auto-seeder, which generated a small set of placeholder accounts and posts with placeholder media on startup, has been removed and replaced by the rebuilt seeder described below.

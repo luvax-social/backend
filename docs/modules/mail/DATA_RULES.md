@@ -19,6 +19,22 @@ It never decides that mail should be sent; it renders and delivers what a consum
 No other table belongs to this module.
 Template content is source, not data, and lives under `src/main/resources/templates/mail/`.
 
+### The mail campaign feature was withdrawn
+
+Between V101 and V113 this module also owned `mail_campaigns`, `mail_campaign_recipients` and `mail_templates`, an administrator-composed bulk mail feature with its own scheduler, its own Markdown rendering pipeline and a per-user unsubscribe token on `user_settings`.
+It was never documented here, and the sentence above was wrong for as long as it existed.
+
+V114 withdrew all of it as a product decision.
+The three tables were archived into `archived_mail_templates`, `archived_mail_campaigns` and `archived_mail_campaign_recipients` rather than dropped outright, following V50, and the two campaign enum types were dropped with them.
+`admin_action_type` lost `send_mail_campaign`, which had never been reachable: the Java enum `AdminActionType` never declared it and no campaign class ever wrote an `admin_actions` row.
+
+`email_deliveries` survives and is unaffected.
+The auth, moderation and support lanes all write to it, so it was never campaign-specific.
+`AbstractTemplateMailSender` lost only its `sendCampaign` method; the recipient allowlist every lane routes through is untouched.
+
+Do not reintroduce this by adding a table here.
+A future bulk mail feature is a product decision to take again, not one to infer from the archive tables.
+
 ---
 
 ## Section 2: Derived Data / Cache / Projection

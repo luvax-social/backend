@@ -207,8 +207,6 @@ public final class ApiConstants {
         // selector driven by the same table the authenticated one reads rather than a client-side
         // copy of it. Strictly narrower than the config vocabulary: enabled, public-form rows only.
         public static final String PUBLIC_CATEGORIES = "/public/categories";
-        // Anonymous. Campaign mail opt-out, followed from a mail client with no session.
-        public static final String UNSUBSCRIBE = "/unsubscribe";
         // The eight verification categories, with the icon key a client maps to a glyph.
         public static final String VERIFICATION_CATEGORIES = "/verification/categories";
         // Submits a verification request. Creates a verification_request ticket and its
@@ -297,13 +295,6 @@ public final class ApiConstants {
                 "/verification/requests/{ticketId}/approve";
         public static final String VERIFICATION_REJECT = "/verification/requests/{ticketId}/reject";
         public static final String VERIFICATION_REVOKE = "/verification/users/{userId}/revoke";
-        // Mail campaigns, administrator only.
-        public static final String MAIL_TEMPLATES = "/mail/templates";
-        public static final String CAMPAIGNS = "/mail/campaigns";
-        public static final String CAMPAIGN_BY_ID = "/mail/campaigns/{campaignId}";
-        // A literal segment, so no "/mail/campaigns/{campaignId}" template can shadow it.
-        public static final String CAMPAIGN_PREVIEW = "/mail/campaigns/preview";
-        public static final String CAMPAIGN_SCHEDULE = "/mail/campaigns/{campaignId}/schedule";
 
         public static final String HASHTAGS = "/hashtags";
         // Declared before HASHTAG_BY_ID for readability only. The literal segment wins over the
