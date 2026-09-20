@@ -75,26 +75,4 @@ public class UserSettings {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
-
-    /**
-     * Suppresses campaign mail only.
-     *
-     * <p>Auth mail and moderation mail ignore it entirely. A password reset and a ban notice are
-     * not marketing, and an account cannot opt out of being told it has been banned.
-     */
-    @Builder.Default
-    @Column(name = "email_opt_out", nullable = false)
-    private boolean emailOptOut = false;
-
-    /**
-     * SHA-256 hex of the per-user unsubscribe secret, or null until one is first needed.
-     *
-     * <p>A stored per-user secret rather than a signed value. A signed token would need its signing
-     * key to stay stable forever or every previously mailed link breaks, and rotating that key
-     * would silently invalidate every unsubscribe link already sitting in someone's inbox. This can
-     * be rotated one row at a time, and needs no session to verify - which is the actual
-     * requirement, because the recipient following the link is logged out and may well be banned.
-     */
-    @Column(name = "unsubscribe_token", length = 64)
-    private String unsubscribeToken;
 }

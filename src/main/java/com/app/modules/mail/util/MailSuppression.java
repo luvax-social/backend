@@ -10,10 +10,9 @@ import com.app.common.exception.AppException;
  * allowlist by throwing {@code MAIL_RECIPIENT_NOT_ALLOWED}. That is an operator's configuration
  * decision, not a delivery failure, and every lane that reaches a transport has to tell the two
  * apart the same way. Before this existed each lane answered differently: the moderation lane
- * recorded {@code SKIPPED}, the auth lane dead-lettered, and the campaign job recorded {@code
- * FAILED} - so on any developer machine, where the dev allowlist is {@code example.invalid}, the
- * dead-letter queue filled with decisions the operator had already made and campaign outcomes
- * reported failures that never happened.
+ * recorded {@code SKIPPED} while the auth lane dead-lettered - so on any developer machine, where
+ * the dev allowlist is {@code example.invalid}, the dead-letter queue filled with decisions the
+ * operator had already made.
  *
  * <p>The classification travels as a distinct error code, so this is routing rather than detection.
  * Walks the cause chain because a lane may wrap the original before it gets here.

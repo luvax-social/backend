@@ -97,8 +97,8 @@ class SocialNotificationConsumerIT {
     @Autowired private UserRepository userRepository;
 
     // Declared at the concrete type rather than at the MailSender interface, because
-    // ModerationMailEventHandler and MailCampaignSenderJob both inject
-    // AbstractTemplateMailSender. An interface-typed override replaces the transport bean with a
+    // ModerationMailEventHandler injects AbstractTemplateMailSender rather than the
+    // interface. An interface-typed override replaces the transport bean with a
     // proxy that is not assignable to it, and the context then fails to start before any
     // assertion runs.
     @MockitoBean private AbstractTemplateMailSender mailSender;

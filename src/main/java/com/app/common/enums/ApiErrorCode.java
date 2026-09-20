@@ -212,19 +212,7 @@ public enum ApiErrorCode {
     VERIFICATION_CATEGORY_NOT_FOUND("VERIFICATION_CATEGORY_NOT_FOUND", "Verification category not found", HttpStatus.NOT_FOUND),
     VERIFICATION_ALREADY_VERIFIED("VERIFICATION_ALREADY_VERIFIED", "This account already holds a verified badge", HttpStatus.CONFLICT),
     VERIFICATION_NOT_ACTIVE("VERIFICATION_NOT_ACTIVE", "This account holds no verified badge to revoke", HttpStatus.CONFLICT),
-    VERIFICATION_REQUEST_NOT_FOUND("VERIFICATION_REQUEST_NOT_FOUND", "Verification request not found", HttpStatus.NOT_FOUND),
-
-    // Mail campaigns
-    CAMPAIGN_NOT_FOUND("CAMPAIGN_NOT_FOUND", "Campaign not found", HttpStatus.NOT_FOUND),
-    CAMPAIGN_NOT_EDITABLE("CAMPAIGN_NOT_EDITABLE", "A campaign can only be edited while it is a draft", HttpStatus.CONFLICT),
-    CAMPAIGN_INVALID_TRANSITION("CAMPAIGN_INVALID_TRANSITION", "The campaign cannot move to the requested state", HttpStatus.CONFLICT),
-    CAMPAIGN_TOO_MANY_RECIPIENTS("CAMPAIGN_TOO_MANY_RECIPIENTS", "A campaign may not exceed ten recipients", HttpStatus.BAD_REQUEST),
-    CAMPAIGN_NO_RECIPIENTS("CAMPAIGN_NO_RECIPIENTS", "A campaign needs at least one recipient", HttpStatus.BAD_REQUEST),
-    // Raised at save time, never at send time, and names the offending token so the author can fix
-    // it: a campaign that saved must never fail later with the mail half-sent.
-    CAMPAIGN_UNKNOWN_VARIABLE("CAMPAIGN_UNKNOWN_VARIABLE", "The campaign body uses an unknown variable", HttpStatus.BAD_REQUEST),
-    CAMPAIGN_TEMPLATE_NOT_FOUND("CAMPAIGN_TEMPLATE_NOT_FOUND", "Mail template not found", HttpStatus.NOT_FOUND),
-    UNSUBSCRIBE_TOKEN_INVALID("UNSUBSCRIBE_TOKEN_INVALID", "This unsubscribe link is not valid", HttpStatus.BAD_REQUEST);
+    VERIFICATION_REQUEST_NOT_FOUND("VERIFICATION_REQUEST_NOT_FOUND", "Verification request not found", HttpStatus.NOT_FOUND);
 
     // spotless:on
 

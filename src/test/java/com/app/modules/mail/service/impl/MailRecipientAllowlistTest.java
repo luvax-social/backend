@@ -65,9 +65,6 @@ class MailRecipientAllowlistTest {
                                         com.app.modules.mail.enums.SupportMailTemplate.class),
                                 any()))
                 .thenReturn("<html></html>");
-        org.mockito.Mockito.lenient()
-                .when(renderer.renderCampaign(any()))
-                .thenReturn("<html></html>");
         return renderer;
     }
 
@@ -141,8 +138,8 @@ class MailRecipientAllowlistTest {
 
     @Test
     void moderationNoticeLane_isGuardedToo() {
-        // Campaign and moderation lanes share the transport and were equally exposed; the guard
-        // sits on the one path all four lanes route through, so none can bypass it.
+        // The auth and moderation lanes share the transport and were equally exposed; the guard
+        // sits on the one path all three lanes route through, so none can bypass it.
         RecordingSender sender = new RecordingSender(properties(List.of("example.invalid")));
 
         assertThatThrownBy(

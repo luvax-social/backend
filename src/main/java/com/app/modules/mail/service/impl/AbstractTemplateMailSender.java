@@ -62,8 +62,7 @@ public abstract class AbstractTemplateMailSender implements MailSender {
      * Applies the recipient allowlist, then hands the message to the transport.
      *
      * <p>Every send routes through here rather than calling {@link #deliver} directly, so a lane
-     * added later cannot bypass the check by construction. Campaign mail matters most: it addresses
-     * many recipients at once.
+     * added later cannot bypass the check by construction.
      *
      * @param toEmail recipient email address
      * @param subject message subject line
@@ -160,25 +159,6 @@ public abstract class AbstractTemplateMailSender implements MailSender {
     private void render(MailTemplate template, Map<String, Object> variables, String toEmail) {
         String html = mailTemplateRenderer.render(template, variables);
         dispatch(toEmail, template.getDefaultSubject(), html);
-    }
-
-    /**
-     * Renders and delivers one campaign mail.
-     *
-     * @param subject the administrator-authored subject
-     * @param bodyHtml the already-sanitized body from {@code CampaignBodyRenderer}
-     * @param unsubscribeUrl the recipient's opt-out link, supplied by the application
-     * @param toEmail recipient email address
-     * @return the provider's identifier for the accepted message, or null
-     */
-    public String sendCampaign(
-            String subject, String bodyHtml, String unsubscribeUrl, String toEmail) {
-        Map<String, Object> variables = new HashMap<>();
-        variables.put("subject", subject);
-        variables.put("appName", mailProperties.getAppName());
-        variables.put("bodyHtml", bodyHtml);
-        variables.put("unsubscribeUrl", unsubscribeUrl);
-        return dispatch(toEmail, subject, mailTemplateRenderer.renderCampaign(variables));
     }
 
     public String sendAppealLink(Map<String, Object> variables, String toEmail) {

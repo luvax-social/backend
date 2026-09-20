@@ -91,9 +91,9 @@ class ProdProfileConsumerActivationIT {
 
     // Overridden at AbstractTemplateMailSender, not at the MailSender interface. Under this
     // profile the transport is resend, so resendMailSender is the only candidate, and both
-    // ModerationMailEventHandler and MailCampaignSenderJob inject the abstract class rather than
-    // the interface. A mock typed as the interface replaces the same bean with something neither
-    // can accept, and the context fails to load before any assertion here runs.
+    // ModerationMailEventHandler injects the abstract class rather than the interface. A mock
+    // typed as the interface replaces the same bean with something it cannot accept, and the
+    // context fails to load before any assertion here runs.
     @MockitoBean private AbstractTemplateMailSender resendMailSender;
 
     @Test
