@@ -15,7 +15,6 @@ import java.util.Map;
  */
 public record SupportTicketPoolSeed(
         Map<String, List<SupportTicketRequestEntry>> requestsByCategory,
-        List<VerificationRequestPoolEntry> verificationRequests,
         List<String> staffResponsesApproved,
         List<String> staffResponsesRejected,
         List<String> escalationReasons) {}

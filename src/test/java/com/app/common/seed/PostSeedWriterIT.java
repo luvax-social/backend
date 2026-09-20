@@ -22,6 +22,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.seed.loader.SeedContent;
 import com.app.common.seed.loader.SeedDataLoader;
+import com.app.common.seed.model.HashtagSeed;
 import com.app.common.seed.reset.SeedResetService;
 import com.app.common.seed.time.SeedTimeline;
 import com.app.common.seed.writer.MediaSeedWriter;
@@ -155,13 +156,17 @@ class PostSeedWriterIT {
         assertThat(nonPublishedWithHashtags).isZero();
         assertThat(countRows("hashtags")).isEqualTo(content.hashtags().size());
 
-        // hashtag_trending: exactly the 15 hashtags.json marks trending get a snapshot row.
-        assertThat(countRows("hashtag_trending")).isEqualTo(15);
+        // hashtag_trending: exactly the hashtags.json entries marked trending get a snapshot
+        // row. Derived from the loaded content rather than hardcoded, because the count changes
+        // whenever a trending hashtag is added and a literal here would fail for the wrong reason.
+        long expectedTrending = content.hashtags().stream().filter(HashtagSeed::isTrending).count();
+        assertThat(countRows("hashtag_trending")).isEqualTo((int) expectedTrending);
         Integer trendingRankRange =
                 jdbcTemplate.queryForObject(
-                        "SELECT COUNT(*) FROM hashtag_trending WHERE rank BETWEEN 1 AND 15",
-                        Integer.class);
-        assertThat(trendingRankRange).isEqualTo(15);
+                        "SELECT COUNT(*) FROM hashtag_trending WHERE rank BETWEEN 1 AND ?",
+                        Integer.class,
+                        (int) expectedTrending);
+        assertThat(trendingRankRange).isEqualTo((int) expectedTrending);
     }
 
     private int countRows(String table) {

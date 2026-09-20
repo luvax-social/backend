@@ -35,6 +35,7 @@ import com.app.common.seed.writer.SocialGraphSeedWriter;
 import com.app.common.seed.writer.StorySeedWriter;
 import com.app.common.seed.writer.SupportSeedWriter;
 import com.app.common.seed.writer.UserSeedWriter;
+import com.app.common.seed.writer.VerificationSeedWriter;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -103,6 +104,7 @@ public class SeedRunner {
     private final NotificationSeedWriter notificationSeedWriter;
     private final ModerationSeedWriter moderationSeedWriter;
     private final SupportSeedWriter supportSeedWriter;
+    private final VerificationSeedWriter verificationSeedWriter;
     private final AnalyticsSeedWriter analyticsSeedWriter;
     private final SeedOutboxEmitter seedOutboxEmitter;
     private final SeedProperties seedProperties;
@@ -247,7 +249,11 @@ public class SeedRunner {
         // Must run before NotificationSeedWriter: warning notifications are read back from
         // user_warnings, which this call is what populates.
         moderationSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
-        supportSeedWriter.write(content, usersByUsername, timeline);
+        // Returns the verification ticket ids, because a badge granted through the request flow
+        // anchors to the ticket that produced it.
+        Map<String, UUID> verificationTicketIds =
+                supportSeedWriter.write(content, usersByUsername, timeline);
+        verificationSeedWriter.write(content, usersByUsername, verificationTicketIds, timeline);
         notificationSeedWriter.write(timeline);
         analyticsSeedWriter.write(timeline);
         return new WriterChainResult(usersByUsername, postIdBySeedId);

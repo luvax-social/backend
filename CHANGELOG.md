@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Verification badges in the development seed: eighteen granted across all eight categories, five later withdrawn, and thirteen left active. A withdrawal driven by a suspension or ban is recorded as a system action with no actor, and a deactivated account keeps its badge.
+- Fifty more seeded accounts, most of which never post: twenty-eight that write nothing at all, nineteen that only comment, and three small creator accounts so the music, screen and gaming verification categories have a plausible subject.
+- A seeded follow graph built on topical affinity, popularity and reciprocity rather than uniform sampling, so follower counts vary the way a real network's do and who follows whom now carries meaning.
+- Administrative hashtag pinning and unpinning in the seeded moderation history, including five tags left pinned and five taken down once their occasion passed.
 - Suggested accounts now carry the account's banner image, follower count and the reason it is being suggested, so a client can show who an account is rather than only its name.
 - Stories in the feed are drawn from followed accounts and suggested ones alike, followed accounts first, and a story the reader has already opened is never offered again. A private account appears only to an accepted follower; blocked, dismissed and opted-out accounts are excluded.
 - Trending hashtags can be read with one post cover image each, so a client can preview what a tag looks like without a separate request per tag. A tag whose posts are all text or all from private accounts keeps its place with no cover.
@@ -315,6 +319,8 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- Seeded post media is drawn from 631 assets rather than 165, so the worst-repeated image now appears in three posts instead of sixteen and every reference still matches its post's topic.
+- A seeded verification request now lands on an account whose profession matches the claim, and an approved request actually grants the badge it approved; previously the subject was chosen at random and an approval left no badge behind it.
 - A Cloudflare outage no longer blocks authentication: the six new surfaces allow a request through when the verification service cannot be reached, because each already carries a per-caller rate limit as its real defence.
 - The public support form is unchanged and still refuses a submission it cannot positively verify, since it has no per-caller rate limit to fall back on.
 - The Turnstile configuration moved out of the support namespace into a shared one, keeping the same environment variable names so no deployment needs changing.

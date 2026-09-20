@@ -1412,6 +1412,114 @@
       ],
       "is_trending": false,
       "intended_post_count_band": "low"
+    },
+    {
+      "name": "livemusic",
+      "status": "active",
+      "topic_tags": [
+        "music"
+      ],
+      "is_trending": true,
+      "intended_post_count_band": "medium"
+    },
+    {
+      "name": "smallvenue",
+      "status": "active",
+      "topic_tags": [
+        "music"
+      ],
+      "is_trending": false,
+      "intended_post_count_band": "low"
+    },
+    {
+      "name": "guitartone",
+      "status": "active",
+      "topic_tags": [
+        "music"
+      ],
+      "is_trending": false,
+      "intended_post_count_band": "low"
+    },
+    {
+      "name": "recording",
+      "status": "active",
+      "topic_tags": [
+        "music"
+      ],
+      "is_trending": false,
+      "intended_post_count_band": "medium"
+    },
+    {
+      "name": "shortfilm",
+      "status": "active",
+      "topic_tags": [
+        "film-screen"
+      ],
+      "is_trending": true,
+      "intended_post_count_band": "medium"
+    },
+    {
+      "name": "filmmaking",
+      "status": "active",
+      "topic_tags": [
+        "film-screen"
+      ],
+      "is_trending": false,
+      "intended_post_count_band": "medium"
+    },
+    {
+      "name": "onset",
+      "status": "active",
+      "topic_tags": [
+        "film-screen"
+      ],
+      "is_trending": false,
+      "intended_post_count_band": "low"
+    },
+    {
+      "name": "colourgrade",
+      "status": "active",
+      "topic_tags": [
+        "film-screen"
+      ],
+      "is_trending": false,
+      "intended_post_count_band": "low"
+    },
+    {
+      "name": "streaming",
+      "status": "active",
+      "topic_tags": [
+        "gaming"
+      ],
+      "is_trending": true,
+      "intended_post_count_band": "medium"
+    },
+    {
+      "name": "ranked",
+      "status": "active",
+      "topic_tags": [
+        "gaming"
+      ],
+      "is_trending": false,
+      "intended_post_count_band": "low"
+    },
+    {
+      "name": "setup",
+      "status": "active",
+      "topic_tags": [
+        "gaming"
+      ],
+      "is_trending": false,
+      "intended_post_count_band": "medium"
+    },
+    {
+      "name": "esports",
+      "status": "active",
+      "topic_tags": [
+        "gaming"
+      ],
+      "is_trending": false,
+      "intended_post_count_band": "low"
     }
   ]
 }

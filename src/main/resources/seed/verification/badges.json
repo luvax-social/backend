@@ -1,0 +1,340 @@
+{
+  "_note": "Verification badges. Two lanes: a ticket lane whose subjects SupportSeedWriter reads so a claim lands on an account whose persona matches it, and a legacy lane granted before the request flow existed, which is the only thing exercising a null request_ticket_id. Revocation is soft: the row stays with revoked_at set. A system revocation has no actor and follows a status change; a moderator revocation is a decision. users.is_verified and users.verified_category are never written here - trg_user_verification_sync derives both.",
+  "verification_tickets": [
+    {
+      "username": "derekshoots",
+      "outcome": "answered",
+      "via_escalation": false,
+      "category_key": "visual_arts",
+      "claimed_name": "Derek Shaw Photography",
+      "evidence_website": "https://derekshaw.example.com",
+      "evidence_other_profile": "https://instagram.com/derekshoots",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": "Listed with the Denver Wedding Photographers Association",
+      "evidence_note": "Full-time wedding and event photographer, booking through this account for four years."
+    },
+    {
+      "username": "closet.by.hana",
+      "outcome": "answered",
+      "via_escalation": false,
+      "category_key": "business",
+      "claimed_name": "Closet by Hana",
+      "evidence_website": "https://closetbyhana.example.com",
+      "evidence_other_profile": "https://instagram.com/closet.by.hana",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": "Registered sole trader, Austin TX",
+      "evidence_note": "Weekly drops of thrifted Japanese pieces; this account is the only sales channel."
+    },
+    {
+      "username": "james.carter.dev",
+      "outcome": "answered",
+      "via_escalation": true,
+      "category_key": "science",
+      "claimed_name": "James Carter",
+      "evidence_website": "https://jamescarter.example.dev",
+      "evidence_other_profile": null,
+      "evidence_email_domain": "Verified against the employer domain on file",
+      "evidence_published_work": "Three conference talks on distributed transactions, 2024-2026",
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Backend engineer writing about database internals; the account is cited in two vendor docs."
+    },
+    {
+      "username": "victor.marathon",
+      "outcome": "answered",
+      "via_escalation": false,
+      "category_key": "sport",
+      "claimed_name": "Victor Amadi",
+      "evidence_website": null,
+      "evidence_other_profile": "https://strava.example.com/victor.marathon",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": "Profiled in the Austin running club newsletter, March 2026",
+      "evidence_official_listing": "Boston Marathon 2026 finisher, bib on file",
+      "evidence_note": "Competes in open marathon category; coaching two club runners."
+    },
+    {
+      "username": "theo.sixstring",
+      "outcome": "answered",
+      "via_escalation": true,
+      "category_key": "music",
+      "claimed_name": "Theo Marchetti",
+      "evidence_website": "https://theomarchetti.example.com",
+      "evidence_other_profile": null,
+      "evidence_email_domain": null,
+      "evidence_published_work": "Two EPs on the usual streaming services under this name",
+      "evidence_press": "Reviewed in a local music weekly, February 2026",
+      "evidence_official_listing": null,
+      "evidence_note": "Guitarist and songwriter; plays under this name at small Austin venues."
+    },
+    {
+      "username": "noemi.shortfilm",
+      "outcome": "answered",
+      "via_escalation": false,
+      "category_key": "screen",
+      "claimed_name": "Noemi Castellanos",
+      "evidence_website": "https://noemicastellanos.example.com",
+      "evidence_other_profile": null,
+      "evidence_email_domain": null,
+      "evidence_published_work": "Four short films, two in festival competition",
+      "evidence_press": null,
+      "evidence_official_listing": "Credited as director on a public festival programme",
+      "evidence_note": "Directs and edits short films with crews of two to six."
+    },
+    {
+      "username": "aaron.codes",
+      "outcome": "rejected",
+      "via_escalation": false,
+      "category_key": "science",
+      "claimed_name": "Aaron Fuentes",
+      "evidence_website": "https://aaroncodes.example.dev",
+      "evidence_other_profile": "https://github.example.com/aaron.codes",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Junior developer, learning in public."
+    },
+    {
+      "username": "blake.design",
+      "outcome": "rejected",
+      "via_escalation": true,
+      "category_key": "visual_arts",
+      "claimed_name": "Blake Rivera",
+      "evidence_website": "https://blakerivera.example.com",
+      "evidence_other_profile": "https://dribbble.example.com/blake.design",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Designer at a small agency, work published under the agency name."
+    },
+    {
+      "username": "hailey.10k",
+      "outcome": "rejected",
+      "via_escalation": false,
+      "category_key": "sport",
+      "claimed_name": "Hailey Brandt",
+      "evidence_website": "https://hailey10k.example.com",
+      "evidence_other_profile": "https://strava.example.com/hailey10k",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Runs recreationally, no competitive record."
+    },
+    {
+      "username": "phoebe.accounting",
+      "outcome": "rejected",
+      "via_escalation": true,
+      "category_key": "writing",
+      "claimed_name": "Phoebe Lang",
+      "evidence_website": null,
+      "evidence_other_profile": "https://medium.example.com/@phoebe.accounting",
+      "evidence_email_domain": "Personal address, no employer domain supplied",
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Writes occasionally about accounting practice."
+    },
+    {
+      "username": "streetwear.atx1",
+      "outcome": "rejected",
+      "via_escalation": false,
+      "category_key": "business",
+      "claimed_name": "Streetwear ATX",
+      "evidence_website": "https://streetwearatx.example.com",
+      "evidence_other_profile": "https://instagram.com/streetwear.atx1",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Reseller account; no registration document supplied."
+    },
+    {
+      "username": "maya.visualdesign",
+      "outcome": "open",
+      "via_escalation": false,
+      "category_key": "visual_arts",
+      "claimed_name": "Maya Sandoval",
+      "evidence_website": "https://mayasandoval.example.com",
+      "evidence_other_profile": "https://behance.example.com/maya.visualdesign",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Visual designer; portfolio is the account itself."
+    },
+    {
+      "username": "nadia.gymlife",
+      "outcome": "in_progress",
+      "via_escalation": false,
+      "category_key": "sport",
+      "claimed_name": "Nadia Kovalenko",
+      "evidence_website": null,
+      "evidence_other_profile": "https://instagram.com/nadia.gymlife",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": "Certified personal trainer, registration number on file",
+      "evidence_note": "Trains clients five days a week alongside a full-time job."
+    },
+    {
+      "username": "corner.sandwich3",
+      "outcome": "open",
+      "via_escalation": false,
+      "category_key": "business",
+      "claimed_name": "The Corner Sandwich",
+      "evidence_website": "https://cornersandwich.example.com",
+      "evidence_other_profile": null,
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": "Food business licence, Denver",
+      "evidence_note": "Single location, owner-operated since 2023."
+    },
+    {
+      "username": "nora.investsafe",
+      "outcome": "in_progress",
+      "via_escalation": false,
+      "category_key": "writing",
+      "claimed_name": "Nora Whitcombe",
+      "evidence_website": null,
+      "evidence_other_profile": "https://substack.example.com/nora.investsafe",
+      "evidence_email_domain": null,
+      "evidence_published_work": "Weekly personal finance column, 40 issues",
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Writes about household finance for a non-specialist audience."
+    },
+    {
+      "username": "dean.lensman",
+      "outcome": "escalated",
+      "via_escalation": false,
+      "category_key": "visual_arts",
+      "claimed_name": "Dean Iwuchukwu",
+      "evidence_website": "https://deaniwuchukwu.example.com",
+      "evidence_other_profile": null,
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": "Work used in a regional tourism campaign, 2025",
+      "evidence_official_listing": null,
+      "evidence_note": "Event photography and wedding video editing."
+    }
+  ],
+  "legacy_grants": [
+    {
+      "username": "kimberly.captures",
+      "category_key": "visual_arts",
+      "granted_by": "admin",
+      "granted_offset_days": -402
+    },
+    {
+      "username": "sophieg.design",
+      "category_key": "visual_arts",
+      "granted_by": "admin",
+      "granted_offset_days": -455
+    },
+    {
+      "username": "tyson.videographer",
+      "category_key": "visual_arts",
+      "granted_by": "admin",
+      "granted_offset_days": -371
+    },
+    {
+      "username": "grandma.roses",
+      "category_key": "business",
+      "granted_by": "admin",
+      "granted_offset_days": -488
+    },
+    {
+      "username": "cafe.gochoc",
+      "category_key": "business",
+      "granted_by": "admin",
+      "granted_offset_days": -430
+    },
+    {
+      "username": "user_suspended",
+      "category_key": "business",
+      "granted_by": "admin",
+      "granted_offset_days": -365
+    },
+    {
+      "username": "derek.freelancedev",
+      "category_key": "science",
+      "granted_by": "admin",
+      "granted_offset_days": -418
+    },
+    {
+      "username": "tyler.sysadmin",
+      "category_key": "science",
+      "granted_by": "admin",
+      "granted_offset_days": -344
+    },
+    {
+      "username": "left.theapp1",
+      "category_key": "sport",
+      "granted_by": "admin",
+      "granted_offset_days": -396
+    },
+    {
+      "username": "hunter.finance",
+      "category_key": "writing",
+      "granted_by": "admin",
+      "granted_offset_days": -461
+    },
+    {
+      "username": "toxic.debates",
+      "category_key": "writing",
+      "granted_by": "admin",
+      "granted_offset_days": -383
+    },
+    {
+      "username": "kade.onstream",
+      "category_key": "gaming",
+      "granted_by": "admin",
+      "granted_offset_days": -357
+    }
+  ],
+  "revocations": [
+    {
+      "username": "user_suspended",
+      "actor": "system",
+      "revoked_by": null,
+      "reason": "Badge withdrawn automatically when the account was suspended.",
+      "revoked_offset_days": -96
+    },
+    {
+      "username": "toxic.debates",
+      "actor": "system",
+      "revoked_by": null,
+      "reason": "Badge withdrawn automatically when the account was suspended.",
+      "revoked_offset_days": -74
+    },
+    {
+      "username": "tyson.videographer",
+      "actor": "moderator",
+      "revoked_by": "mod1",
+      "reason": "The claimed business no longer matches the account; the listing supplied at grant time has lapsed.",
+      "revoked_offset_days": -151
+    },
+    {
+      "username": "cafe.gochoc",
+      "actor": "moderator",
+      "revoked_by": "mod1",
+      "reason": "Account changed hands and the new operator has not re-established the claim.",
+      "revoked_offset_days": -128
+    },
+    {
+      "username": "tyler.sysadmin",
+      "actor": "moderator",
+      "revoked_by": "mod1",
+      "reason": "Evidence supplied at grant time could not be re-confirmed on review.",
+      "revoked_offset_days": -112
+    }
+  ]
+}

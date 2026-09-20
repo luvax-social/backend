@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "case_01",
+      "title": "test case",
+      "target_username": "alice",
+      "reporter_usernames": ["bob"],
+      "reported_content": [
+        { "type": "post", "post_id": "post_0001" }
+      ],
+      "timeline": [
+        { "event": "report_submitted", "at": "2026-01-01T00:00:00Z" }
+      ],
+      "outcome": "test outcome"
+    }
+  ]
+}

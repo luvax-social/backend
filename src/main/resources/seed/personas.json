@@ -129,6 +129,58 @@
       "media_preference": "image_heavy",
       "engagement_style": "promotional",
       "account_type": "spam"
+    },
+    {
+      "id": "p11_silent_consumer",
+      "label": "Silent consumer",
+      "occupation": "Varied; the account exists to read rather than to represent a job",
+      "age_band": "20-40",
+      "city": "mixed",
+      "voice": "Writes nothing at all. Never posts, never comments. Follows accounts, likes what it likes, opens stories, and leaves no text anywhere in the dataset.",
+      "topics": ["lifestyle", "cost-of-living", "tech-general", "travel-work"],
+      "posting_frequency": "none",
+      "media_preference": "text_heavy",
+      "engagement_style": "reader",
+      "account_type": "personal"
+    },
+    {
+      "id": "p12_musician",
+      "label": "Working musician",
+      "occupation": "Guitarist and songwriter in a four-piece, plays small rooms",
+      "age_band": "26-32",
+      "city": "Austin",
+      "voice": "Plain and unhurried. Writes about rooms, gear and what a take actually sounded like rather than about success. Mentions dates and venues without hype.",
+      "topics": ["music", "lifestyle", "freelance-work"],
+      "posting_frequency": "rare",
+      "media_preference": "video_occasional",
+      "engagement_style": "supportive",
+      "account_type": "creator"
+    },
+    {
+      "id": "p13_filmmaker",
+      "label": "Independent filmmaker",
+      "occupation": "Director and editor of short films, crews of two to six",
+      "age_band": "29-35",
+      "city": "Portland",
+      "voice": "Precise about craft, vague about budget. Talks through decisions on set and in the edit. Full sentences, no exclamation marks.",
+      "topics": ["film-screen", "photography", "freelance-work"],
+      "posting_frequency": "rare",
+      "media_preference": "image_heavy",
+      "engagement_style": "supportive",
+      "account_type": "creator"
+    },
+    {
+      "id": "p14_streamer",
+      "label": "Game streamer",
+      "occupation": "Streams four nights a week, small consistent audience",
+      "age_band": "22-28",
+      "city": "Denver",
+      "voice": "Lowercase, quick, gaming shorthand used without explaining it. Honest about bad sessions. Talks about schedule and burnout as readily as about wins.",
+      "topics": ["gaming", "tech-general", "lifestyle"],
+      "posting_frequency": "rare",
+      "media_preference": "video_occasional",
+      "engagement_style": "supportive",
+      "account_type": "creator"
     }
   ]
 }
