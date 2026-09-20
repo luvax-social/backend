@@ -131,7 +131,7 @@ class MediaAndSocialGraphSeedWriterIT {
         assertThat(rowsAtTodaysWallClock).isZero();
 
         // follows / blocks: never touch the trigger-maintained counters.
-        assertThat(countRows("follows")).isBetween(1500, 3600);
+        assertThat(countRows("follows")).isBetween(4500, 6000);
         assertThat(countRows("blocks")).isEqualTo(25);
         Integer pendingCount =
                 jdbcTemplate.queryForObject(

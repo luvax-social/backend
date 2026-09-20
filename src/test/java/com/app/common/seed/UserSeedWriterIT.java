@@ -90,10 +90,10 @@ class UserSeedWriterIT {
 
         Map<String, UUID> usersByUsername = userSeedWriter.write(content, timeline);
 
-        assertThat(usersByUsername).hasSize(90);
-        assertThat(countRows("users")).isEqualTo(90);
-        assertThat(countRows("user_credentials")).isEqualTo(90);
-        assertThat(countRows("user_settings")).isEqualTo(90);
+        assertThat(usersByUsername).hasSize(140);
+        assertThat(countRows("users")).isEqualTo(140);
+        assertThat(countRows("user_credentials")).isEqualTo(140);
+        assertThat(countRows("user_settings")).isEqualTo(140);
 
         assertThat(usersByUsername).containsKey("user_power");
         Integer roleCount =

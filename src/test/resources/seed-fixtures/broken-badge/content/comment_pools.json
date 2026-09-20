@@ -1,0 +1,14 @@
+{
+  "pools": {
+    "software-engineering": [
+      {
+        "text": "test comment",
+        "tone": "joke",
+        "language": "vi",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      }
+    ]
+  },
+  "conversation_seeds": []
+}

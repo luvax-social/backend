@@ -1,0 +1,20 @@
+{
+  "conversations": [
+    {
+      "id": "conv_001",
+      "participants": ["alice", "bob"],
+      "scenario": "cold_unanswered",
+      "messages": [
+        {
+          "sender": "alice",
+          "text": "hi",
+          "message_type": "text",
+          "offset_minutes_from_conversation_start": 1,
+          "admin_removed_at_offset_minutes": null,
+          "is_deleted": false
+        }
+      ],
+      "unread_for": ["bob"]
+    }
+  ]
+}

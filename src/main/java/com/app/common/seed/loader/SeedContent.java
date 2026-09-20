@@ -2,6 +2,7 @@ package com.app.common.seed.loader;
 
 import java.util.List;
 
+import com.app.common.seed.model.BadgeSeed;
 import com.app.common.seed.model.CommentPoolSeed;
 import com.app.common.seed.model.ConversationSeed;
 import com.app.common.seed.model.HashtagSeed;
@@ -29,4 +30,5 @@ public record SeedContent(
         List<ModerationSupplementaryAction> supplementaryModerationActions,
         List<ModerationSupplementaryReport> supplementaryModerationReports,
         List<MediaManifestEntry> mediaManifest,
-        SupportTicketPoolSeed supportTicketPools) {}
+        SupportTicketPoolSeed supportTicketPools,
+        BadgeSeed badges) {}

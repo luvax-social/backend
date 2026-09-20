@@ -6343,6 +6343,852 @@
         "depth_suitability": "either",
         "is_reply_bait": false
       }
+    ],
+    "music": [
+      {
+        "text": "the room sound on this is so much better than the last one",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "mixing a live take is a different beast, nice work",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "what mic did you end up using on the cab",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "that bass tone is doing a lot of heavy lifting",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "soundcheck running an hour over is the most relatable thing here",
+        "tone": "joke",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "small rooms are where you actually learn to play, no hiding",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "is this the whole set or just the encore",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "been waiting for a proper recording of this one",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the drums sit a bit far back for me but the take is great",
+        "tone": "disagree",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "pedalboard looks like it took years to settle on",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "how long did the tracking take start to finish",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "you can hear the room breathing between the verses, love that",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "playing to forty people who actually listen beats a festival slot",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the harmony in the second chorus is what makes it",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "any plan to press this or is it streaming only",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "rehearsing in a storage unit is a rite of passage honestly",
+        "tone": "joke",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "gear cost is the part nobody posts about",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "tempo pulls slightly in the bridge and it works better for it",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the guitar is buried under the synth in the second half",
+        "tone": "disagree",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "caught the last show, the new material lands much harder live",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "what daw are you tracking into",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "that is a real drummer and not a loop, you can tell immediately",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "venue lighting doing the whole mood for free",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "takes ten years to sound this unrehearsed",
+        "tone": "joke",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "did you track the vocals in the same room or separately",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "reply",
+        "is_reply_bait": true
+      },
+      {
+        "text": "the low end is tight, which never happens in a room that size",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "bought the ep after hearing this, worth it",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "a four piece with no click is always going to breathe more",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "still think the acoustic version was stronger",
+        "tone": "disagree",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "sound engineers at small venues do not get paid enough",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "set list order makes a huge difference and this one is well built",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "how many takes before you kept one",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "strings sound freshly changed, that brightness is unmistakable",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "came for the riff, stayed for the outro",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "touring costs more than it pays until it suddenly does not",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the crowd noise in the gaps makes it feel like being there",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "anyone know if the backing track is available separately",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "reply",
+        "is_reply_bait": true
+      },
+      {
+        "text": "recording in a converted garage and it sounds better than most studios",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "that key change had no business working",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "looking forward to whatever the next one turns out to be",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      }
+    ],
+    "film-screen": [
+      {
+        "text": "the lighting setup here is doing more than the camera is",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "shot this on what, the colour is gorgeous",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "call time at 5am and a wrap at midnight, sounds about right",
+        "tone": "joke",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the blocking in the second shot is really considered",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "handheld suits the scene, a tripod would have flattened it",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "how big was the crew on this",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "colour grade is doing the heavy lifting and that is fine",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the sound is the weak point, everything else is strong",
+        "tone": "disagree",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "location permits are the least glamorous part of any shoot",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "that practical light in frame is such a good choice",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "did you storyboard this or find it on the day",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "editing is where the film actually gets written, every time",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the cut on the door close is perfect",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "a two person crew doing work that looks like ten",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "what lens was the wide",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "reply",
+        "is_reply_bait": true
+      },
+      {
+        "text": "continuity in the coffee cup is off but nobody will notice",
+        "tone": "joke",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "shooting available light outdoors is a gamble and it paid off",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the pacing drags a little in the middle third",
+        "tone": "disagree",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "festival submission fees add up faster than people expect",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "great to see a short that trusts the audience",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "how long was post on this",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "the sound design in the last thirty seconds is the whole film",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "gimbal work is smooth without being sterile, hard balance",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "that transition is going to be copied a lot",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "renting glass costs more than the camera body ever did",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "is there a longer cut anywhere",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "the performance carries it, everything technical is secondary",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "shot on a weekend with favours and it shows in the best way",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "natural light at that hour gives you about twenty usable minutes",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "watched it twice and caught the reflection the second time",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "screening in an actual cinema still beats everything",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "did you record sound separately or in camera",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "reply",
+        "is_reply_bait": true
+      },
+      {
+        "text": "the framing keeps putting the subject off centre and it works",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "wardrobe choice makes the whole tone land",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "post production is where the budget quietly disappears",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "congratulations on the selection, well earned",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the ending is too abrupt for me",
+        "tone": "disagree",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "crew credit list longer than the film, as it should be",
+        "tone": "joke",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "really strong use of negative space throughout",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "looking forward to the feature whenever it happens",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      }
+    ],
+    "gaming": [
+      {
+        "text": "the new desk layout looks way better for long sessions",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "what are you running for capture",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "cable management better than my actual life",
+        "tone": "joke",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "that clutch was read perfectly, not luck at all",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "frame pacing matters more than raw fps for this genre",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "how many hours a week are you streaming now",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "chat moderation is the part people underestimate",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the overlay is clean, does not cover anything important",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "honestly the older patch felt better to play",
+        "tone": "disagree",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "consistent schedule does more for growth than any clip going viral",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "what monitor refresh are you on",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "reply",
+        "is_reply_bait": true
+      },
+      {
+        "text": "that was a one in a hundred spawn and you still read it",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "audio balance between game and mic is finally right",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "ranked at 3am is a decision you make once",
+        "tone": "joke",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the vod review habit is why the aim improved, not the new mouse",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "any plan to try the new mode competitively",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "good to see someone explaining the call instead of just yelling",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "input lag on wireless is a non issue at this point",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the team comp was wrong from the draft and you still won",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "how long did the setup take to get to this state",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "small streams with actual conversation beat big ones every time",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "that positioning cost the round more than the aim did",
+        "tone": "disagree",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "upgrading the chair did more for me than upgrading the gpu",
+        "tone": "joke",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "the tutorial explanation was clearer than the official one",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "lighting on stream looks properly set up now",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "practising one map for a month is boring and it works",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "what are the pc specs",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": true
+      },
+      {
+        "text": "the community around this game is better than its reputation",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "clip is going to age well, that was clean",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "burnout is real, taking a week off is not quitting",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "crosshair placement is the whole difference at this level",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "thanks for keeping the vods up, went back through the whole series",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "sponsors asking for exclusivity that early is a red flag",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "is the tournament run being streamed anywhere",
+        "tone": "question",
+        "language": "en",
+        "depth_suitability": "reply",
+        "is_reply_bait": true
+      },
+      {
+        "text": "the mic upgrade is immediately noticeable",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "playing badly on stream and owning it is more watchable than a highlight reel",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "net code explains half the deaths people blame on aim",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "that was an absurd comeback from two rounds down",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "setup cost is worth naming out loud, it is not a cheap hobby",
+        "tone": "info",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      },
+      {
+        "text": "looking forward to the next series",
+        "tone": "supportive",
+        "language": "en",
+        "depth_suitability": "either",
+        "is_reply_bait": false
+      }
     ]
   },
   "conversation_seeds": [

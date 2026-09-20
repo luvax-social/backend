@@ -64,4 +64,14 @@ class SeedDataLoaderTest {
                 .hasMessageContaining("participant")
                 .hasMessageContaining("ghost_user");
     }
+
+    @Test
+    void load_badgeNamesUnknownAccount_throwsIllegalStateException() {
+        SeedDataLoader loader = new SeedDataLoader("seed-fixtures/broken-badge");
+
+        assertThatThrownBy(loader::load)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("badges.json")
+                .hasMessageContaining("nobody_at_all");
+    }
 }

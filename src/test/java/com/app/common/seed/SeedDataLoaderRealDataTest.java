@@ -18,19 +18,38 @@ class SeedDataLoaderRealDataTest {
     void load_realSeedContent_loadsSuccessfully() {
         SeedContent content = new SeedDataLoader().load();
 
-        assertThat(content.personas()).hasSize(10);
-        assertThat(content.users()).hasSize(90);
-        assertThat(content.hashtags()).hasSize(152);
-        assertThat(content.posts()).hasSize(722);
+        assertThat(content.personas()).hasSize(14);
+        assertThat(content.users()).hasSize(140);
+        assertThat(content.hashtags()).hasSize(164);
+        assertThat(content.posts()).hasSize(746);
         assertThat(content.conversations()).hasSize(85);
         assertThat(content.moderationCases()).hasSize(6);
-        assertThat(content.supplementaryModerationActions()).hasSize(153);
+        assertThat(content.supplementaryModerationActions()).hasSize(168);
         assertThat(content.supplementaryModerationReports()).hasSize(27);
-        // 125 images (120 original + 5 reclassified from the former avatar pool - posts.json
-        // still references them, see media_manifest.json's _reclassified_avatar_pool_note), 15
-        // videos, 25 banners. Avatars are no longer in this file at all - see users.json's
-        // avatar_url field and UserSeedWriter.
-        assertThat(content.mediaManifest()).hasSize(125 + 15 + 25);
+        // 536 images (120 original, 5 reclassified from the former avatar pool - posts.json
+        // still references them, see media_manifest.json's _reclassified_avatar_pool_note - and
+        // 411 appended), 70 videos, 25 banners. Avatars are no longer in this file at all - see
+        // users.json's avatar_url field and UserSeedWriter.
+        assertThat(content.mediaManifest()).hasSize(536 + 70 + 25);
+    }
+
+    @Test
+    void load_realSeedContent_populatesBadges() {
+        SeedContent content = new SeedDataLoader().load();
+
+        assertThat(content.badges()).isNotNull();
+        assertThat(content.badges().verificationTickets()).hasSize(16);
+        assertThat(content.badges().legacyGrants()).hasSize(12);
+        assertThat(content.badges().revocations()).hasSize(5);
+
+        // Five tickets are still in the queue, and V107 admits one per account, so they must sit
+        // on five distinct accounts.
+        assertThat(
+                        content.badges().verificationTickets().stream()
+                                .filter(t -> !t.isTerminal())
+                                .map(t -> t.username())
+                                .distinct())
+                .hasSize(5);
     }
 
     @Test
@@ -49,6 +68,5 @@ class SeedDataLoaderRealDataTest {
                         "bug_report",
                         "safety_concern",
                         "other");
-        assertThat(content.supportTicketPools().verificationRequests()).isNotEmpty();
     }
 }

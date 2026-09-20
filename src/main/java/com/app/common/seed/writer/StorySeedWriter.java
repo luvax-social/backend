@@ -20,6 +20,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import com.app.common.seed.loader.SeedContent;
+import com.app.common.seed.model.ConversationSeed;
+import com.app.common.seed.model.MessageSeed;
 import com.app.common.seed.model.UserSeed;
 import com.app.common.seed.time.SeedTimeline;
 
@@ -104,8 +106,9 @@ public class StorySeedWriter {
                             + " StorySeedWriter");
         }
 
-        List<String> ownerUsernames = buildOwnerAssignment(users, random);
-        List<Boolean> liveFlags = buildLiveFlags(random);
+        List<String> requiredLiveOwners = liveStoryOwnersRequiredByMessages(content);
+        List<String> ownerUsernames = buildOwnerAssignment(users, requiredLiveOwners, random);
+        List<Boolean> liveFlags = buildLiveFlags(requiredLiveOwners.size(), random);
 
         List<Object[]> storyRows = new ArrayList<>();
         List<StoryRow> generated = new ArrayList<>();
@@ -147,27 +150,67 @@ public class StorySeedWriter {
                 likeCount);
     }
 
-    // Builds the 120-entry owner list: one guaranteed slot per GUARANTEED_STORY_OWNERS entry, then
-    // fills the rest uniformly at random (with replacement) across every seeded user.
-    private List<String> buildOwnerAssignment(List<UserSeed> users, Random random) {
-        List<String> owners = new ArrayList<>(GUARANTEED_STORY_OWNERS);
-        List<String> allUsernames = users.stream().map(UserSeed::username).toList();
-        while (owners.size() < TOTAL_STORY_TARGET) {
-            owners.add(allUsernames.get(random.nextInt(allUsernames.size())));
+    // Every account a conversations.json story_share points at. Derived rather than listed,
+    // because a hardcoded copy drifts the moment someone edits a conversation, and the failure it
+    // produces surfaces two writers later in MessageSeedWriter rather than here.
+    private List<String> liveStoryOwnersRequiredByMessages(SeedContent content) {
+        List<String> required = new ArrayList<>();
+        for (ConversationSeed conversation : content.conversations()) {
+            for (MessageSeed message : conversation.messages()) {
+                String owner = message.sharedStoryOwner();
+                if (owner != null && !required.contains(owner)) {
+                    required.add(owner);
+                }
+            }
         }
-        Collections.shuffle(owners, random);
+        return required;
+    }
+
+    // Builds the 120-entry owner list, front-loaded with the accounts that must own a story at
+    // all and the accounts that must own a live one, then filled uniformly at random (with
+    // replacement) across every seeded user.
+    //
+    // The two guaranteed groups are kept at the head rather than shuffled in, because
+    // buildLiveFlags assigns liveness by position and the live flags are front-loaded to match.
+    // Shuffling either list independently is what left a guaranteed owner holding only an expired
+    // story.
+    private List<String> buildOwnerAssignment(
+            List<UserSeed> users, List<String> requiredLiveOwners, Random random) {
+        List<String> owners = new ArrayList<>(requiredLiveOwners);
+        for (String owner : GUARANTEED_STORY_OWNERS) {
+            if (!owners.contains(owner)) {
+                owners.add(owner);
+            }
+        }
+        int guaranteedCount = owners.size();
+        List<String> allUsernames = users.stream().map(UserSeed::username).toList();
+        List<String> remainder = new ArrayList<>();
+        while (guaranteedCount + remainder.size() < TOTAL_STORY_TARGET) {
+            remainder.add(allUsernames.get(random.nextInt(allUsernames.size())));
+        }
+        Collections.shuffle(remainder, random);
+        owners.addAll(remainder);
         return owners;
     }
 
-    private List<Boolean> buildLiveFlags(Random random) {
-        List<Boolean> flags = new ArrayList<>(TOTAL_STORY_TARGET);
-        for (int i = 0; i < LIVE_STORY_COUNT; i++) {
-            flags.add(true);
+    // Live flags by position: the first requiredLiveCount slots are live so the accounts a
+    // story_share names always have one, and the rest of the live quota is shuffled across
+    // everything that follows.
+    private List<Boolean> buildLiveFlags(int requiredLiveCount, Random random) {
+        List<Boolean> tail = new ArrayList<>();
+        for (int i = 0; i < LIVE_STORY_COUNT - requiredLiveCount; i++) {
+            tail.add(true);
         }
         for (int i = 0; i < EXPIRED_STORY_COUNT; i++) {
-            flags.add(false);
+            tail.add(false);
         }
-        Collections.shuffle(flags, random);
+        Collections.shuffle(tail, random);
+
+        List<Boolean> flags = new ArrayList<>(TOTAL_STORY_TARGET);
+        for (int i = 0; i < requiredLiveCount; i++) {
+            flags.add(true);
+        }
+        flags.addAll(tail);
         return flags;
     }
 

@@ -1754,6 +1754,126 @@
       "action_type": "issue_strike",
       "target_user": "victor.marathon",
       "note": "Strike issued directly for a doxxing attempt against another user in a comment thread."
+    },
+    {
+      "at": "2026-08-11T02:14:07.418Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned to the trending surface for the freelance design showcase week.",
+      "hashtag_name": "freelancedesign"
+    },
+    {
+      "at": "2026-08-11T03:46:52.109Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned alongside the freelance showcase; the two tags share most of their audience.",
+      "hashtag_name": "productphotography"
+    },
+    {
+      "at": "2026-08-11T05:02:31.884Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned for the small business feature running through the month.",
+      "hashtag_name": "onlinebusiness"
+    },
+    {
+      "at": "2026-08-11T06:38:14.550Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned with the small business feature; cafe and restaurant owners are the largest slice of it.",
+      "hashtag_name": "fnbstartup"
+    },
+    {
+      "at": "2026-08-11T08:11:45.276Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned for the design careers series.",
+      "hashtag_name": "uiux"
+    },
+    {
+      "at": "2026-08-11T10:27:09.733Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned while the gold price story is moving; to be reviewed once it settles.",
+      "hashtag_name": "goldprice"
+    },
+    {
+      "at": "2026-08-11T12:53:38.402Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned for the remote hiring push; time-bound and expected to come down after it.",
+      "hashtag_name": "remotejob"
+    },
+    {
+      "at": "2026-08-11T15:19:56.147Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned for the long weekend.",
+      "hashtag_name": "daytrip"
+    },
+    {
+      "at": "2026-08-11T17:44:22.905Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned for the back-to-training month.",
+      "hashtag_name": "gymtraining"
+    },
+    {
+      "at": "2026-08-11T20:08:47.631Z",
+      "actor": "rachel.admin",
+      "action_type": "pin_hashtag",
+      "target_user": null,
+      "note": "Pinned for the start of the academic year.",
+      "hashtag_name": "studentlife"
+    },
+    {
+      "at": "2026-08-13T01:36:18.220Z",
+      "actor": "rachel.admin",
+      "action_type": "unpin_hashtag",
+      "target_user": null,
+      "note": "Unpinned now the gold price story has settled.",
+      "hashtag_name": "goldprice"
+    },
+    {
+      "at": "2026-08-13T04:09:44.876Z",
+      "actor": "rachel.admin",
+      "action_type": "unpin_hashtag",
+      "target_user": null,
+      "note": "Unpinned at the end of the remote hiring push.",
+      "hashtag_name": "remotejob"
+    },
+    {
+      "at": "2026-08-13T07:22:11.503Z",
+      "actor": "rachel.admin",
+      "action_type": "unpin_hashtag",
+      "target_user": null,
+      "note": "Unpinned after the long weekend.",
+      "hashtag_name": "daytrip"
+    },
+    {
+      "at": "2026-08-13T10:55:37.148Z",
+      "actor": "rachel.admin",
+      "action_type": "unpin_hashtag",
+      "target_user": null,
+      "note": "Unpinned at the end of the back-to-training month.",
+      "hashtag_name": "gymtraining"
+    },
+    {
+      "at": "2026-08-13T14:31:02.764Z",
+      "actor": "rachel.admin",
+      "action_type": "unpin_hashtag",
+      "target_user": null,
+      "note": "Unpinned once the first weeks of term were over.",
+      "hashtag_name": "studentlife"
     }
   ],
   "supplementary_reports": [

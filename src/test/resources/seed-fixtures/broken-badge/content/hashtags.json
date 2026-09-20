@@ -1,0 +1,11 @@
+{
+  "hashtags": [
+    {
+      "name": "test",
+      "status": "active",
+      "topic_tags": ["software-engineering"],
+      "is_trending": false,
+      "intended_post_count_band": "low"
+    }
+  ]
+}

@@ -21,7 +21,7 @@ import org.springframework.stereotype.Service;
 import com.app.common.seed.loader.SeedContent;
 import com.app.common.seed.model.SupportTicketPoolSeed;
 import com.app.common.seed.model.SupportTicketRequestEntry;
-import com.app.common.seed.model.VerificationRequestPoolEntry;
+import com.app.common.seed.model.VerificationTicketSeed;
 import com.app.common.seed.time.SeedTimeline;
 
 import lombok.RequiredArgsConstructor;
@@ -75,30 +75,32 @@ public class SupportSeedWriter {
                                     "remove_comment",
                                     "remove_story",
                                     "remove_message")),
-                    new CategoryPlan("account_access", 8, List.of()),
+                    new CategoryPlan("account_access", 6, List.of()),
                     new CategoryPlan("account_data", 6, List.of()),
-                    new CategoryPlan("bug_report", 10, List.of()),
+                    new CategoryPlan("bug_report", 6, List.of()),
                     new CategoryPlan("safety_concern", 6, List.of()),
                     new CategoryPlan("other", 6, List.of()));
 
-    private static final int VERIFICATION_TICKET_COUNT = 10;
     private static final Set<String> PENDING_CONFIRMATION_CATEGORIES =
             Set.of("bug_report", "account_access", "other");
 
-    // Every status-plan entry this writer draws from, shuffled once per run: 12 OPEN, 10
-    // IN_PROGRESS, 6 ESCALATED (still undecided), 22 ANSWERED (16 decided directly, 6 decided after
-    // an escalation), 17 REJECTED (12 direct, 5 after escalation). 67 entries total = the 57
-    // non-pending category-loop tickets (60 minus the 3 deterministic PENDING_CONFIRMATION ones)
-    // plus the 10 verification tickets, so the queue is drained exactly.
+    // Every status-plan entry the category loop draws from, shuffled once per run: 10 OPEN, 8
+    // IN_PROGRESS, 5 ESCALATED (still undecided), 16 ANSWERED (12 decided directly, 4 decided after
+    // an escalation), 12 REJECTED (9 direct, 3 after escalation). 51 entries = the 54 category-loop
+    // tickets minus the 3 deterministic PENDING_CONFIRMATION ones, so the queue is drained exactly.
+    //
+    // The verification lane no longer draws from here. Its outcomes are authored per ticket in
+    // verification/badges.json, because the badge lanes need exactly five approvals, five refusals
+    // and five open requests and a shuffled draw cannot promise any of those counts.
     private static List<StatusPlan> buildStatusPlanQueue(Random random) {
         List<StatusPlan> plans = new ArrayList<>();
-        addRepeated(plans, "open", false, 12);
-        addRepeated(plans, "in_progress", false, 10);
-        addRepeated(plans, "escalated", false, 6);
-        addRepeated(plans, "answered", false, 16);
-        addRepeated(plans, "answered", true, 6);
-        addRepeated(plans, "rejected", false, 12);
-        addRepeated(plans, "rejected", true, 5);
+        addRepeated(plans, "open", false, 10);
+        addRepeated(plans, "in_progress", false, 8);
+        addRepeated(plans, "escalated", false, 5);
+        addRepeated(plans, "answered", false, 12);
+        addRepeated(plans, "answered", true, 4);
+        addRepeated(plans, "rejected", false, 9);
+        addRepeated(plans, "rejected", true, 3);
         Collections.shuffle(plans, random);
         return plans;
     }
@@ -130,7 +132,7 @@ public class SupportSeedWriter {
 
     private final JdbcTemplate jdbc;
 
-    public void write(
+    public Map<String, UUID> write(
             SeedContent content, Map<String, UUID> usersByUsername, SeedTimeline timeline) {
         Random random = new Random(SUPPORT_RANDOM_SEED);
         SupportTicketPoolSeed pools = content.supportTicketPools();
@@ -233,35 +235,40 @@ public class SupportSeedWriter {
             }
         }
 
-        List<VerificationRequestPoolEntry> verificationPool = pools.verificationRequests();
-        for (int i = 0; i < VERIFICATION_TICKET_COUNT; i++) {
-            VerificationRequestPoolEntry claim = verificationPool.get(i % verificationPool.size());
-            StatusPlan statusPlan = statusQueue.remove(statusQueue.size() - 1);
-            boolean nonTerminal =
-                    !"answered".equals(statusPlan.status())
-                            && !"rejected".equals(statusPlan.status());
-
-            TicketTarget target =
-                    resolveOrdinaryTarget(
-                            ordinaryUserIds, verificationLaneOccupied, nonTerminal, random);
-            if (target == null) {
-                log.warn("[seed] support: no eligible target for verification_request, skipping");
-                continue;
+        // The subject of a verification claim is named in verification/badges.json rather than
+        // drawn from ordinaryUserIds at random. A random subject is what let a claim about an
+        // illustration studio land on a gym account, and it left an approved ticket with no badge
+        // behind it, because nothing downstream knew which account had been approved.
+        Map<String, UUID> verificationTicketIdByUsername = new HashMap<>();
+        for (VerificationTicketSeed claim : content.badges().verificationTickets()) {
+            UUID subjectId = usersByUsername.get(claim.username());
+            if (subjectId == null) {
+                throw new IllegalStateException(
+                        "SupportSeedWriter: verification/badges.json names unknown account '"
+                                + claim.username()
+                                + "'");
             }
-            if (nonTerminal) {
-                verificationLaneOccupied.add(target.userId());
+            // V107 admits one non-terminal verification ticket per account. badges.json is
+            // authored to hold that, and this makes a later edit that breaks it fail loudly here
+            // rather than as a constraint violation halfway through the run.
+            if (!claim.isTerminal() && !verificationLaneOccupied.add(subjectId)) {
+                throw new IllegalStateException(
+                        "SupportSeedWriter: account '"
+                                + claim.username()
+                                + "' holds more than one open verification request, which"
+                                + " uq_support_tickets_one_open_verification_per_user refuses");
             }
 
+            StatusPlan statusPlan = new StatusPlan(claim.outcome(), claim.viaEscalation());
             Instant createdAt =
                     timeline.supportTicketCreatedAt(
-                            userCreatedAtById.getOrDefault(
-                                    target.userId(), timeline.referenceNow()));
+                            userCreatedAtById.getOrDefault(subjectId, timeline.referenceNow()));
             UUID ticketId = UUID.randomUUID();
             adminActionCount +=
                     writeTicketRow(
                             ticketId,
-                            target.userId(),
-                            userEmailById.getOrDefault(target.userId(), "unknown@example.com"),
+                            subjectId,
+                            userEmailById.getOrDefault(subjectId, "unknown@example.com"),
                             "verification_request",
                             "Verification request: " + claim.claimedName(),
                             "Requesting a verified badge for " + claim.claimedName() + ".",
@@ -275,7 +282,8 @@ public class SupportSeedWriter {
                             pools,
                             timeline,
                             random);
-            writeVerificationRequestRow(ticketId, target.userId(), claim, createdAt);
+            writeVerificationRequestRow(ticketId, subjectId, claim, createdAt);
+            verificationTicketIdByUsername.put(claim.username(), ticketId);
             ticketCount++;
             verificationCount++;
         }
@@ -287,6 +295,7 @@ public class SupportSeedWriter {
                 verificationCount,
                 pendingConfirmationCount,
                 adminActionCount);
+        return verificationTicketIdByUsername;
     }
 
     // Resolves an appeal ticket's target from a real punitive admin_actions row
@@ -528,7 +537,7 @@ public class SupportSeedWriter {
     }
 
     private void writeVerificationRequestRow(
-            UUID ticketId, UUID userId, VerificationRequestPoolEntry claim, Instant createdAt) {
+            UUID ticketId, UUID userId, VerificationTicketSeed claim, Instant createdAt) {
         List<String> evidenceValues =
                 List.of(
                         nullToEmpty(claim.evidenceWebsite()),

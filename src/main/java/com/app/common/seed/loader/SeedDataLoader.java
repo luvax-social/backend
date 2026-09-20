@@ -3,6 +3,7 @@ package com.app.common.seed.loader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -15,9 +16,12 @@ import java.util.stream.Stream;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 
+import com.app.common.seed.model.BadgeRevocationSeed;
+import com.app.common.seed.model.BadgeSeed;
 import com.app.common.seed.model.CommentPoolSeed;
 import com.app.common.seed.model.ConversationSeed;
 import com.app.common.seed.model.HashtagSeed;
+import com.app.common.seed.model.LegacyGrantSeed;
 import com.app.common.seed.model.MediaManifestEntry;
 import com.app.common.seed.model.MessageSeed;
 import com.app.common.seed.model.ModerationCaseSeed;
@@ -27,6 +31,7 @@ import com.app.common.seed.model.PersonaSeed;
 import com.app.common.seed.model.PostSeed;
 import com.app.common.seed.model.SupportTicketPoolSeed;
 import com.app.common.seed.model.UserSeed;
+import com.app.common.seed.model.VerificationTicketSeed;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
@@ -90,6 +95,7 @@ public class SeedDataLoader {
         List<MediaManifestEntry> mediaManifest = readMediaManifest();
         SupportTicketPoolSeed supportTicketPools =
                 readFile("support/support_ticket_pools.json", SupportTicketPoolSeed.class);
+        BadgeSeed badges = readFile("verification/badges.json", BadgeSeed.class);
 
         Set<String> usernames = users.stream().map(UserSeed::username).collect(Collectors.toSet());
         Set<String> mediaIds =
@@ -111,6 +117,7 @@ public class SeedDataLoader {
                 conversations, usernames, mediaIds, publishedPostIds);
         validateConversationParticipantScopedFieldsResolve(conversations);
         validateSupplementaryReportsAreUnique(supplementaryReports);
+        validateBadgeSubjectsExist(badges, users);
 
         return new SeedContent(
                 personas,
@@ -123,7 +130,48 @@ public class SeedDataLoader {
                 supplementaryActions,
                 supplementaryReports,
                 mediaManifest,
-                supportTicketPools);
+                supportTicketPools,
+                badges);
+    }
+
+    // Mirrors validatePostAuthorsExist: a badge names its subject as a bare username, and a
+    // typo would otherwise surface as a silently skipped grant rather than a load failure. The
+    // role check is here rather than in the writer because
+    // AdminAuthorizationService.assertMayDecideVerification refuses an administrator as a subject,
+    // so authored content that names one is wrong content, not a runtime condition to handle.
+    private void validateBadgeSubjectsExist(BadgeSeed badges, List<UserSeed> users) {
+        Map<String, String> roleByUsername = new HashMap<>();
+        for (UserSeed user : users) {
+            roleByUsername.put(user.username(), user.role());
+        }
+        List<String> subjects = new ArrayList<>();
+        for (VerificationTicketSeed ticket : badges.verificationTickets()) {
+            subjects.add(ticket.username());
+        }
+        for (LegacyGrantSeed grant : badges.legacyGrants()) {
+            subjects.add(grant.username());
+        }
+        for (BadgeRevocationSeed revocation : badges.revocations()) {
+            subjects.add(revocation.username());
+        }
+        for (String username : subjects) {
+            String role = roleByUsername.get(username);
+            if (role == null) {
+                throw new IllegalStateException(
+                        "verification/badges.json: names account '"
+                                + username
+                                + "' which does not exist in users.json");
+            }
+            if (!"user".equals(role)) {
+                throw new IllegalStateException(
+                        "verification/badges.json: account '"
+                                + username
+                                + "' has role '"
+                                + role
+                                + "'; a verification subject may be neither the acting staff"
+                                + " member nor an administrator");
+            }
+        }
     }
 
     private <T> List<T> nullToEmpty(List<T> list) {
