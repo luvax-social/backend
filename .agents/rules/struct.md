@@ -54,7 +54,7 @@ app/
 │   │       ├── templates/mail/     # email-verification.html, oauth-account-no-password.html,
 │   │       │                       # password-changed.html, password-reset.html, welcome.html,
 │   │       │                       # moderation/ (layout.html + 13 notice variants),
-│   │       │                       # campaign/layout.html, support/confirm-support-request.html
+│   │       │                       # support/confirm-support-request.html
 │   │       ├── application.yaml    # Core config (active profile: dev)
 │   │       ├── application-dev.yml # Dev: JPA show-sql, Swagger at /api-docs, relaxed rate limits
 │   │       ├── application-prod.yml# Prod: show-sql off, Swagger disabled
@@ -277,7 +277,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/hashtag/controller` | `HashtagControllerIT` |
 | `modules/hashtag/repository` | `HashtagRepositoryIT` |
 | `modules/hashtag/service/impl` | `HashtagLifecycleServiceImplTest`, `HashtagLookupServiceImplTest`, `HashtagPinLifecycleTest`, `HashtagSearchServiceImplTest`, `HashtagServiceImplTest`, `HashtagTrendingServiceImplTest`, `HashtagTrendingSnapshotIT`, `PersonalisedTrendingServiceImplTest` |
-| `modules/mail/service/impl` | `CampaignBodyRendererTest`, `MailRecipientAllowlistTest`, `ModerationMailThrottleImplTest`, `ResendMailSenderTest` |
+| `modules/mail/service/impl` | `MailRecipientAllowlistTest`, `ModerationMailThrottleImplTest`, `ResendMailSenderTest` |
 | `modules/media/controller` | `MediaControllerIT` |
 | `modules/media/repository` | `MediaAssetRepositoryIT` |
 | `modules/media/service/impl` | `MediaAssetRegistrarTest`, `MediaEventServiceImplTest`, `MediaServiceImplTest` |
@@ -339,7 +339,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 ### Database
 
 - Engine: **PostgreSQL** (docker-compose builds `./docker/postgres` on the `postgres:latest` base)
-- Migration: **Flyway** (`out-of-order: false`); 113 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109 and V110 build their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those sixteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V113 all exist.
+- Migration: **Flyway** (`out-of-order: false`); 114 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109 and V110 build their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those sixteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V114 all exist.
 
 | Migration | Description |
 |-----------|-------------|
@@ -456,6 +456,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | V111 | add_campaign_recipient_suppressed_status |
 | V112 | add_content_removal_notification_types |
 | V113 | add_content_removal_notification_configs |
+| V114 | remove_mail_campaigns |
 
 - Reference schema: `database/schema.sql` (authoritative final-state; not applied by Flyway)
 - Extensions: `pgcrypto` (UUID gen), `pg_trgm` (fuzzy username search), `btree_gin` (composite GIN indexes)
@@ -468,13 +469,11 @@ means a migration: these are domain primitives, not configuration.
 
 | Enum | Values |
 |------|--------|
-| `admin_action_type` | `ban_user`, `unban_user`, `suspend_user`, `unsuspend_user`, `remove_post`, `restore_post`, `remove_comment`, `restore_comment`, `resolve_report`, `dismiss_report`, `change_user_role`, `warn_user`, `revoke_warning`, `issue_strike`, `revoke_strike`, `escalate_report`, `force_logout`, `create_hashtag`, `edit_hashtag`, `ban_hashtag`, `unban_hashtag`, `delete_hashtag`, `remove_story`, `restore_story`, `remove_message`, `restore_message`, `revoke_session`, `pin_hashtag`, `unpin_hashtag`, `respond_support_ticket`, `reject_support_ticket`, `escalate_support_ticket`, `send_mail_campaign`, `grant_verification`, `reject_verification`, `revoke_verification` (36 values). Every value has a caller. `revoke_session` ends exactly one session, distinct from `force_logout`, which ends every session on the account. |
+| `admin_action_type` | `ban_user`, `unban_user`, `suspend_user`, `unsuspend_user`, `remove_post`, `restore_post`, `remove_comment`, `restore_comment`, `resolve_report`, `dismiss_report`, `change_user_role`, `warn_user`, `revoke_warning`, `issue_strike`, `revoke_strike`, `escalate_report`, `force_logout`, `create_hashtag`, `edit_hashtag`, `ban_hashtag`, `unban_hashtag`, `delete_hashtag`, `remove_story`, `restore_story`, `remove_message`, `restore_message`, `revoke_session`, `pin_hashtag`, `unpin_hashtag`, `respond_support_ticket`, `reject_support_ticket`, `escalate_support_ticket`, `grant_verification`, `reject_verification`, `revoke_verification` (35 values). Every value has a caller. `revoke_session` ends exactly one session, distinct from `force_logout`, which ends every session on the account. |
 | `email_delivery_status` | `pending`, `sent`, `failed`, `throttled`, `skipped` (5 values). |
 | `event_type` | `post_view`, `post_like`, `post_unlike`, `post_save`, `post_unsave`, `post_share`, `post_comment`, `story_view`, `story_reply`, `profile_view`, `profile_follow`, `profile_unfollow`, `search`, `hashtag_click`, `comment_like`, `comment_reply`, `message_send`, `session_start`, `session_end`, `app_open` (20 values). |
 | `follow_status` | `pending`, `accepted` (2 values). |
 | `hashtag_status` | `active`, `banned`, `deleted` (3 values). |
-| `mail_campaign_recipient_status` | `pending`, `queued`, `skipped_opted_out`, `failed`, `skipped_not_allowed` (5 values). |
-| `mail_campaign_status` | `draft`, `scheduled`, `sending`, `sent`, `cancelled`, `failed` (6 values). |
 | `media_type` | `image`, `video` (2 values). |
 | `message_type` | `text`, `image`, `video`, `post_share`, `story_share` (5 values). |
 | `notification_type` | `like_post`, `like_comment`, `comment_post`, `reply_comment`, `follow`, `follow_request`, `mention_post`, `mention_comment`, `story_view`, `message`, `warning`, `post_removed`, `report_post_removed`, `post_restored`, `report_dismissed`, `support_ticket_update`, `comment_removed`, `story_removed`, `message_removed` (19 values). |
