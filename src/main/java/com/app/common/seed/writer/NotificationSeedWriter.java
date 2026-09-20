@@ -91,6 +91,11 @@ public class NotificationSeedWriter {
     private static final String POST_ENTITY_TYPE = "post";
     private static final String MESSAGE_ENTITY_TYPE = "message";
     private static final String REPORT_ENTITY_TYPE = "report";
+    // AdminServiceImpl.notifyContentRemoved anchors a removal notification to the audit row
+    // rather than to the removed content, because the content is hidden by the time the
+    // recipient reads it.
+    private static final String ADMIN_ACTION_ENTITY_TYPE = "admin_action";
+    private static final String SUPPORT_TICKET_ENTITY_TYPE = "support_ticket";
 
     private static final String INSERT_NOTIFICATION_SQL =
             "INSERT INTO notifications (id, recipient_id, actor_id, type, entity_type, entity_id,"
@@ -119,6 +124,8 @@ public class NotificationSeedWriter {
         List<Candidate> reportPostRemovedCandidates = fetchReportPostRemovedCandidates();
         List<Candidate> postRestoredCandidates = fetchPostRestoredCandidates();
         List<Candidate> reportDismissedCandidates = fetchReportDismissedCandidates();
+        List<Candidate> contentRemovedCandidates = fetchContentRemovedCandidates();
+        List<Candidate> supportTicketUpdateCandidates = fetchSupportTicketUpdateCandidates();
 
         List<Candidate> sampledCandidates = new ArrayList<>();
         sampledCandidates.addAll(fetchFollowCandidates());
@@ -150,6 +157,8 @@ public class NotificationSeedWriter {
         all.addAll(reportPostRemovedCandidates);
         all.addAll(postRestoredCandidates);
         all.addAll(reportDismissedCandidates);
+        all.addAll(contentRemovedCandidates);
+        all.addAll(supportTicketUpdateCandidates);
 
         List<Object[]> rows = new ArrayList<>();
         for (Candidate candidate : all) {
@@ -175,7 +184,7 @@ public class NotificationSeedWriter {
                 "[seed] notifications: {} rows written ({} warning, {} mention, {} sampled from"
                         + " {} candidates, {} like_post, {} like_comment, {} message, {}"
                         + " post_removed, {} report_post_removed, {} post_restored, {}"
-                        + " report_dismissed)",
+                        + " report_dismissed, {} content_removed, {} support_ticket_update)",
                 rows.size(),
                 warningCandidates.size(),
                 mentionCandidates.size(),
@@ -187,7 +196,9 @@ public class NotificationSeedWriter {
                 postRemovedCandidates.size(),
                 reportPostRemovedCandidates.size(),
                 postRestoredCandidates.size(),
-                reportDismissedCandidates.size());
+                reportDismissedCandidates.size(),
+                contentRemovedCandidates.size(),
+                supportTicketUpdateCandidates.size());
     }
 
     // Reservoir-style uniform sample without replacement: shuffling the whole candidate list and
@@ -314,6 +325,80 @@ public class NotificationSeedWriter {
     // mirrors AdminServiceImpl.notifySystem's unconditional POST_REMOVED call, which (like every
     // notification in this group) carries a null actor_id since the recipient is told the system
     // acted, not which admin acted.
+    // comment_removed, story_removed and message_removed. All three were added to
+    // notification_type by V112 with their config rows in V113, and nothing produced a row of any
+    // of them, so the enum coverage assertion had been failing on all three since that migration
+    // landed. Shape mirrors AdminServiceImpl.notifyContentRemoved exactly: a null actor, because
+    // production sends these as system notifications rather than attributing them to the acting
+    // administrator, and the audit row as the entity.
+    private List<Candidate> fetchContentRemovedCandidates() {
+        List<Candidate> candidates = new ArrayList<>();
+        collectContentRemoved(
+                candidates,
+                "SELECT aa.id AS action_id, c.user_id AS owner_id, aa.created_at AS created_at"
+                        + " FROM admin_actions aa JOIN comments c ON c.id = aa.target_entity_id"
+                        + " WHERE aa.action_type = 'remove_comment'",
+                "comment_removed");
+        collectContentRemoved(
+                candidates,
+                "SELECT aa.id AS action_id, s.user_id AS owner_id, aa.created_at AS created_at"
+                        + " FROM admin_actions aa JOIN stories s ON s.id = aa.target_entity_id"
+                        + " WHERE aa.action_type = 'remove_story'",
+                "story_removed");
+        collectContentRemoved(
+                candidates,
+                "SELECT aa.id AS action_id, m.sender_id AS owner_id, aa.created_at AS created_at"
+                        + " FROM admin_actions aa JOIN messages m ON m.id = aa.target_entity_id"
+                        + " WHERE aa.action_type = 'remove_message'",
+                "message_removed");
+        return candidates;
+    }
+
+    private void collectContentRemoved(List<Candidate> candidates, String sql, String type) {
+        jdbc.query(
+                sql,
+                rs -> {
+                    UUID ownerId = (UUID) rs.getObject("owner_id");
+                    if (ownerId == null) {
+                        return;
+                    }
+                    candidates.add(
+                            new Candidate(
+                                    ownerId,
+                                    null,
+                                    type,
+                                    ADMIN_ACTION_ENTITY_TYPE,
+                                    (UUID) rs.getObject("action_id"),
+                                    null,
+                                    rs.getTimestamp("created_at").toInstant()));
+                });
+    }
+
+    // support_ticket_update, added to notification_type by V98 and unproduced ever since.
+    // SupportTicketServiceImpl attributes this one to the staff member who decided the ticket
+    // rather than sending it as a system notification, which is why actorId is populated here and
+    // null in the three above. A public ticket that never resolved to an account is skipped: it
+    // has nobody to notify in-product, and production skips it for the same reason.
+    private List<Candidate> fetchSupportTicketUpdateCandidates() {
+        List<Candidate> candidates = new ArrayList<>();
+        jdbc.query(
+                "SELECT id, user_id, responded_by, responded_at FROM support_tickets WHERE status"
+                        + " IN ('answered', 'rejected') AND user_id IS NOT NULL AND responded_at"
+                        + " IS NOT NULL",
+                rs -> {
+                    candidates.add(
+                            new Candidate(
+                                    (UUID) rs.getObject("user_id"),
+                                    (UUID) rs.getObject("responded_by"),
+                                    "support_ticket_update",
+                                    SUPPORT_TICKET_ENTITY_TYPE,
+                                    (UUID) rs.getObject("id"),
+                                    null,
+                                    rs.getTimestamp("responded_at").toInstant()));
+                });
+        return candidates;
+    }
+
     private List<Candidate> fetchPostRemovedCandidates() {
         List<Candidate> candidates = new ArrayList<>();
         jdbc.query(
