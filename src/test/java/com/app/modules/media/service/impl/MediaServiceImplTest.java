@@ -59,7 +59,7 @@ class MediaServiceImplTest {
     @BeforeEach
     void setUp() {
         MediaProperties mediaProperties = new MediaProperties();
-        mediaProperties.setCdnBaseUrl("https://cdn.example.com/assets");
+        mediaProperties.setCdnBaseUrl("https://media.luvax.online");
         service =
                 new MediaServiceImpl(
                         new MediaMetadataValidator(mediaProperties),
@@ -141,7 +141,8 @@ class MediaServiceImplTest {
         assertThat(captor.getValue().getUserId()).isEqualTo(USER_ID);
         assertThat(captor.getValue().getStorageKey()).isEqualTo(VALID_STORAGE_KEY);
         assertThat(captor.getValue().getCdnUrl())
-                .isEqualTo("https://cdn.example.com/assets/" + VALID_STORAGE_KEY);
+                .startsWith("https://")
+                .isEqualTo("https://media.luvax.online/" + VALID_STORAGE_KEY);
         assertThat(response.id()).isEqualTo(MEDIA_ID);
     }
 
