@@ -838,6 +838,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- Media upload URL coverage now verifies that CDN object URLs preserve the HTTPS scheme.
 - The post index-sync integration tests now stub the Gorse recommender client, which is an external HTTP service with no container in those tests; left real, every post upsert failed on a refused connection and nothing reached Elasticsearch.
 - Coverage proving the anonymous appeal status read never carries the staff-only note, never consumes its token, and answers every negative case identically.
 - Coverage proving the appeal link recovery path answers the same for a matching and a non-matching address, equalizes both, and verifies the captcha inside that equalized window.
