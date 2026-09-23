@@ -487,7 +487,7 @@ means a migration: these are domain primitives, not configuration.
 | `hashtag_status` | `active`, `banned`, `deleted` (3 values). |
 | `media_type` | `image`, `video` (2 values). |
 | `message_type` | `text`, `image`, `video`, `post_share`, `story_share` (5 values). |
-| `notification_category` | `like`, `comment`, `mention`, `follow`, `story`, `system` (6 values, V115). Derived from `notification_type` in application code; drives the feed filters. |
+| `notification_category` | `like`, `comment`, `mention`, `follow`, `story`, `message`, `system` (7 values, V115). Derived from `notification_type` in application code; drives the feed filters. `message` is retired with the `message` type: no producer writes it since direct messages left the feed. |
 | `notification_type` | `like_post`, `like_comment`, `comment_post`, `reply_comment`, `follow`, `follow_request`, `mention_post`, `mention_comment`, `story_view`, `message`, `warning`, `post_removed`, `report_post_removed`, `post_restored`, `report_dismissed`, `support_ticket_update`, `comment_removed`, `story_removed`, `message_removed` (19 values). |
 | `oauth_provider` | `google`, `facebook`, `apple` (3 values). |
 | `post_status` | `draft`, `published`, `archived`, `removed` (4 values). |

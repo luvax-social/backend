@@ -94,11 +94,13 @@ public class SeedRunner {
     private static final Map<String, Set<String>> ASYNC_ENUM_VALUES =
             Map.of("user_events.event_type", Set.of("post_view"));
 
-    // Values the schema keeps but nothing writes any more. notification_type 'message' stays in
-    // the enum so historical rows remain readable, but direct messages left the activity feed and
-    // no producer writes it.
+    // Values the schema keeps but nothing writes any more. notification_type 'message' and its
+    // notification_category 'message' stay in their enums so historical rows remain readable,
+    // but direct messages left the activity feed and no producer writes either.
     private static final Map<String, Set<String>> RETIRED_ENUM_VALUES =
-            Map.of("notifications.type", Set.of("message"));
+            Map.of(
+                    "notifications.type", Set.of("message"),
+                    "notifications.category", Set.of("message"));
 
     // Each replayed event whose notification NotificationSeedWriter already wrote, and the
     // consumer that would otherwise write it a second time when the replay drains.

@@ -18,7 +18,8 @@ These tables cannot be rebuilt from any other source if lost.
 
 ### Columns in detail
 
-- `category` (`notification_category`: `like`, `comment`, `mention`, `follow`, `story`, `system`) is derived from `type` by `NotificationType.category()` and drives the list filters.
+- `category` (`notification_category`: `like`, `comment`, `mention`, `follow`, `story`, `message`, `system`) is derived from `type` by `NotificationType.category()` and drives the list filters.
+  `message` belongs only to the retired `message` type.
 - `entity_type` / `entity_id` is the polymorphic target, shaped by each producer (Section 3B).
   `post_id` carries the post of every post, comment and post-moderation row, so a client can open the post without a second lookup.
   A follow row has neither: its only subject is the actor.
@@ -52,7 +53,7 @@ These tables cannot be rebuilt from any other source if lost.
 | Rule | Enforced By |
 |------|-------------|
 | `type` is one of the 19 values of `notification_type` | enum |
-| `category` is one of the 6 values of `notification_category` | enum (V115) |
+| `category` is one of the 7 values of `notification_category` | enum (V115) |
 | At most one open group per recipient and key | partial unique index `uq_notifications_open_group (recipient_id, aggregation_key) WHERE is_group_open AND deleted_at IS NULL` |
 | An actor appears in a row at most once | primary key of `notification_actors` |
 | `actor_count` equals the membership count and never goes below zero | trigger `trg_notification_actor_count`, `CHECK (actor_count >= 0)` |

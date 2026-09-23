@@ -251,6 +251,14 @@ class DomainWritersSeedWriterIT {
                                         + " WHERE na.notification_id = n.id)"))
                 .isZero();
         assertThat(count("SELECT COUNT(*) FROM notifications WHERE type = 'message'")).isZero();
+        // SeedRunner's coverage floor, for the column this writer alone fills: every category
+        // but the retired 'message' reaches five rows.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM unnest(enum_range(NULL::notification_category))"
+                                        + " c WHERE c <> 'message' AND (SELECT COUNT(*) FROM"
+                                        + " notifications n WHERE n.category = c) < 5"))
+                .isZero();
         assertThat(
                         count(
                                 "SELECT COUNT(*) FROM notifications WHERE category = 'system'"
