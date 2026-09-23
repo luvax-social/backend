@@ -3,7 +3,9 @@ package com.app.modules.notification.service;
 import java.util.UUID;
 
 import com.app.common.response.CursorPageResponse;
+import com.app.modules.notification.dto.request.AdvanceSeenRequest;
 import com.app.modules.notification.dto.response.NotificationResponse;
+import com.app.modules.notification.dto.response.NotificationStateResponse;
 import com.app.modules.notification.entity.enums.NotificationType;
 
 public interface NotificationService {
@@ -108,6 +110,35 @@ public interface NotificationService {
      * @return the number of rows rewritten
      */
     int resyncActorVerified(UUID actorId);
+
+    /**
+     * Returns the account's feed state: the bounded unseen badge, the seen and previous watermarks,
+     * and the pinned follow-request entry.
+     *
+     * <p>The badge counts visible notifications newer than the seen watermark, pending follow
+     * requests included, reading at most 100 rows. A pending request therefore lights the badge
+     * once, when it arrives, not for as long as it stays pending.
+     *
+     * @param userId the caller
+     * @return the state; never null
+     */
+    NotificationStateResponse getState(UUID userId);
+
+    /**
+     * Advances the caller's seen watermark to the newest notification they rendered, clears the
+     * badge up to it, and publishes the new state to the caller's other open tabs.
+     *
+     * <p>The position is clamped to the row's current feed position and to the database clock, and
+     * never moves backwards. The "new" boundary rotates to the previous watermark only on the first
+     * advance after the configured session gap.
+     *
+     * @param userId the caller
+     * @param request the rendered row's {@code activityAt} and id
+     * @return the state after the advance
+     * @throws com.app.common.exception.AppException {@code FORBIDDEN} when the row is not the
+     *     caller's
+     */
+    NotificationStateResponse advanceSeen(UUID userId, AdvanceSeenRequest request);
 
     /**
      * Marks the notification as read. Throws {@link com.app.common.exception.AppException} with

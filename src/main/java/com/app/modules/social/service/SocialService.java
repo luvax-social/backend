@@ -13,6 +13,7 @@ import com.app.common.response.UserListItemResponse;
 import com.app.common.response.ViewerRelationshipResponse;
 import com.app.modules.social.dto.response.FollowRequestResponse;
 import com.app.modules.social.dto.response.FollowResponse;
+import com.app.modules.social.dto.response.PendingFollowRequestSummary;
 import com.app.modules.social.enums.FollowStatus;
 
 public interface SocialService {
@@ -201,6 +202,30 @@ public interface SocialService {
      * @return the edge's status, or empty when no edge exists
      */
     Optional<FollowStatus> findFollowStatus(UUID followerId, UUID followingId);
+
+    /**
+     * Summarises the account's pending follow requests for the notification feed's pinned entry.
+     *
+     * <p>Counts every pending request, as {@link #getPendingFollowRequests} lists them, reading at
+     * most {@code countLimit} rows.
+     *
+     * @param userId the private account the requests were sent to
+     * @param recentLimit how many of the newest requesters to return
+     * @param countLimit the most requests counted
+     * @return the bounded count and the newest requesters, newest first
+     */
+    PendingFollowRequestSummary summarizePendingFollowRequests(
+            UUID userId, int recentLimit, int countLimit);
+
+    /**
+     * The subset of {@code candidateIds} with a pending follow request to {@code userId}, in one
+     * query; drives the confirm and delete actions on follow-request notifications.
+     *
+     * @param userId the account the requests were sent to
+     * @param candidateIds users who may have asked to follow
+     * @return the candidates with a pending request; empty when none or when no candidates
+     */
+    Set<UUID> findPendingRequesters(UUID userId, Collection<UUID> candidateIds);
 
     /**
      * Resolves the viewer's follow and block relationship to each of {@code userIds} in two batched

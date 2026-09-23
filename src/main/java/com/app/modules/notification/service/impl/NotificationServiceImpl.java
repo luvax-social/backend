@@ -25,7 +25,12 @@ import com.app.common.pagination.TimeCursors;
 import com.app.common.response.CursorPageResponse;
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.notification.config.NotificationProperties;
+import com.app.modules.notification.dto.request.AdvanceSeenRequest;
+import com.app.modules.notification.dto.response.FollowRequestSummaryResponse;
+import com.app.modules.notification.dto.response.NotificationKeyResponse;
 import com.app.modules.notification.dto.response.NotificationResponse;
+import com.app.modules.notification.dto.response.NotificationStateResponse;
+import com.app.modules.notification.dto.response.UnseenCountResponse;
 import com.app.modules.notification.entity.Notification;
 import com.app.modules.notification.entity.enums.NotificationCategory;
 import com.app.modules.notification.entity.enums.NotificationType;
@@ -34,9 +39,14 @@ import com.app.modules.notification.messaging.NotificationEventTypes;
 import com.app.modules.notification.repository.NotificationAggregationRepository;
 import com.app.modules.notification.repository.NotificationAggregationRepository.GroupWrite;
 import com.app.modules.notification.repository.NotificationAggregationRepository.Removal;
+import com.app.modules.notification.repository.NotificationFeedRepository;
+import com.app.modules.notification.repository.NotificationFeedRepository.Key;
 import com.app.modules.notification.repository.NotificationRepository;
+import com.app.modules.notification.repository.NotificationSeenStateRepository;
+import com.app.modules.notification.repository.NotificationSeenStateRepository.SeenState;
 import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
+import com.app.modules.social.dto.response.PendingFollowRequestSummary;
 import com.app.modules.social.service.SocialService;
 import com.app.modules.users.dto.response.NotificationPreferencesResponse;
 import com.app.modules.users.service.UserNotificationPreferencesService;
@@ -46,9 +56,12 @@ import com.app.modules.users.service.UserSummaryService;
 public class NotificationServiceImpl implements NotificationService {
 
     private static final String AGGREGATE_TYPE = "notification";
+    private static final int RECENT_REQUESTERS = 2;
 
     private final NotificationRepository notificationRepository;
     private final NotificationAggregationRepository aggregationRepository;
+    private final NotificationFeedRepository feedRepository;
+    private final NotificationSeenStateRepository seenStateRepository;
     private final NotificationTypePolicy typePolicy;
     private final NotificationProperties properties;
     private final NotificationMapper notificationMapper;
@@ -61,6 +74,8 @@ public class NotificationServiceImpl implements NotificationService {
     public NotificationServiceImpl(
             NotificationRepository notificationRepository,
             NotificationAggregationRepository aggregationRepository,
+            NotificationFeedRepository feedRepository,
+            NotificationSeenStateRepository seenStateRepository,
             NotificationTypePolicy typePolicy,
             NotificationProperties properties,
             NotificationMapper notificationMapper,
@@ -71,6 +86,8 @@ public class NotificationServiceImpl implements NotificationService {
             PlatformTransactionManager transactionManager) {
         this.notificationRepository = notificationRepository;
         this.aggregationRepository = aggregationRepository;
+        this.feedRepository = feedRepository;
+        this.seenStateRepository = seenStateRepository;
         this.typePolicy = typePolicy;
         this.properties = properties;
         this.notificationMapper = notificationMapper;
@@ -216,6 +233,57 @@ public class NotificationServiceImpl implements NotificationService {
             total += rewritten;
         } while (rewritten == batchSize);
         return total;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public NotificationStateResponse getState(UUID userId) {
+        return toState(userId, seenStateRepository.find(userId).orElse(SeenState.NONE));
+    }
+
+    @Override
+    @Transactional
+    public NotificationStateResponse advanceSeen(UUID userId, AdvanceSeenRequest request) {
+        SeenState advanced =
+                seenStateRepository
+                        .advance(
+                                userId,
+                                request.activityAt(),
+                                request.id(),
+                                properties.seenSessionGap())
+                        .orElseThrow(() -> new AppException(ApiErrorCode.FORBIDDEN));
+        enqueue(NotificationEventTypes.NOTIFICATION_SEEN_V1, userId, userId, recipientData(userId));
+        return toState(userId, advanced);
+    }
+
+    private NotificationStateResponse toState(UUID userId, SeenState seenState) {
+        return new NotificationStateResponse(
+                UnseenCountResponse.of(feedRepository.countUnseen(userId, seenState.seen())),
+                toKeyResponse(seenState.seen()),
+                toKeyResponse(seenState.previous()),
+                followRequests(userId));
+    }
+
+    private FollowRequestSummaryResponse followRequests(UUID userId) {
+        PendingFollowRequestSummary summary =
+                socialService.summarizePendingFollowRequests(
+                        userId, RECENT_REQUESTERS, UnseenCountResponse.CAP + 1);
+        if (summary.count() == 0) {
+            return FollowRequestSummaryResponse.NONE;
+        }
+        Map<UUID, UserSummaryResponse> requesters =
+                userSummaryService.loadSummaries(summary.recentRequesterIds());
+        return new FollowRequestSummaryResponse(
+                (int) Math.min(summary.count(), UnseenCountResponse.CAP),
+                summary.count() > UnseenCountResponse.CAP,
+                summary.recentRequesterIds().stream()
+                        .map(requesters::get)
+                        .filter(Objects::nonNull)
+                        .toList());
+    }
+
+    static NotificationKeyResponse toKeyResponse(Key key) {
+        return key == null ? null : new NotificationKeyResponse(key.activityAt(), key.id());
     }
 
     @Override

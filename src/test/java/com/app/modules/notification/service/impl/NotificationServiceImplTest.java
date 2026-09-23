@@ -43,7 +43,12 @@ import com.app.common.pagination.TimeCursors;
 import com.app.common.response.CursorPageResponse;
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.notification.config.NotificationProperties;
+import com.app.modules.notification.dto.request.AdvanceSeenRequest;
+import com.app.modules.notification.dto.response.FollowRequestSummaryResponse;
+import com.app.modules.notification.dto.response.NotificationKeyResponse;
 import com.app.modules.notification.dto.response.NotificationResponse;
+import com.app.modules.notification.dto.response.NotificationStateResponse;
+import com.app.modules.notification.dto.response.UnseenCountResponse;
 import com.app.modules.notification.entity.Notification;
 import com.app.modules.notification.entity.enums.NotificationCategory;
 import com.app.modules.notification.entity.enums.NotificationType;
@@ -52,8 +57,13 @@ import com.app.modules.notification.messaging.NotificationEventTypes;
 import com.app.modules.notification.repository.NotificationAggregationRepository;
 import com.app.modules.notification.repository.NotificationAggregationRepository.GroupWrite;
 import com.app.modules.notification.repository.NotificationAggregationRepository.Removal;
+import com.app.modules.notification.repository.NotificationFeedRepository;
+import com.app.modules.notification.repository.NotificationFeedRepository.Key;
 import com.app.modules.notification.repository.NotificationRepository;
+import com.app.modules.notification.repository.NotificationSeenStateRepository;
+import com.app.modules.notification.repository.NotificationSeenStateRepository.SeenState;
 import com.app.modules.notification.service.NotificationDraft;
+import com.app.modules.social.dto.response.PendingFollowRequestSummary;
 import com.app.modules.social.service.SocialService;
 import com.app.modules.users.dto.response.NotificationPreferencesResponse;
 import com.app.modules.users.service.UserNotificationPreferencesService;
@@ -66,6 +76,8 @@ class NotificationServiceImplTest {
 
     @Mock private NotificationRepository notificationRepository;
     @Mock private NotificationAggregationRepository aggregationRepository;
+    @Mock private NotificationFeedRepository feedRepository;
+    @Mock private NotificationSeenStateRepository seenStateRepository;
     @Mock private NotificationTypePolicy typePolicy;
     @Mock private NotificationMapper notificationMapper;
     @Mock private OutboxService outboxService;
@@ -82,6 +94,8 @@ class NotificationServiceImplTest {
                 new NotificationServiceImpl(
                         notificationRepository,
                         aggregationRepository,
+                        feedRepository,
+                        seenStateRepository,
                         typePolicy,
                         new NotificationProperties(WINDOW, Duration.ofMinutes(30), 2),
                         notificationMapper,
@@ -481,6 +495,90 @@ class NotificationServiceImplTest {
         assertThat(rewritten).isEqualTo(5);
         verify(aggregationRepository, times(3)).resyncActorVerified(actorId, true, 2);
         verify(transactionManager, times(3)).commit(any());
+    }
+
+    @Test
+    void getState_neverOpened_countsEveryVisibleRowAndHasNoWatermarks() {
+        UUID userId = UUID.randomUUID();
+        when(seenStateRepository.find(userId)).thenReturn(Optional.empty());
+        when(feedRepository.countUnseen(userId, null)).thenReturn(100L);
+        when(socialService.summarizePendingFollowRequests(userId, 2, 100))
+                .thenReturn(new PendingFollowRequestSummary(0, List.of()));
+
+        NotificationStateResponse state = service.getState(userId);
+
+        assertThat(state.unseen().count()).isEqualTo(99);
+        assertThat(state.unseen().capped()).isTrue();
+        assertThat(state.seen()).isNull();
+        assertThat(state.previous()).isNull();
+        assertThat(state.followRequests()).isEqualTo(FollowRequestSummaryResponse.NONE);
+    }
+
+    @Test
+    void getState_pendingRequests_summarisesCountAndNewestRequesters() {
+        UUID userId = UUID.randomUUID();
+        UUID newest = UUID.randomUUID();
+        UUID next = UUID.randomUUID();
+        Key seen = new Key(OffsetDateTime.now(ZoneOffset.UTC), UUID.randomUUID());
+        when(seenStateRepository.find(userId)).thenReturn(Optional.of(new SeenState(seen, seen)));
+        when(feedRepository.countUnseen(userId, seen)).thenReturn(3L);
+        when(socialService.summarizePendingFollowRequests(userId, 2, 100))
+                .thenReturn(new PendingFollowRequestSummary(5, List.of(newest, next)));
+        when(userSummaryService.loadSummaries(List.of(newest, next)))
+                .thenReturn(Map.of(newest, summary(newest, false), next, summary(next, true)));
+
+        NotificationStateResponse state = service.getState(userId);
+
+        assertThat(state.unseen()).isEqualTo(new UnseenCountResponse(3, false));
+        assertThat(state.seen())
+                .isEqualTo(new NotificationKeyResponse(seen.activityAt(), seen.id()));
+        assertThat(state.followRequests().count()).isEqualTo(5);
+        assertThat(state.followRequests().recent())
+                .extracting(UserSummaryResponse::id)
+                .containsExactly(newest, next);
+    }
+
+    @Test
+    void advanceSeen_rowOfTheCaller_advancesAndPublishesTheSeenEvent() {
+        UUID userId = UUID.randomUUID();
+        Key key = new Key(OffsetDateTime.now(ZoneOffset.UTC), UUID.randomUUID());
+        when(seenStateRepository.advance(
+                        userId, key.activityAt(), key.id(), Duration.ofMinutes(30)))
+                .thenReturn(Optional.of(new SeenState(key, null)));
+        when(feedRepository.countUnseen(userId, key)).thenReturn(0L);
+        when(socialService.summarizePendingFollowRequests(any(), anyInt(), anyInt()))
+                .thenReturn(new PendingFollowRequestSummary(0, List.of()));
+
+        NotificationStateResponse state =
+                service.advanceSeen(userId, new AdvanceSeenRequest(key.activityAt(), key.id()));
+
+        assertThat(state.unseen().count()).isZero();
+        verify(outboxService)
+                .enqueue(
+                        eq(NotificationEventTypes.NOTIFICATION_SEEN_V1),
+                        eq(NotificationEventTypes.NOTIFICATION_SEEN_V1),
+                        eq("notification"),
+                        eq(userId),
+                        eq(userId),
+                        argThat(data -> userId.toString().equals(data.get("recipientId"))));
+    }
+
+    @Test
+    void advanceSeen_rowOfAnotherAccount_isForbiddenAndPublishesNothing() {
+        UUID userId = UUID.randomUUID();
+        when(seenStateRepository.advance(any(), any(), any(), any())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(
+                        () ->
+                                service.advanceSeen(
+                                        userId,
+                                        new AdvanceSeenRequest(
+                                                OffsetDateTime.now(ZoneOffset.UTC),
+                                                UUID.randomUUID())))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.FORBIDDEN);
+        verifyNoInteractions(outboxService);
     }
 
     private static UserSummaryResponse summary(UUID id, boolean verified) {

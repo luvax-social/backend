@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- A per-account seen watermark that advances only to notifications the client actually rendered, never moves backwards, and rotates the boundary of the new section only after a pause between visits, so the new section survives a reload.
+- A notification badge count bounded at 99+ that reads at most 100 rows however large the backlog, and a summary of pending follow requests for the pinned entry above the feed.
 - Post likes now produce a notification, grouped per post, and every like, comment like, story view and follow joins one group per target for 24 hours from its first actor, moving it to the top and marking it unread again when a new actor joins.
 - Unliking a post or comment, unfollowing, cancelling or rejecting a follow request and blocking an account now withdraw that actor from the notifications they produced, without moving or re-alerting what remains; approving a request turns it into a follow notification in place.
 - Granting or revoking a verified badge rewrites the verified-actor flag on that account's notifications in bounded background batches.
@@ -849,6 +851,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- Repository tests for the seen watermark (monotonic advance, clamp, session rotation, ownership) and for the feed reads (visibility under blocks and account status, bounded count, head, keyset pagination per filter, and the index each filter uses).
 - Repository tests for group open, join, window close, retraction, concurrent first actors, request conversion, block cleanup and the batched verified resync, and unit tests for the post like consumer, the retired-queue cleaner and the type policy.
 - A migration test that carries every pre-overhaul notification shape through the overhaul migrations and asserts the archive, the aggregation, the actor counts, the moderation links, the seen watermark and the index swap.
 - Media upload URL coverage now verifies that CDN object URLs preserve the HTTPS scheme.

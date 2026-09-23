@@ -35,6 +35,7 @@ import com.app.modules.report.enums.ReportType;
 import com.app.modules.report.service.ReportedTargetService;
 import com.app.modules.social.dto.response.FollowRequestResponse;
 import com.app.modules.social.dto.response.FollowResponse;
+import com.app.modules.social.dto.response.PendingFollowRequestSummary;
 import com.app.modules.social.entity.Block;
 import com.app.modules.social.entity.BlockId;
 import com.app.modules.social.entity.Follow;
@@ -592,6 +593,33 @@ public class SocialServiceImpl implements SocialService {
         return followRepository
                 .findById(new FollowId(followerId, followingId))
                 .map(Follow::getStatus);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PendingFollowRequestSummary summarizePendingFollowRequests(
+            UUID userId, int recentLimit, int countLimit) {
+        long count = followRepository.countPendingRequestsUpTo(userId, countLimit);
+        if (count == 0) {
+            return new PendingFollowRequestSummary(0, List.of());
+        }
+        List<UUID> recent =
+                followRepository
+                        .findFirstPendingRequests(userId, PageRequest.of(0, recentLimit))
+                        .stream()
+                        .map(follow -> follow.getId().getFollowerId())
+                        .toList();
+        return new PendingFollowRequestSummary(count, recent);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findPendingRequesters(UUID userId, Collection<UUID> candidateIds) {
+        if (candidateIds == null || candidateIds.isEmpty()) {
+            return Set.of();
+        }
+        return new HashSet<>(
+                followRepository.findPendingRequesterIdsAmong(userId, Set.copyOf(candidateIds)));
     }
 
     @Override
