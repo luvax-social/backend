@@ -1,11 +1,15 @@
 package com.app.modules.notification.service;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import com.app.common.response.CursorPageResponse;
 import com.app.modules.notification.dto.request.AdvanceSeenRequest;
+import com.app.modules.notification.dto.response.NotificationItemResponse;
+import com.app.modules.notification.dto.response.NotificationPageResponse;
 import com.app.modules.notification.dto.response.NotificationResponse;
 import com.app.modules.notification.dto.response.NotificationStateResponse;
+import com.app.modules.notification.entity.enums.NotificationFilter;
 import com.app.modules.notification.entity.enums.NotificationType;
 
 public interface NotificationService {
@@ -139,6 +143,35 @@ public interface NotificationService {
      *     caller's
      */
     NotificationStateResponse advanceSeen(UUID userId, AdvanceSeenRequest request);
+
+    /**
+     * Returns one page of the caller's activity feed for a filter, newest first, every row
+     * hydrated.
+     *
+     * <p>Pending follow requests are never rows, under any filter. The first page carries {@code
+     * head}. Each row is marked new when it is above the watermark bounding this visit's new
+     * section; the client never decides that from its own clock.
+     *
+     * @param userId the caller
+     * @param filter the chip
+     * @param cursor the previous page's end cursor; null for the first page
+     * @param limit rows per page
+     * @return the page
+     * @throws com.app.common.exception.AppException {@code INVALID_CURSOR} for a malformed cursor
+     */
+    NotificationPageResponse listFeed(
+            UUID userId, NotificationFilter filter, String cursor, int limit);
+
+    /**
+     * Returns one notification of the caller's, hydrated exactly as on a page, if it is still
+     * visible to them; for the live push.
+     *
+     * @param userId the recipient
+     * @param notificationId the notification
+     * @return the item, or empty when it is deleted, not the caller's, or hidden by a block or
+     *     account status
+     */
+    Optional<NotificationItemResponse> findItem(UUID userId, UUID notificationId);
 
     /**
      * Marks the notification as read. Throws {@link com.app.common.exception.AppException} with

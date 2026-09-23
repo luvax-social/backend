@@ -78,6 +78,7 @@ class NotificationServiceImplTest {
     @Mock private NotificationAggregationRepository aggregationRepository;
     @Mock private NotificationFeedRepository feedRepository;
     @Mock private NotificationSeenStateRepository seenStateRepository;
+    @Mock private NotificationItemAssembler itemAssembler;
     @Mock private NotificationTypePolicy typePolicy;
     @Mock private NotificationMapper notificationMapper;
     @Mock private OutboxService outboxService;
@@ -96,6 +97,7 @@ class NotificationServiceImplTest {
                         aggregationRepository,
                         feedRepository,
                         seenStateRepository,
+                        itemAssembler,
                         typePolicy,
                         new NotificationProperties(WINDOW, Duration.ofMinutes(30), 2),
                         notificationMapper,

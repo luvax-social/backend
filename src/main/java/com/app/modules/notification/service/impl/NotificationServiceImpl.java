@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.domain.PageRequest;
@@ -27,12 +28,15 @@ import com.app.common.response.UserSummaryResponse;
 import com.app.modules.notification.config.NotificationProperties;
 import com.app.modules.notification.dto.request.AdvanceSeenRequest;
 import com.app.modules.notification.dto.response.FollowRequestSummaryResponse;
+import com.app.modules.notification.dto.response.NotificationItemResponse;
 import com.app.modules.notification.dto.response.NotificationKeyResponse;
+import com.app.modules.notification.dto.response.NotificationPageResponse;
 import com.app.modules.notification.dto.response.NotificationResponse;
 import com.app.modules.notification.dto.response.NotificationStateResponse;
 import com.app.modules.notification.dto.response.UnseenCountResponse;
 import com.app.modules.notification.entity.Notification;
 import com.app.modules.notification.entity.enums.NotificationCategory;
+import com.app.modules.notification.entity.enums.NotificationFilter;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.mapper.NotificationMapper;
 import com.app.modules.notification.messaging.NotificationEventTypes;
@@ -40,6 +44,7 @@ import com.app.modules.notification.repository.NotificationAggregationRepository
 import com.app.modules.notification.repository.NotificationAggregationRepository.GroupWrite;
 import com.app.modules.notification.repository.NotificationAggregationRepository.Removal;
 import com.app.modules.notification.repository.NotificationFeedRepository;
+import com.app.modules.notification.repository.NotificationFeedRepository.FeedRow;
 import com.app.modules.notification.repository.NotificationFeedRepository.Key;
 import com.app.modules.notification.repository.NotificationRepository;
 import com.app.modules.notification.repository.NotificationSeenStateRepository;
@@ -62,6 +67,7 @@ public class NotificationServiceImpl implements NotificationService {
     private final NotificationAggregationRepository aggregationRepository;
     private final NotificationFeedRepository feedRepository;
     private final NotificationSeenStateRepository seenStateRepository;
+    private final NotificationItemAssembler itemAssembler;
     private final NotificationTypePolicy typePolicy;
     private final NotificationProperties properties;
     private final NotificationMapper notificationMapper;
@@ -76,6 +82,7 @@ public class NotificationServiceImpl implements NotificationService {
             NotificationAggregationRepository aggregationRepository,
             NotificationFeedRepository feedRepository,
             NotificationSeenStateRepository seenStateRepository,
+            NotificationItemAssembler itemAssembler,
             NotificationTypePolicy typePolicy,
             NotificationProperties properties,
             NotificationMapper notificationMapper,
@@ -88,6 +95,7 @@ public class NotificationServiceImpl implements NotificationService {
         this.aggregationRepository = aggregationRepository;
         this.feedRepository = feedRepository;
         this.seenStateRepository = seenStateRepository;
+        this.itemAssembler = itemAssembler;
         this.typePolicy = typePolicy;
         this.properties = properties;
         this.notificationMapper = notificationMapper;
@@ -254,6 +262,59 @@ public class NotificationServiceImpl implements NotificationService {
                         .orElseThrow(() -> new AppException(ApiErrorCode.FORBIDDEN));
         enqueue(NotificationEventTypes.NOTIFICATION_SEEN_V1, userId, userId, recipientData(userId));
         return toState(userId, advanced);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public NotificationPageResponse listFeed(
+            UUID userId, NotificationFilter filter, String cursor, int limit) {
+        Cursor decoded = decodeCursor(cursor);
+        Key before =
+                decoded == null
+                        ? null
+                        : new Key(TimeCursors.fromMicros(decoded.sortValueMicros()), decoded.id());
+        List<FeedRow> rows = feedRepository.findPage(userId, filter, before, limit + 1);
+        boolean hasNextPage = rows.size() > limit;
+        if (hasNextPage) {
+            rows = rows.subList(0, limit);
+        }
+        SeenState seenState = seenStateRepository.find(userId).orElse(SeenState.NONE);
+        List<NotificationItemResponse> content =
+                itemAssembler.assemble(userId, rows, seenState.previous());
+        CursorPageResponse.PageInfo pageInfo =
+                CursorPageResponse.PageInfo.builder()
+                        .hasNextPage(hasNextPage)
+                        .hasPreviousPage(cursor != null)
+                        .startCursor(rows.isEmpty() ? null : encodeCursor(rows.get(0)))
+                        .endCursor(rows.isEmpty() ? null : encodeCursor(rows.get(rows.size() - 1)))
+                        .build();
+        NotificationKeyResponse head =
+                cursor == null ? toKeyResponse(feedRepository.findHead(userId).orElse(null)) : null;
+        return new NotificationPageResponse(content, pageInfo, false, head);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<NotificationItemResponse> findItem(UUID userId, UUID notificationId) {
+        return feedRepository
+                .findVisible(userId, notificationId)
+                .map(
+                        row ->
+                                itemAssembler
+                                        .assemble(
+                                                userId,
+                                                List.of(row),
+                                                seenStateRepository
+                                                        .find(userId)
+                                                        .orElse(SeenState.NONE)
+                                                        .previous())
+                                        .get(0));
+    }
+
+    private static String encodeCursor(FeedRow row) {
+        return CursorCodec.encode(
+                new Cursor(TimeCursors.toMicros(row.activityAt()), row.id()),
+                CursorScope.NOTIFICATIONS);
     }
 
     private NotificationStateResponse toState(UUID userId, SeenState seenState) {
