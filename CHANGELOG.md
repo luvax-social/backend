@@ -534,6 +534,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - Startup now fails with a clear message when `app.turnstile.verify-url` (`TURNSTILE_VERIFY_URL`) is not an absolute http or https URL, instead of every sign-in failing its challenge at runtime.
 - Draining the seed's replayed like and comment events after a seed run no longer writes every seeded notification a second time with the current date.
 - The OAuth2 code exchange endpoint had no per-caller rate limit under the base configuration, which both deployment profiles had set but the base file had omitted.
+- The recommendation feedback consumer now discards feedback for a user or post that no longer exists instead of retrying it forever.
 - The commit subject check now fails when it cannot resolve the revision range it was given, instead of reporting that all zero subjects were within the limit and exiting successfully.
 - Addressing a route with a method it does not support now answers `405` with an `Allow` header naming the methods it does, and the generated API document declares that response on every operation. It previously answered a generic `400`, which a client could not tell from a malformed request.
 - Every error response now declares its own JSON content type instead of negotiating one, so a request carrying an `Accept` header the API cannot satisfy receives its real status rather than an empty `500`. An unauthenticated call asking for XML returned `500` with no body.
