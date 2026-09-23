@@ -18,6 +18,10 @@
 # post.notification-consumer is held off for the notification reason above: SeedOutboxEmitter
 # replays post.liked.v1, and NotificationSeedWriter writes the like groups itself. The post index
 # consumer beside it stays enabled.
+# Holding a consumer off only lasts for the seed run: the replay stays queued and the next ordinary
+# start drains it. SeedOutboxBatchWriter therefore also records every replayed like and comment in
+# the inbox of the consumer that would notify on it, so that drain skips them instead of writing
+# every seeded like and comment notification a second time, and SeedRunner asserts it did.
 # mail is disabled for a different reason entirely: it writes no notifications row, so the
 # NOW()-stamping argument above does not apply to it. AuthMailEventConsumer dispatches through
 # whatever transport app.mail.transport resolves to - Resend in every environment now that the

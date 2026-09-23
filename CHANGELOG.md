@@ -331,6 +331,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- The seed pipeline writes the activity feed through the production aggregation path, with like, follow and story-view groups, platform notices linked to their audit rows, seen watermarks for every account, and showcase accounts covering every feed state including a 99+ badge.
 - `/topic/notifications.{userId}` now carries a typed envelope (`upserted`, `read-state`, `deleted`, `seen` or `requests`) with the feed state after the event, instead of a bare notification; a pending follow request arrives as `requests` and never as a row; this is a breaking change that ships together with the matching frontend.
 - `PATCH /api/v1/notifications/read-all` now requires an `upTo` bound and marks read only notifications the client rendered, returning how many changed.
 - A comment that mentions the account it answers now notifies that account once instead of twice.
@@ -523,6 +524,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Draining the seed's replayed like and comment events after a seed run no longer writes every seeded notification a second time with the current date.
 - The OAuth2 code exchange endpoint had no per-caller rate limit under the base configuration, which both deployment profiles had set but the base file had omitted.
 - The commit subject check now fails when it cannot resolve the revision range it was given, instead of reporting that all zero subjects were within the limit and exiting successfully.
 - Addressing a route with a method it does not support now answers `405` with an `Allow` header naming the methods it does, and the generated API document declares that response on every operation. It previously answered a generic `400`, which a client could not tell from a malformed request.
@@ -860,6 +862,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- Seed tests assert the aggregated feed shape, the showcase group sizes and badge states, and that every replayed like and comment is already handled by its notification consumer.
 - An end-to-end controller test of the feed contract, filters, head, watermark, read state, deletion, unavailable targets, blocked and inactive actors, moderation notices and the comment context endpoint.
 - Unit tests for the notification row assembler and each preview service's availability rules, and for the code-point-safe snippet helper.
 - Repository tests for the seen watermark (monotonic advance, clamp, session rotation, ownership) and for the feed reads (visibility under blocks and account status, bounded count, head, keyset pagination per filter, and the index each filter uses).

@@ -38,6 +38,8 @@ import com.app.common.seed.writer.SocialGraphSeedWriter;
 import com.app.common.seed.writer.StorySeedWriter;
 import com.app.common.seed.writer.UserSeedWriter;
 import com.app.modules.mail.service.MailService;
+import com.app.modules.notification.dto.response.UnseenCountResponse;
+import com.app.modules.notification.service.NotificationService;
 
 /**
  * Proves {@link StorySeedWriter}, {@link MessageSeedWriter}, {@link NotificationSeedWriter}, {@link
@@ -91,6 +93,7 @@ class DomainWritersSeedWriterIT {
     @MockitoBean private MailService mailService;
 
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private NotificationService notificationService;
     @Autowired private SeedResetService seedResetService;
     @Autowired private UserSeedWriter userSeedWriter;
     @Autowired private MediaSeedWriter mediaSeedWriter;
@@ -135,6 +138,7 @@ class DomainWritersSeedWriterIT {
         assertMessageLastMessageAtCorrectness();
         assertMessageNoStaleColumns();
         assertNotificationCreatedAtWritten();
+        assertNotificationFeedShaped();
         assertModerationReportIds(reportIds);
         assertAdminActionNeverPrecedesReport();
         assertAnalyticsBucketsClosedBeforeReferenceNow();
@@ -235,6 +239,98 @@ class DomainWritersSeedWriterIT {
                 jdbcTemplate.queryForObject(
                         "SELECT COUNT(*) FROM notifications WHERE type = 'warning'", Integer.class);
         assertThat(warningNotificationCount).isGreaterThanOrEqualTo(5);
+    }
+
+    // Rows are written through the production aggregation SQL, so the trigger-maintained count,
+    // the group timestamps and the moderation audit link must all hold exactly as they do live.
+    private void assertNotificationFeedShaped() {
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications n WHERE n.actor_count <>"
+                                        + " (SELECT COUNT(*) FROM notification_actors na"
+                                        + " WHERE na.notification_id = n.id)"))
+                .isZero();
+        assertThat(count("SELECT COUNT(*) FROM notifications WHERE type = 'message'")).isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications WHERE category = 'system'"
+                                        + " AND type <> 'support_ticket_update'"
+                                        + " AND admin_action_id IS NULL"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications WHERE category = 'system'"
+                                        + " AND (actor_id IS NOT NULL OR actor_count <> 0)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications WHERE type = 'follow'"
+                                        + " AND (entity_type IS NOT NULL OR entity_id IS NOT NULL)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications n JOIN notification_actors na"
+                                        + " ON na.notification_id = n.id"
+                                        + " WHERE na.acted_at < n.created_at"
+                                        + " OR na.acted_at > n.activity_at"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications WHERE aggregation_key IS NOT"
+                                        + " NULL AND (group_started_at <> created_at"
+                                        + " OR activity_at < group_started_at)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications WHERE read_at IS NOT NULL"
+                                        + " AND read_at < activity_at"))
+                .isZero();
+
+        UUID showcase = userId("sophieg.design");
+        List<Integer> likeGroupSizes =
+                jdbcTemplate.queryForList(
+                        "SELECT actor_count FROM notifications WHERE recipient_id = ?"
+                                + " AND type = 'like_post' AND deleted_at IS NULL"
+                                + " AND activity_at > ?",
+                        Integer.class,
+                        showcase,
+                        java.sql.Timestamp.from(REFERENCE_NOW.minus(Duration.ofDays(60))));
+        assertThat(likeGroupSizes).contains(1, 2, 3, 14);
+        assertThat(likeGroupSizes.stream().mapToInt(Integer::intValue).max().orElse(0))
+                .isGreaterThan(50);
+        assertThat(
+                        jdbcTemplate.queryForList(
+                                "SELECT actor_count FROM notifications WHERE recipient_id = ?"
+                                        + " AND type = 'follow' AND deleted_at IS NULL"
+                                        + " AND activity_at > ?",
+                                Integer.class,
+                                showcase,
+                                java.sql.Timestamp.from(REFERENCE_NOW.minus(Duration.ofDays(7)))))
+                .containsExactlyInAnyOrder(1, 5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications WHERE recipient_id = '"
+                                        + showcase
+                                        + "' AND deleted_at IS NOT NULL"))
+                .isEqualTo(1);
+
+        assertThat(count("SELECT COUNT(*) FROM notification_seen_states"))
+                .isEqualTo(count("SELECT COUNT(*) FROM users"));
+        UnseenCountResponse ordinary = notificationService.getState(showcase).unseen();
+        assertThat(ordinary.count()).isBetween(1, 99);
+        assertThat(ordinary.capped()).isFalse();
+        assertThat(notificationService.getState(userId("tucker.trailrunner")).unseen().capped())
+                .isTrue();
+    }
+
+    private int count(String sql) {
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class);
+        return value == null ? 0 : value;
+    }
+
+    private UUID userId(String username) {
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM users WHERE username = ?", UUID.class, username);
     }
 
     private void assertModerationReportIds(List<UUID> reportIds) {

@@ -51,7 +51,7 @@ import com.rabbitmq.client.Channel;
         matchIfMissing = false)
 public class CommentNotificationConsumer {
 
-    static final String CONSUMER_NAME = "comment-notification-consumer";
+    public static final String CONSUMER_NAME = "comment-notification-consumer";
 
     private static final Logger log = LoggerFactory.getLogger(CommentNotificationConsumer.class);
     private static final String ENTITY_TYPE = "comment";

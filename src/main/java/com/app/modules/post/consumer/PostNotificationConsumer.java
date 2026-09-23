@@ -54,7 +54,7 @@ import com.rabbitmq.client.Channel;
         matchIfMissing = false)
 public class PostNotificationConsumer {
 
-    static final String CONSUMER_NAME = "post-notification-consumer";
+    public static final String CONSUMER_NAME = "post-notification-consumer";
 
     private static final Logger log = LoggerFactory.getLogger(PostNotificationConsumer.class);
     private static final String ENTITY_TYPE = "post";
