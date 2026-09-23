@@ -331,6 +331,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- The WebSocket guide describes the typed notification live events in place of the retired `notification.created.v1` frame.
 - The notification data rules, the dependency sections of the post, comment, story, admin, support, message, social and users modules, the global counter and soft-delete tables, the structure document and the reference schema now describe the aggregated activity feed through V123.
 - The seed pipeline writes the activity feed through the production aggregation path, with like, follow and story-view groups, platform notices linked to their audit rows, seen watermarks for every account, and showcase accounts covering every feed state including a 99+ badge.
 - `/topic/notifications.{userId}` now carries a typed envelope (`upserted`, `read-state`, `deleted`, `seen` or `requests`) with the feed state after the event, instead of a bare notification; a pending follow request arrives as `requests` and never as a row; this is a breaking change that ships together with the matching frontend.
@@ -871,6 +872,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- The banned-hashtag restore test counts the notification outbox event by its current type, `notification.upserted.v1`.
 - A unit test asserts every live fanout queue auto-deletes and carries the idle expiry.
 - An integration test drives the post like notification consumer against a real database: group join, redelivery, stale likes, retraction, emptied groups and invalid payloads.
 - Unit tests for the warning notice consumer cover the audit link, duplicate delivery, invalid payloads, retries and dead-lettering.
