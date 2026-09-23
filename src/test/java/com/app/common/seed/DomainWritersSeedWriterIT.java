@@ -294,6 +294,16 @@ class DomainWritersSeedWriterIT {
                                         + " AND read_at < activity_at"))
                 .isZero();
 
+        // Nothing is dated after the seed clock: a future row would outrank every live one.
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "SELECT COUNT(*) FROM notifications WHERE activity_at > ?"
+                                        + " OR created_at > ?",
+                                Integer.class,
+                                java.sql.Timestamp.from(REFERENCE_NOW),
+                                java.sql.Timestamp.from(REFERENCE_NOW)))
+                .isZero();
+
         UUID showcase = userId("sophieg.design");
         List<Integer> likeGroupSizes =
                 jdbcTemplate.queryForList(

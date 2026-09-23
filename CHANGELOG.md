@@ -525,6 +525,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The seeded showcase like group no longer ends in the future: its members are spread within the fifty minutes before the seed clock, so live notifications sort above it.
 - A seed run no longer fails its coverage check on the retired `message` notification category, which no producer writes since direct messages left the activity feed.
 - The recommendation guide now gives the seeded accounts' real password.
 - Startup now fails with a clear message when `app.turnstile.verify-url` (`TURNSTILE_VERIFY_URL`) is not an absolute http or https URL, instead of every sign-in failing its challenge at runtime.

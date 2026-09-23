@@ -557,7 +557,9 @@ public class NotificationSeedWriter {
         }
     }
 
-    // Members act a few minutes apart, so the newest actor is the last in the list.
+    // Members are spread evenly over fifty minutes from the start, so the newest actor is the last
+    // in the list and even the largest group ends before the seed clock: a row in the future would
+    // sit above every live row and above any watermark a client could advance to.
     private static void addGroup(
             List<Event> shaped,
             Set<String> reserved,
@@ -567,7 +569,7 @@ public class NotificationSeedWriter {
             UUID postId,
             Instant start,
             boolean read) {
-        long spacingSeconds = Math.max(60, Duration.ofMinutes(50).toSeconds() / actors.size());
+        long spacingSeconds = Math.max(1, Duration.ofMinutes(50).toSeconds() / actors.size());
         for (int i = 0; i < actors.size(); i++) {
             NotificationDraft draft =
                     type == NotificationType.FOLLOW
