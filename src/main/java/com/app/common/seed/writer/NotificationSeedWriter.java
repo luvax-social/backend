@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import com.app.common.seed.time.SeedTimeline;
+import com.app.modules.notification.entity.enums.NotificationType;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -99,8 +100,8 @@ public class NotificationSeedWriter {
 
     private static final String INSERT_NOTIFICATION_SQL =
             "INSERT INTO notifications (id, recipient_id, actor_id, type, entity_type, entity_id,"
-                    + " post_id, is_read, read_at, created_at) VALUES (?, ?, ?, ?::notification_type,"
-                    + " ?, ?, ?, ?, ?, ?)";
+                    + " post_id, category, read_at, created_at, activity_at) VALUES (?, ?, ?,"
+                    + " ?::notification_type, ?, ?, ?, ?::notification_category, ?, ?, ?)";
 
     private final JdbcTemplate jdbc;
 
@@ -174,8 +175,9 @@ public class NotificationSeedWriter {
                         candidate.entityType(),
                         candidate.entityId(),
                         candidate.postId(),
-                        isRead,
+                        NotificationType.fromJson(candidate.type()).category().toJson(),
                         readAt == null ? null : Timestamp.from(readAt),
+                        Timestamp.from(candidate.createdAt()),
                         Timestamp.from(candidate.createdAt())
                     });
         }
@@ -711,13 +713,14 @@ public class NotificationSeedWriter {
         } else {
             ps.setObject(7, row[6]);
         }
-        ps.setBoolean(8, (Boolean) row[7]);
+        ps.setString(8, (String) row[7]);
         if (row[8] == null) {
             ps.setNull(9, Types.TIMESTAMP_WITH_TIMEZONE);
         } else {
             ps.setTimestamp(9, (Timestamp) row[8]);
         }
         ps.setTimestamp(10, (Timestamp) row[9]);
+        ps.setTimestamp(11, (Timestamp) row[10]);
     }
 
     private record Candidate(

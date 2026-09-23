@@ -100,6 +100,7 @@ public class NotificationServiceImpl implements NotificationService {
                         .recipientId(recipientId)
                         .actorId(actorId)
                         .type(type)
+                        .category(type.category())
                         .entityType(entityType)
                         .entityId(entityId)
                         .postId(postId)
@@ -128,8 +129,7 @@ public class NotificationServiceImpl implements NotificationService {
                 notificationRepository
                         .findByIdAndRecipientId(notificationId, recipientId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.FORBIDDEN));
-        if (!notification.isRead()) {
-            notification.setRead(true);
+        if (notification.getReadAt() == null) {
             notification.setReadAt(OffsetDateTime.now(ZoneOffset.UTC));
             notificationRepository.save(notification);
         }

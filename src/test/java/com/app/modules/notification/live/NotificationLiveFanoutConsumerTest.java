@@ -78,6 +78,7 @@ class NotificationLiveFanoutConsumerTest {
                         .recipientId(recipientId)
                         .actorId(actorId)
                         .type(NotificationType.FOLLOW)
+                        .category(NotificationType.FOLLOW.category())
                         .build();
         when(notificationRepository.findById(notificationId)).thenReturn(Optional.of(notification));
         UserSummaryResponse actor =
@@ -124,6 +125,7 @@ class NotificationLiveFanoutConsumerTest {
                         .recipientId(recipientId)
                         .actorId(actorId)
                         .type(NotificationType.MENTION_POST)
+                        .category(NotificationType.MENTION_POST.category())
                         .build();
         when(notificationRepository.findById(notificationId)).thenReturn(Optional.of(notification));
         when(blockRepository.existsBetween(actorId, recipientId)).thenReturn(true);

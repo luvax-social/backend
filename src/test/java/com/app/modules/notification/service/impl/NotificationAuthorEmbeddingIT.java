@@ -163,9 +163,9 @@ class NotificationAuthorEmbeddingIT {
         UUID recipient = insertUser("notif_recipient4", false);
         UUID notificationId =
                 jdbcTemplate.queryForObject(
-                        "INSERT INTO notifications(recipient_id, type, entity_type, entity_id,"
-                                + " message, created_at) VALUES (?, 'post_removed', 'post', ?, ?,"
-                                + " ?) RETURNING id",
+                        "INSERT INTO notifications(recipient_id, type, category, entity_type,"
+                                + " entity_id, message, created_at) VALUES (?, 'post_removed',"
+                                + " 'system', 'post', ?, ?, ?) RETURNING id",
                         UUID.class,
                         recipient,
                         UUID.randomUUID(),
@@ -201,8 +201,8 @@ class NotificationAuthorEmbeddingIT {
 
     private UUID insertNotification(UUID recipientId, UUID actorId, OffsetDateTime createdAt) {
         return jdbcTemplate.queryForObject(
-                "INSERT INTO notifications(recipient_id, actor_id, type, created_at)"
-                        + " VALUES (?, ?, 'follow', ?) RETURNING id",
+                "INSERT INTO notifications(recipient_id, actor_id, type, category, created_at)"
+                        + " VALUES (?, ?, 'follow', 'follow', ?) RETURNING id",
                 UUID.class,
                 recipientId,
                 actorId,

@@ -35,6 +35,7 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     @Query(
             value =
                     "SELECT * FROM notifications WHERE recipient_id = :recipientId "
+                            + "AND deleted_at IS NULL "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
                             + " WHERE (b.blocker_id = :recipientId AND b.blocked_id = notifications.actor_id)"
                             + " OR (b.blocker_id = notifications.actor_id AND b.blocked_id = :recipientId)) "
@@ -62,6 +63,7 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     @Query(
             value =
                     "SELECT * FROM notifications WHERE recipient_id = :recipientId "
+                            + "AND deleted_at IS NULL "
                             + "AND (created_at, id) < (:cursorTime, :cursorId) "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
                             + " WHERE (b.blocker_id = :recipientId AND b.blocked_id = notifications.actor_id)"
@@ -85,7 +87,7 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     @Query(
             value =
                     "SELECT COUNT(*) FROM notifications WHERE recipient_id = :recipientId "
-                            + "AND is_read = false "
+                            + "AND read_at IS NULL AND deleted_at IS NULL "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
                             + " WHERE (b.blocker_id = :recipientId AND b.blocked_id = notifications.actor_id)"
                             + " OR (b.blocker_id = notifications.actor_id AND b.blocked_id = :recipientId))",
@@ -101,7 +103,7 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     /** Marks all unread notifications for the recipient as read in a single bulk update. */
     @Modifying
     @Query(
-            "UPDATE Notification n SET n.isRead = true, n.readAt = :now "
-                    + "WHERE n.recipientId = :recipientId AND n.isRead = false")
+            "UPDATE Notification n SET n.readAt = :now "
+                    + "WHERE n.recipientId = :recipientId AND n.readAt IS NULL")
     int markAllAsRead(@Param("recipientId") UUID recipientId, @Param("now") OffsetDateTime now);
 }

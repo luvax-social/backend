@@ -2,6 +2,7 @@ package com.app.modules.notification.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -162,6 +163,7 @@ class NotificationControllerIT {
                                 .recipientId(userA.getId())
                                 .actorId(userB.getId())
                                 .type(NotificationType.COMMENT_POST)
+                                .category(NotificationType.COMMENT_POST.category())
                                 .entityType("comment")
                                 .entityId(UUID.randomUUID())
                                 .postId(postId)
@@ -199,7 +201,6 @@ class NotificationControllerIT {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         Notification reloaded = notificationRepository.findById(n.getId()).orElseThrow();
-        assertThat(reloaded.isRead()).isTrue();
         assertThat(reloaded.getReadAt()).isNotNull();
     }
 
@@ -278,7 +279,8 @@ class NotificationControllerIT {
                         .recipientId(userA.getId())
                         .actorId(userB.getId())
                         .type(NotificationType.FOLLOW)
-                        .isRead(true)
+                        .category(NotificationType.FOLLOW.category())
+                        .readAt(OffsetDateTime.now())
                         .build());
         seedFollow(userA.getId(), userB.getId());
         seedFollow(userA.getId(), userB.getId());
@@ -321,6 +323,7 @@ class NotificationControllerIT {
                         .recipientId(recipientId)
                         .actorId(actorId)
                         .type(NotificationType.FOLLOW)
+                        .category(NotificationType.FOLLOW.category())
                         .build());
     }
 

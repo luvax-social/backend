@@ -144,8 +144,9 @@ class NotificationKeysetRowLossIT {
     private UUID insertNotification(UUID recipientId, OffsetDateTime createdAt) {
         return jdbcClient
                 .sql(
-                        "INSERT INTO notifications(recipient_id, type, created_at)"
-                                + " VALUES (:recipientId, 'follow', :createdAt) RETURNING id")
+                        "INSERT INTO notifications(recipient_id, type, category, created_at)"
+                                + " VALUES (:recipientId, 'follow', 'follow', :createdAt)"
+                                + " RETURNING id")
                 .param("recipientId", recipientId)
                 .param("createdAt", createdAt)
                 .query(UUID.class)
@@ -156,9 +157,9 @@ class NotificationKeysetRowLossIT {
             UUID recipientId, UUID actorId, OffsetDateTime createdAt) {
         return jdbcClient
                 .sql(
-                        "INSERT INTO notifications(recipient_id, actor_id, type, created_at)"
-                                + " VALUES (:recipientId, :actorId, 'follow', :createdAt) RETURNING"
-                                + " id")
+                        "INSERT INTO notifications(recipient_id, actor_id, type, category,"
+                                + " created_at) VALUES (:recipientId, :actorId, 'follow',"
+                                + " 'follow', :createdAt) RETURNING id")
                 .param("recipientId", recipientId)
                 .param("actorId", actorId)
                 .param("createdAt", createdAt)

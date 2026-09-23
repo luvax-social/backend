@@ -319,6 +319,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- Notifications gain a feed sort key that moves when a group gains an actor, a filter category, soft delete, actor membership for aggregated groups, a per-user seen watermark and a link to the moderation decision behind each notice; existing likes, comment likes, story views and follows are collapsed into one group per target and day, direct-message notifications leave the feed, and every original row is archived first.
 - Seeded post media is drawn from 631 assets rather than 165, so the worst-repeated image now appears in three posts instead of sixteen and every reference still matches its post's topic.
 - A seeded verification request now lands on an account whose profession matches the claim, and an approved request actually grants the badge it approved; previously the subject was chosen at random and an approval left no badge behind it.
 - A Cloudflare outage no longer blocks authentication: the six new surfaces allow a request through when the verification service cannot be reached, because each already carries a per-caller rate limit as its real defence.
@@ -713,6 +714,7 @@ A conversation that already has messages in it is kept, because unfollowing some
 - `CustomOidcUserService.resolveUniqueUsername` random-suffix branch now re-checks uniqueness via `ThreadLocalRandom` and a bounded retry loop, preventing the rare unique-constraint violation that previously surfaced as a 500.
 
 ### Removed
+- The redundant `is_read` notification column, whose value is fully carried by `read_at`, and three notification indexes superseded by the new feed indexes.
 - Mail campaigns, along with the administrator composer, the scheduled sender, the read-only Markdown samples and the per-account campaign email opt-out. Account, security, moderation and support mail are unaffected, and the send log that records every delivery attempt is unchanged.
 - The `ci-test.yml` CI workflow, which had been unintentionally disabled and was reporting a permanent failure on every push and pull request; its coverage was already fully subsumed by `sonarcloud.yml`.
 - The local SMTP mail transport and its Mailpit sink.
@@ -838,6 +840,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- A migration test that carries every pre-overhaul notification shape through the overhaul migrations and asserts the archive, the aggregation, the actor counts, the moderation links, the seen watermark and the index swap.
 - Media upload URL coverage now verifies that CDN object URLs preserve the HTTPS scheme.
 - The post index-sync integration tests now stub the Gorse recommender client, which is an external HTTP service with no container in those tests; left real, every post upsert failed on a refused connection and nothing reached Elasticsearch.
 - Coverage proving the anonymous appeal status read never carries the staff-only note, never consumes its token, and answers every negative case identically.

@@ -20,10 +20,6 @@ public interface NotificationMapper {
      */
     @Mapping(source = "notification.id", target = "id")
     @Mapping(source = "actor", target = "actor")
-    // Explicit because a boolean field and record component both named isRead resolve to
-    // different property names under MapStruct's bean-property convention (source "read" via the
-    // Lombok-generated isRead() getter, target "isRead" via the record accessor of the same name),
-    // so the two sides never auto-match.
-    @Mapping(target = "isRead", expression = "java(notification.isRead())")
+    @Mapping(target = "isRead", expression = "java(notification.getReadAt() != null)")
     NotificationResponse toResponse(Notification notification, UserSummaryResponse actor);
 }

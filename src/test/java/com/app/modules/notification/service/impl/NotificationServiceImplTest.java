@@ -218,7 +218,8 @@ class NotificationServiceImplTest {
                         .id(notificationId)
                         .recipientId(recipientId)
                         .type(NotificationType.LIKE_POST)
-                        .isRead(true)
+                        .category(NotificationType.LIKE_POST.category())
+                        .readAt(OffsetDateTime.now())
                         .build();
         when(notificationRepository.findByIdAndRecipientId(notificationId, recipientId))
                 .thenReturn(Optional.of(notification));
@@ -237,7 +238,7 @@ class NotificationServiceImplTest {
                         .id(notificationId)
                         .recipientId(recipientId)
                         .type(NotificationType.LIKE_POST)
-                        .isRead(false)
+                        .category(NotificationType.LIKE_POST.category())
                         .build();
         when(notificationRepository.findByIdAndRecipientId(notificationId, recipientId))
                 .thenReturn(Optional.of(notification));
@@ -245,7 +246,6 @@ class NotificationServiceImplTest {
         service.markAsRead(notificationId, recipientId);
 
         verify(notificationRepository, times(1)).save(notification);
-        assertThat(notification.isRead()).isTrue();
         assertThat(notification.getReadAt()).isNotNull();
     }
 
@@ -443,6 +443,7 @@ class NotificationServiceImplTest {
                 .id(UUID.randomUUID())
                 .recipientId(UUID.randomUUID())
                 .type(NotificationType.FOLLOW)
+                .category(NotificationType.FOLLOW.category())
                 .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .build();
     }
