@@ -865,6 +865,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- An integration test drives the post like notification consumer against a real database: group join, redelivery, stale likes, retraction, emptied groups and invalid payloads.
 - Unit tests for the warning notice consumer cover the audit link, duplicate delivery, invalid payloads, retries and dead-lettering.
 - Seed tests assert the aggregated feed shape, the showcase group sizes and badge states, and that every replayed like and comment is already handled by its notification consumer.
 - An end-to-end controller test of the feed contract, filters, head, watermark, read state, deletion, unavailable targets, blocked and inactive actors, moderation notices and the comment context endpoint.
