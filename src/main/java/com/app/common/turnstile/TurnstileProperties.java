@@ -2,7 +2,11 @@ package com.app.common.turnstile;
 
 import java.time.Duration;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -14,14 +18,24 @@ import lombok.Setter;
  * test key in {@code dev}. An empty secret produces {@link TurnstileOutcome#UNAVAILABLE}, which the
  * public support form refuses on, so a deployment that forgets to configure the real key fails that
  * form closed instead of silently removing the control.
+ *
+ * <p>{@code verify-url} is validated at startup. A value that is not an absolute http or https URL
+ * - a site key pasted into the wrong variable, for instance - otherwise surfaces only at the first
+ * verification, where the fail-open policy on the auth surfaces hides it and every sign-in is
+ * refused as a failed challenge.
  */
 @ConfigurationProperties(prefix = "app.turnstile")
+@Validated
 @Getter
 @Setter
 public class TurnstileProperties {
 
     private String secretKey = "";
 
+    @NotBlank
+    @Pattern(
+            regexp = "https?://[^\\s/?#]+(/\\S*)?",
+            message = "must be an absolute http or https URL")
     private String verifyUrl = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
     /** Short: Cloudflare is on the critical path of a user-facing submit. */
