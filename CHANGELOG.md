@@ -331,6 +331,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- The notification data rules, the dependency sections of the post, comment, story, admin, support, message, social and users modules, the global counter and soft-delete tables, the structure document and the reference schema now describe the aggregated activity feed through V123.
 - The seed pipeline writes the activity feed through the production aggregation path, with like, follow and story-view groups, platform notices linked to their audit rows, seen watermarks for every account, and showcase accounts covering every feed state including a 99+ badge.
 - `/topic/notifications.{userId}` now carries a typed envelope (`upserted`, `read-state`, `deleted`, `seen` or `requests`) with the feed state after the event, instead of a bare notification; a pending follow request arrives as `requests` and never as a row; this is a breaking change that ships together with the matching frontend.
 - `PATCH /api/v1/notifications/read-all` now requires an `upTo` bound and marks read only notifications the client rendered, returning how many changed.
@@ -524,6 +525,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The recommendation guide now gives the seeded accounts' real password.
 - Startup now fails with a clear message when `app.turnstile.verify-url` (`TURNSTILE_VERIFY_URL`) is not an absolute http or https URL, instead of every sign-in failing its challenge at runtime.
 - Draining the seed's replayed like and comment events after a seed run no longer writes every seeded notification a second time with the current date.
 - The OAuth2 code exchange endpoint had no per-caller rate limit under the base configuration, which both deployment profiles had set but the base file had omitted.

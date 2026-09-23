@@ -137,7 +137,7 @@ A future reader must not re-derive the "counters are safe because they're viewer
 |------------|-----------|--------|
 | `auth` | inbound | Auth module owns the `users` row lifecycle (creation, status validation); users module manages profile fields on the same row |
 | `media` | outbound | `avatar_url` and `banner_url` are CDN URLs sourced from `media_assets`; relationship is by convention, not FK |
-| `notification` | inbound | Notification settings on `user_settings` are read by the notification module before dispatching |
+| `notification` | inbound | `UserNotificationPreferencesService` gives the notification module the `user_settings` toggles it checks before writing; `UserSummaryService` gives the actor summaries and the verified flag of a feed row |
 | `social` | outbound | `UserServiceImpl` calls `SocialService` for block gating, follow gating, and viewer relationship state |
 | `admin` | inbound | Moderation actions mutate `users.status` and write an `admin_actions` audit row |
 | all modules | outbound | `UserSummaryService` is the shared batch resolver for embedding user identity in any response |

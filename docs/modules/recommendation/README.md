@@ -192,7 +192,7 @@ Apply the generated SQL to a **fresh** application database, then wait one fit c
 python gorse/seed/seed.py verify --api-key "$GORSE_API_KEY"
 ```
 
-Every seeded account uses the password `Demo@Pass123` with emails of the form `<username>@seed.local`.
+Every seeded account uses the password `Password123!`, with the email address listed for it in `src/main/resources/seed/users.json`.
 The two demo accounts are `demo_an` (football, travel) and `demo_binh` (cooking, fashion).
 
 ### Rebuild Gorse from PostgreSQL

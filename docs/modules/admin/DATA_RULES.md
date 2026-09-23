@@ -131,7 +131,8 @@ These tables cannot be rebuilt from any other source if lost. `platform_stats` i
 |------------|-----------|--------|
 | `users` | inbound | `admin_id` and `target_user_id` reference `users.id`; admin actions mutate `users.status` |
 | `report` | inbound | `report_id` links an admin action to the report that prompted it; `report_reason_configs` supplies the reason keys a warning may cite |
-| `notification` | outbound | A warning enqueues `user.warned.v1`, which `AdminNotificationConsumer` turns into a `warning` notification |
+| `notification` | outbound | A warning enqueues `user.warned.v1` carrying `adminActionId`, which `AdminNotificationConsumer` turns into a `warning` notice; every other moderation notice is written synchronously by `AdminServiceImpl` with the moderator's reason and the audit row id, so the notice exists exactly when the decision does |
+| `notification` | inbound | `ModerationNoticeService` gives the notification feed the kind, date, text snippet and appeal eligibility of the audit row a notice reports, to the content's author only |
 | `post` | outbound | `remove_post` / `restore_post` actions mutate `posts.status` and `posts.deleted_at` |
 | `hashtag` | outbound | The five hashtag lifecycle actions mutate `hashtags.status` and purge `hashtag_trending`, through `HashtagLifecycleService`. The statistics snapshot also reads the most-used active hashtags live |
 | `recommendation` | inbound | The activity log reads `user_events`, which `recommendation` owns and is the sole writer of |
