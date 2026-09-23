@@ -34,6 +34,7 @@ import com.app.modules.admin.service.AdminService;
 import com.app.modules.comment.repository.CommentRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.notification.entity.enums.NotificationType;
+import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.repository.PostRepository;
@@ -420,8 +421,9 @@ public class AdminServiceImpl implements AdminService {
                     NotificationType.POST_RESTORED,
                     "post",
                     postId,
-                    null,
-                    request.reason());
+                    postId,
+                    request.reason(),
+                    action.id());
         } else {
             resolveLinkedReport(linkedReport, actorId, request.reason());
             notifySystem(
@@ -429,8 +431,9 @@ public class AdminServiceImpl implements AdminService {
                     NotificationType.POST_REMOVED,
                     "post",
                     postId,
-                    null,
-                    request.reason());
+                    postId,
+                    request.reason(),
+                    action.id());
             if (isMatchingPostReport(linkedReport, postId)
                     && !linkedReport.getReporterId().equals(result.ownerId())) {
                 notifySystem(
@@ -439,7 +442,8 @@ public class AdminServiceImpl implements AdminService {
                         "report",
                         linkedReport.getId(),
                         postId,
-                        null);
+                        null,
+                        action.id());
             }
         }
         return new ModerationOutcome(action, result.remainingBannedHashtags());
@@ -604,7 +608,8 @@ public class AdminServiceImpl implements AdminService {
                     "report",
                     reportId,
                     null,
-                    request.reason());
+                    request.reason(),
+                    action.id());
         }
         return action;
     }
@@ -731,7 +736,14 @@ public class AdminServiceImpl implements AdminService {
         if (recipientId == null) {
             return;
         }
-        notifySystem(recipientId, type, "admin_action", action.id(), null, request.reason());
+        notifySystem(
+                recipientId,
+                type,
+                "admin_action",
+                action.id(),
+                null,
+                request.reason(),
+                action.id());
     }
 
     private void notifySystem(
@@ -740,8 +752,11 @@ public class AdminServiceImpl implements AdminService {
             String entityType,
             UUID entityId,
             UUID postId,
-            String message) {
-        notificationService.create(null, recipientId, type, entityType, entityId, postId, message);
+            String message,
+            UUID adminActionId) {
+        notificationService.create(
+                NotificationDraft.systemNotice(
+                        recipientId, type, entityType, entityId, postId, message, adminActionId));
     }
 
     private CursorPageResponse<AdminActionSummaryResponse> toPage(

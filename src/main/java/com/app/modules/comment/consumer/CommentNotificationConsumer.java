@@ -2,8 +2,10 @@ package com.app.modules.comment.consumer;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -25,12 +27,14 @@ import com.app.common.messaging.config.ConsumerRetryProperties;
 import com.app.common.messaging.exception.PermanentMessageException;
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.modules.comment.messaging.CommentEventTypes;
+import com.app.modules.comment.repository.CommentLikeRepository;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.service.NotificationService;
 import com.rabbitmq.client.Channel;
 
 /**
- * RabbitMQ consumer that creates comment, reply, mention, and like notifications.
+ * RabbitMQ consumer that creates comment, reply, mention, and like notifications, and withdraws a
+ * like notification's actor on unlike.
  *
  * <p>The single notification producer for the comment module. Recipients are resolved from the
  * event {@code data} payload, not from the aggregate id. {@code NotificationService.create} already
@@ -56,16 +60,19 @@ public class CommentNotificationConsumer {
     private final ProcessedMessageService processedMessageService;
     private final NotificationService notificationService;
     private final ConsumerRetryProperties retryProperties;
+    private final CommentLikeRepository commentLikeRepository;
 
     public CommentNotificationConsumer(
             DomainEventMessageParser parser,
             ProcessedMessageService processedMessageService,
             NotificationService notificationService,
-            ConsumerRetryProperties retryProperties) {
+            ConsumerRetryProperties retryProperties,
+            CommentLikeRepository commentLikeRepository) {
         this.parser = parser;
         this.processedMessageService = processedMessageService;
         this.notificationService = notificationService;
         this.retryProperties = retryProperties;
+        this.commentLikeRepository = commentLikeRepository;
     }
 
     @RabbitListener(queues = RabbitMqTopologyConfig.COMMENT_NOTIFICATION_QUEUE)
@@ -119,37 +126,50 @@ public class CommentNotificationConsumer {
         switch (event.eventType()) {
             case CommentEventTypes.COMMENT_CREATED_V1 -> {
                 int depth = ((Number) data.get("depth")).intValue();
-                if (depth == 0) {
-                    notificationService.create(
-                            actor,
-                            uuid(data.get("postOwnerId")),
-                            NotificationType.COMMENT_POST,
-                            ENTITY_TYPE,
-                            commentId,
-                            postId);
-                } else {
-                    notificationService.create(
-                            actor,
-                            uuid(data.get("parentOwnerId")),
-                            NotificationType.REPLY_COMMENT,
-                            ENTITY_TYPE,
-                            commentId,
-                            postId);
-                }
+                UUID primaryRecipient =
+                        uuid(depth == 0 ? data.get("postOwnerId") : data.get("parentOwnerId"));
+                boolean primaryDelivered =
+                        primaryRecipient != null
+                                && notificationService.create(
+                                        actor,
+                                        primaryRecipient,
+                                        depth == 0
+                                                ? NotificationType.COMMENT_POST
+                                                : NotificationType.REPLY_COMMENT,
+                                        ENTITY_TYPE,
+                                        commentId,
+                                        postId);
+                // One notification per person per comment. The account the comment answers is
+                // already told by the comment or reply notification, so a mention of them in
+                // the same comment would say the same thing twice; a repeated handle is one
+                // mention. A mention still goes out when that primary notification was
+                // suppressed (by a toggle, for instance), so the account is told once.
+                Set<UUID> mentioned = new LinkedHashSet<>();
                 Object mentions = data.getOrDefault("mentionedUserIds", List.of());
                 if (mentions instanceof List<?> ids) {
                     for (Object mid : ids) {
-                        notificationService.create(
-                                actor,
-                                uuid(mid),
-                                NotificationType.MENTION_COMMENT,
-                                ENTITY_TYPE,
-                                commentId,
-                                postId);
+                        mentioned.add(uuid(mid));
                     }
                 }
+                if (primaryDelivered) {
+                    mentioned.remove(primaryRecipient);
+                }
+                for (UUID recipient : mentioned) {
+                    notificationService.create(
+                            actor,
+                            recipient,
+                            NotificationType.MENTION_COMMENT,
+                            ENTITY_TYPE,
+                            commentId,
+                            postId);
+                }
             }
-            case CommentEventTypes.COMMENT_LIKED_V1 ->
+            // Both like branches act on the like as it stands when the event is processed, not as
+            // the event described it, so a redelivered or reordered like/unlike pair converges:
+            // a like already withdrawn writes nothing, and an unlike already followed by a
+            // re-like retracts nothing.
+            case CommentEventTypes.COMMENT_LIKED_V1 -> {
+                if (commentLikeRepository.existsByIdUserIdAndIdCommentId(actor, commentId)) {
                     notificationService.create(
                             actor,
                             uuid(data.get("commentOwnerId")),
@@ -157,6 +177,17 @@ public class CommentNotificationConsumer {
                             ENTITY_TYPE,
                             commentId,
                             postId);
+                }
+            }
+            case CommentEventTypes.COMMENT_UNLIKED_V1 -> {
+                if (!commentLikeRepository.existsByIdUserIdAndIdCommentId(actor, commentId)) {
+                    notificationService.retract(
+                            actor,
+                            uuid(data.get("commentOwnerId")),
+                            NotificationType.LIKE_COMMENT,
+                            commentId);
+                }
+            }
             default -> {
                 // Not a notification-bearing event; ignore.
             }

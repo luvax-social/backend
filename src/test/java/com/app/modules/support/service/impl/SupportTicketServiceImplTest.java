@@ -33,6 +33,7 @@ import com.app.modules.admin.entity.AdminAction;
 import com.app.modules.admin.enums.AdminActionType;
 import com.app.modules.admin.repository.AdminActionRepository;
 import com.app.modules.admin.service.AdminActionRecorder;
+import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
 import com.app.modules.support.dto.request.InProductAppealRequest;
@@ -171,7 +172,7 @@ class SupportTicketServiceImplTest {
         assertThat(capturedFlushedTicket().getAdminActionId()).isEqualTo(ACTION_ID);
         // The collaborators that would mint a session are not even wired into this service, so the
         // property is structural: there is nothing here that could issue one.
-        verify(notificationService, never()).create(any(), any(), any(), any(), any(), any());
+        verify(notificationService, never()).create(any(NotificationDraft.class));
     }
 
     // The category travels inside the token, never from the request body. Otherwise the submitter

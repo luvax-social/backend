@@ -26,6 +26,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
+import com.app.common.outbox.service.OutboxService;
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.admin.dto.response.AdminActionResponse;
 import com.app.modules.admin.enums.AdminActionType;
@@ -71,6 +72,7 @@ class VerificationServiceImplTest {
     @Mock private NotificationService notificationService;
     @Mock private UserRepository userRepository;
     @Mock private UserSummaryService userSummaryService;
+    @Mock private OutboxService outboxService;
 
     private VerificationServiceImpl service;
 
@@ -89,7 +91,8 @@ class VerificationServiceImplTest {
                         adminActionRecorder,
                         notificationService,
                         userRepository,
-                        userSummaryService);
+                        userSummaryService,
+                        outboxService);
     }
 
     @Test

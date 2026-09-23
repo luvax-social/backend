@@ -26,4 +26,12 @@ public class CommentRabbitBindingConfig {
                 .to(socialEventsExchange)
                 .with(CommentEventTypes.COMMENT_LIKED_V1);
     }
+
+    @Bean
+    Binding commentUnlikedNotificationBinding(
+            Queue commentNotificationQueue, TopicExchange socialEventsExchange) {
+        return BindingBuilder.bind(commentNotificationQueue)
+                .to(socialEventsExchange)
+                .with(CommentEventTypes.COMMENT_UNLIKED_V1);
+    }
 }

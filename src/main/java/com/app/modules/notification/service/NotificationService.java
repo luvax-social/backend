@@ -9,26 +9,43 @@ import com.app.modules.notification.entity.enums.NotificationType;
 public interface NotificationService {
 
     /**
-     * Creates a notification for the recipient if all creation guards pass: actor is not the
-     * recipient, the recipient has the governing user-settings toggle enabled for the type, and the
-     * actor is not blocked by the recipient.
+     * Writes a notification if every guard passes, and publishes it to the recipient's live feed.
+     *
+     * <p>Guards, in order: the actor is not the recipient; the operator has not disabled the type
+     * in {@code notification_type_configs}; the recipient has not switched the type off in {@code
+     * user_settings}; the actor and recipient are not in a block either way. A platform notice has
+     * no actor, so only the operator switch applies to it: a warning, a removal notice and a
+     * support answer have no user toggle, because an account that could switch them off would be
+     * disciplined or answered without being told.
      *
      * <p>Toggle mapping: {@code FOLLOW}/{@code FOLLOW_REQUEST} check {@code notify_follows}, {@code
-     * LIKE_POST}/{@code LIKE_COMMENT} check {@code notify_likes}, {@code COMMENT_POST}/ {@code
+     * LIKE_POST}/{@code LIKE_COMMENT} check {@code notify_likes}, {@code COMMENT_POST}/{@code
      * REPLY_COMMENT} check {@code notify_comments}, {@code MENTION_POST}/{@code MENTION_COMMENT}
-     * check {@code notify_mentions}, and {@code MESSAGE} checks {@code notify_messages}. {@code
-     * STORY_VIEW} has no toggle and is never preference-suppressed.
+     * check {@code notify_mentions}, {@code MESSAGE} checks {@code notify_messages}; {@code
+     * STORY_VIEW} has no toggle.
      *
-     * @param actorId user who triggered the action; may be null for system notifications
-     * @param recipientId user who should receive the notification
-     * @param type notification type
-     * @param entityType polymorphic entity type; null for follow/follow_request
-     * @param entityId polymorphic entity id; null for follow/follow_request
-     * @param postId id of the post this notification concerns, so a client can open it directly
-     *     without resolving entityId to a post separately; null for non-content types and for
-     *     LIKE_POST/MENTION_POST notifications where entityId is already the post id
+     * <p>An aggregatable type ({@link NotificationType#isAggregatable()}) joins the recipient's
+     * open group for its target, which moves to the top of the feed and reads as unread and unseen
+     * again; an actor already in that group changes nothing. Every other type writes one row.
+     *
+     * @param draft the notification
+     * @return true when a row was written or a group gained the actor; false when a guard
+     *     suppressed it or the actor was already in the group
      */
-    void create(
+    boolean create(NotificationDraft draft);
+
+    /**
+     * Convenience for {@link #create(NotificationDraft)} with no message and no audit row.
+     *
+     * @param actorId user who acted; null for a platform notice
+     * @param recipientId user who is told
+     * @param type notification type
+     * @param entityType polymorphic target type; null when the target is the recipient
+     * @param entityId polymorphic target id; null when the target is the recipient
+     * @param postId the post the target belongs to; null for non-content types
+     * @return see {@link #create(NotificationDraft)}
+     */
+    boolean create(
             UUID actorId,
             UUID recipientId,
             NotificationType type,
@@ -37,16 +54,60 @@ public interface NotificationService {
             UUID postId);
 
     /**
-     * Creates a notification with an optional system message attached, such as a moderation reason.
+     * Withdraws an actor from the notifications an action of theirs produced, after the action was
+     * undone: an unlike, an unfollow, a cancelled or rejected follow request.
+     *
+     * <p>A retraction never moves a notification in the feed and never makes it unread or unseen
+     * again. A notification left with no actor is removed from the feed. For {@code LIKE_POST},
+     * {@code LIKE_COMMENT} and {@code STORY_VIEW} the actor leaves every group for {@code
+     * targetId}, open or closed; for {@code FOLLOW} and {@code FOLLOW_REQUEST} the actor leaves
+     * every follow row of the recipient, which covers a follow group, an approved request and a
+     * pending one.
+     *
+     * @param actorId the user whose action was undone
+     * @param recipientId the user who had been told
+     * @param type the notification type the undone action produced
+     * @param targetId the liked post or comment, or the viewed story; ignored for follow types
      */
-    void create(
-            UUID actorId,
-            UUID recipientId,
-            NotificationType type,
-            String entityType,
-            UUID entityId,
-            UUID postId,
-            String message);
+    void retract(UUID actorId, UUID recipientId, NotificationType type, UUID targetId);
+
+    /**
+     * Applies the recipient's answer to a follow request.
+     *
+     * <p>An approval turns the request into a follow notification in place, keeping its position
+     * and read state, so it reads "started following you" with a follow-back action and does not
+     * re-alert. A rejection removes the request from the feed.
+     *
+     * @param requesterId the user who asked to follow
+     * @param approverId the private account that answered, and the notification's recipient
+     * @param approved true for an approval
+     */
+    void resolveFollowRequest(UUID requesterId, UUID approverId, boolean approved);
+
+    /**
+     * Removes each user of a newly blocked pair from the other's aggregated groups and pending
+     * follow requests.
+     *
+     * <p>Other notifications between the pair stay stored and are hidden while the block lasts by
+     * the read-time block filter, so lifting the block shows them again.
+     *
+     * @param blockerId the user who blocked
+     * @param blockedId the user who was blocked
+     */
+    void onBlock(UUID blockerId, UUID blockedId);
+
+    /**
+     * Rewrites the verified-actor flag on every live notification whose newest actor is {@code
+     * actorId}, from that account's current verification state.
+     *
+     * <p>Runs in bounded batches, each in its own transaction, so a prolific account never holds
+     * one long write on the notifications table. Reading the current state rather than trusting the
+     * event makes a reordered grant and revocation converge on the truth.
+     *
+     * @param actorId the account whose verification changed
+     * @return the number of rows rewritten
+     */
+    int resyncActorVerified(UUID actorId);
 
     /**
      * Marks the notification as read. Throws {@link com.app.common.exception.AppException} with

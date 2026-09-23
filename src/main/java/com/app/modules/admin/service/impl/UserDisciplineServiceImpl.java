@@ -168,7 +168,7 @@ public class UserDisciplineServiceImpl implements UserDisciplineService {
             activeWarnings = 0;
         }
 
-        enqueueWarningNotification(userId, warning.getId());
+        enqueueWarningNotification(userId, warning.getId(), warnAudit.id());
         log.info(
                 "Warning issued: actorId={}, targetId={}, reasonKey={}, activeWarnings={},"
                         + " strikeIssued={}",
@@ -551,7 +551,7 @@ public class UserDisciplineServiceImpl implements UserDisciplineService {
         };
     }
 
-    private void enqueueWarningNotification(UUID userId, UUID warningId) {
+    private void enqueueWarningNotification(UUID userId, UUID warningId, UUID adminActionId) {
         // Same transaction as the warning row, through the outbox, so the account is told if and
         // only if the warning was actually recorded.
         outboxService.enqueue(
@@ -560,7 +560,13 @@ public class UserDisciplineServiceImpl implements UserDisciplineService {
                 TARGET_ENTITY_TYPE,
                 userId,
                 null,
-                Map.of("userId", userId.toString(), "warningId", warningId.toString()));
+                Map.of(
+                        "userId",
+                        userId.toString(),
+                        "warningId",
+                        warningId.toString(),
+                        "adminActionId",
+                        adminActionId.toString()));
     }
 
     private static String encode(OffsetDateTime createdAt, UUID id, String scope) {

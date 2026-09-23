@@ -100,6 +100,15 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
      */
     Optional<Notification> findByIdAndRecipientId(UUID id, UUID recipientId);
 
+    /**
+     * Keys of the notification types an operator has switched off in {@code
+     * notification_type_configs}.
+     */
+    @Query(
+            value = "SELECT type_key FROM notification_type_configs WHERE NOT is_enabled",
+            nativeQuery = true)
+    List<String> findDisabledTypeKeys();
+
     /** Marks all unread notifications for the recipient as read in a single bulk update. */
     @Modifying
     @Query(

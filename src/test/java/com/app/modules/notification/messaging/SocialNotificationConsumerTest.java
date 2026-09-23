@@ -3,6 +3,7 @@ package com.app.modules.notification.messaging;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -17,6 +18,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +44,10 @@ import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.common.outbox.model.DomainEventEnvelopeJson;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.service.NotificationService;
+import com.app.modules.social.enums.FollowStatus;
 import com.app.modules.social.messaging.SocialEventTypes;
+import com.app.modules.social.service.SocialService;
+import com.app.modules.support.messaging.SupportEventTypes;
 import com.rabbitmq.client.Channel;
 
 @ExtendWith(MockitoExtension.class)
@@ -56,6 +61,7 @@ class SocialNotificationConsumerTest {
     @Mock private ProcessedMessageService processedMessageService;
     @Mock private NotificationService notificationService;
     @Mock private DeadLetterPublisher deadLetterPublisher;
+    @Mock private SocialService socialService;
     @Mock private Channel channel;
 
     private ConsumerRetryProperties retryProperties;
@@ -75,6 +81,7 @@ class SocialNotificationConsumerTest {
                         notificationService,
                         retryProperties,
                         deadLetterPublisher,
+                        socialService,
                         sleptMillis::add);
     }
 
@@ -174,12 +181,9 @@ class SocialNotificationConsumerTest {
     @Test
     void consume_userFollowedEvent_createsFollowNotification() throws Exception {
         Message message = message(envelope(SocialEventTypes.USER_FOLLOWED_V1));
-        when(processedMessageService.processOnce(any(), any(), any(), any()))
-                .thenAnswer(
-                        inv -> {
-                            inv.getArgument(3, Runnable.class).run();
-                            return ProcessedMessageResult.PROCESSED;
-                        });
+        runHandlers();
+        when(socialService.findFollowStatus(ACTOR_ID, RECIPIENT_ID))
+                .thenReturn(Optional.of(FollowStatus.ACCEPTED));
 
         consumer.consume(message, channel);
 
@@ -191,18 +195,131 @@ class SocialNotificationConsumerTest {
     @Test
     void consume_userFollowRequestedEvent_createsFollowRequestNotification() throws Exception {
         Message message = message(envelope(SocialEventTypes.USER_FOLLOW_REQUESTED_V1));
-        when(processedMessageService.processOnce(any(), any(), any(), any()))
-                .thenAnswer(
-                        inv -> {
-                            inv.getArgument(3, Runnable.class).run();
-                            return ProcessedMessageResult.PROCESSED;
-                        });
+        runHandlers();
+        when(socialService.findFollowStatus(ACTOR_ID, RECIPIENT_ID))
+                .thenReturn(Optional.of(FollowStatus.PENDING));
 
         consumer.consume(message, channel);
 
         verify(notificationService)
                 .create(ACTOR_ID, RECIPIENT_ID, NotificationType.FOLLOW_REQUEST, null, null, null);
         verify(channel).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_followEventWhoseEdgeIsGone_writesNothing() throws Exception {
+        runHandlers();
+        when(socialService.findFollowStatus(ACTOR_ID, RECIPIENT_ID)).thenReturn(Optional.empty());
+
+        consumer.consume(message(envelope(SocialEventTypes.USER_FOLLOWED_V1)), channel);
+
+        verify(notificationService, never()).create(any(), any(), any(), any(), any(), any());
+        verify(channel).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_unfollowedWithNoEdgeLeft_retractsTheFollow() throws Exception {
+        runHandlers();
+        when(socialService.findFollowStatus(ACTOR_ID, RECIPIENT_ID)).thenReturn(Optional.empty());
+
+        consumer.consume(
+                message(
+                        envelope(
+                                SocialEventTypes.USER_UNFOLLOWED_V1,
+                                Map.of(
+                                        "followerId", ACTOR_ID.toString(),
+                                        "followingId", RECIPIENT_ID.toString(),
+                                        "previousStatus", "accepted"))),
+                channel);
+
+        verify(notificationService).retract(ACTOR_ID, RECIPIENT_ID, NotificationType.FOLLOW, null);
+    }
+
+    @Test
+    void consume_unfollowedButFollowedAgain_retractsNothing() throws Exception {
+        runHandlers();
+        when(socialService.findFollowStatus(ACTOR_ID, RECIPIENT_ID))
+                .thenReturn(Optional.of(FollowStatus.ACCEPTED));
+
+        consumer.consume(
+                message(
+                        envelope(
+                                SocialEventTypes.USER_UNFOLLOWED_V1,
+                                Map.of(
+                                        "followerId", ACTOR_ID.toString(),
+                                        "followingId", RECIPIENT_ID.toString(),
+                                        "previousStatus", "accepted"))),
+                channel);
+
+        verify(notificationService, never()).retract(any(), any(), any(), any());
+    }
+
+    @Test
+    void consume_requestApprovedAndAccepted_convertsTheRequest() throws Exception {
+        runHandlers();
+        when(socialService.findFollowStatus(ACTOR_ID, RECIPIENT_ID))
+                .thenReturn(Optional.of(FollowStatus.ACCEPTED));
+
+        consumer.consume(
+                message(envelope(SocialEventTypes.USER_FOLLOW_REQUEST_APPROVED_V1, resolution())),
+                channel);
+
+        verify(notificationService).resolveFollowRequest(ACTOR_ID, RECIPIENT_ID, true);
+    }
+
+    @Test
+    void consume_requestRejected_withdrawsTheRequest() throws Exception {
+        runHandlers();
+        when(socialService.findFollowStatus(ACTOR_ID, RECIPIENT_ID)).thenReturn(Optional.empty());
+
+        consumer.consume(
+                message(envelope(SocialEventTypes.USER_FOLLOW_REQUEST_REJECTED_V1, resolution())),
+                channel);
+
+        verify(notificationService).resolveFollowRequest(ACTOR_ID, RECIPIENT_ID, false);
+    }
+
+    @Test
+    void consume_blockStillInPlace_cleansBothUsersGroups() throws Exception {
+        runHandlers();
+        when(socialService.isBlockedBetween(RECIPIENT_ID, ACTOR_ID)).thenReturn(true);
+
+        consumer.consume(
+                message(
+                        envelope(
+                                SocialEventTypes.USER_BLOCKED_V1,
+                                Map.of(
+                                        "blockerId", RECIPIENT_ID.toString(),
+                                        "blockedId", ACTOR_ID.toString()))),
+                channel);
+
+        verify(notificationService).onBlock(RECIPIENT_ID, ACTOR_ID);
+    }
+
+    @Test
+    void consume_verificationChanged_resyncsTheAccountsRows() throws Exception {
+        runHandlers();
+
+        consumer.consume(
+                message(
+                        envelope(
+                                SupportEventTypes.USER_VERIFICATION_CHANGED_V1,
+                                Map.of("userId", RECIPIENT_ID.toString()))),
+                channel);
+
+        verify(notificationService).resyncActorVerified(RECIPIENT_ID);
+        verify(channel).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_resolutionMissingItsUsers_routesToDlq() throws Exception {
+        runHandlers();
+
+        consumer.consume(
+                message(envelope(SocialEventTypes.USER_FOLLOW_REQUEST_APPROVED_V1)), channel);
+
+        verify(deadLetterPublisher).publish(any(), any(), any());
+        verify(notificationService, never()).resolveFollowRequest(any(), any(), anyBoolean());
     }
 
     @Test
@@ -245,6 +362,10 @@ class SocialNotificationConsumerTest {
     }
 
     private DomainEventEnvelope envelope(String eventType) {
+        return envelope(eventType, Map.of());
+    }
+
+    private DomainEventEnvelope envelope(String eventType, Map<String, Object> data) {
         return new DomainEventEnvelope(
                 EVENT_ID,
                 eventType,
@@ -252,7 +373,20 @@ class SocialNotificationConsumerTest {
                 ACTOR_ID,
                 "user",
                 RECIPIENT_ID,
-                Map.of());
+                data);
+    }
+
+    private static Map<String, Object> resolution() {
+        return Map.of("requesterId", ACTOR_ID.toString(), "approverId", RECIPIENT_ID.toString());
+    }
+
+    private void runHandlers() {
+        when(processedMessageService.processOnce(any(), any(), any(), any()))
+                .thenAnswer(
+                        inv -> {
+                            inv.getArgument(3, Runnable.class).run();
+                            return ProcessedMessageResult.PROCESSED;
+                        });
     }
 
     private DomainEventEnvelope nullEventIdEnvelope() {

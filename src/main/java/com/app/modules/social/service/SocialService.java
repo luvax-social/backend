@@ -3,6 +3,7 @@ package com.app.modules.social.service;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -12,6 +13,7 @@ import com.app.common.response.UserListItemResponse;
 import com.app.common.response.ViewerRelationshipResponse;
 import com.app.modules.social.dto.response.FollowRequestResponse;
 import com.app.modules.social.dto.response.FollowResponse;
+import com.app.modules.social.enums.FollowStatus;
 
 public interface SocialService {
 
@@ -185,6 +187,20 @@ public interface SocialService {
      * @return true when either user has blocked the other
      */
     boolean isBlockedBetween(UUID userIdA, UUID userIdB);
+
+    /**
+     * Returns the current status of the follow edge from {@code followerId} to {@code followingId}.
+     *
+     * <p>Lets an asynchronous consumer act on the relationship as it stands when the event is
+     * processed rather than as the event described it, so a redelivered or reordered follow,
+     * unfollow or approval event cannot leave a notification describing a relationship that no
+     * longer exists.
+     *
+     * @param followerId the following user
+     * @param followingId the followed user
+     * @return the edge's status, or empty when no edge exists
+     */
+    Optional<FollowStatus> findFollowStatus(UUID followerId, UUID followingId);
 
     /**
      * Resolves the viewer's follow and block relationship to each of {@code userIds} in two batched

@@ -100,7 +100,7 @@ class PostLikeEventPublishingIT {
     }
 
     @Test
-    void unlikePost_recordsALiveUnlikedEvent() {
+    void unlikePost_recordsTheUnlikeAndItsLiveEvent() {
         UUID owner = insertUser("owner");
         UUID liker = insertUser("liker");
         UUID post = insertPublishedPost(owner);
@@ -109,9 +109,8 @@ class PostLikeEventPublishingIT {
 
         postLikeService.unlikePost(liker, post);
 
-        Map<String, Object> row = singleOutboxRow();
-        assertThat(row.get("event_type")).isEqualTo("post.live.unliked.v1");
-        assertThat(row.get("routing_key")).isEqualTo("post.live.unliked.v1");
+        outboxRow("post.live.unliked.v1");
+        outboxRow("post.unliked.v1");
     }
 
     @Test
@@ -135,15 +134,6 @@ class PostLikeEventPublishingIT {
         // The count is re-read at push time, so carrying one here would be a stale duplicate.
         assertThat(String.valueOf(outboxRow("post.live.liked.v1").get("payload")))
                 .doesNotContain("likeCount");
-    }
-
-    private Map<String, Object> singleOutboxRow() {
-        List<Map<String, Object>> rows =
-                jdbcTemplate.queryForList(
-                        "SELECT event_type, routing_key, payload::text AS payload"
-                                + " FROM outbox_events ORDER BY created_at DESC");
-        assertThat(rows).hasSize(1);
-        return rows.get(0);
     }
 
     // The like path enqueues both the live-fanout event asserted here and a separate

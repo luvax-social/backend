@@ -15,10 +15,9 @@
 # take minutes rather than seconds to drain a seed run at its default 100-rows-per-second rate,
 # and note that user_events post_view coverage is therefore only true after that drain completes,
 # not when the seed run returns.
-# message stays enabled too: MessageRabbitBindingConfig binds MessageNotificationConsumer only to
-# message.sent.v1, and SeedOutboxEmitter never emits that routing key, so there is no NOW()-stamped
-# notification for it to produce today. If a future change makes the emitter publish message
-# events, this consumer must be added to the disabled list below.
+# post.notification-consumer is held off for the notification reason above: SeedOutboxEmitter
+# replays post.liked.v1, and NotificationSeedWriter writes the like groups itself. The post index
+# consumer beside it stays enabled.
 # mail is disabled for a different reason entirely: it writes no notifications row, so the
 # NOW()-stamping argument above does not apply to it. AuthMailEventConsumer dispatches through
 # whatever transport app.mail.transport resolves to - Resend in every environment now that the
@@ -44,6 +43,9 @@ app:
         enabled: false
   story:
     consumer:
+      enabled: false
+  post:
+    notification-consumer:
       enabled: false
   mail:
     consumer:

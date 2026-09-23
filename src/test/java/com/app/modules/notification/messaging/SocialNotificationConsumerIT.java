@@ -18,6 +18,7 @@ import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -95,6 +96,7 @@ class SocialNotificationConsumerIT {
     @Autowired private SocialNotificationConsumer consumer;
     @Autowired private NotificationRepository notificationRepository;
     @Autowired private UserRepository userRepository;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     // Declared at the concrete type rather than at the MailSender interface, because
     // ModerationMailEventHandler injects AbstractTemplateMailSender rather than the
@@ -120,6 +122,7 @@ class SocialNotificationConsumerIT {
     @Test
     void handle_followEvent_createsNotification() throws Exception {
         Channel channel = mock(Channel.class);
+        follow(actor.getId(), recipient.getId(), "accepted");
         Message message =
                 envelopeMessage(
                         UUID.randomUUID(),
@@ -141,6 +144,7 @@ class SocialNotificationConsumerIT {
     @Test
     void handle_followRequestEvent_createsNotification() throws Exception {
         Channel channel = mock(Channel.class);
+        follow(actor.getId(), recipient.getId(), "pending");
         Message message =
                 envelopeMessage(
                         UUID.randomUUID(),
@@ -159,6 +163,7 @@ class SocialNotificationConsumerIT {
     @Test
     void handle_duplicateEventId_doesNotCreateSecondRow() throws Exception {
         Channel channel = mock(Channel.class);
+        follow(actor.getId(), recipient.getId(), "accepted");
         UUID eventId = UUID.randomUUID();
         Message first =
                 envelopeMessage(
@@ -177,6 +182,93 @@ class SocialNotificationConsumerIT {
         consumer.consume(second, channel);
 
         assertThat(notificationRepository.findAll()).hasSize(1);
+    }
+
+    @Test
+    void handle_unfollowAfterTheEdgeIsGone_removesTheFollowNotification() throws Exception {
+        Channel channel = mock(Channel.class);
+        follow(actor.getId(), recipient.getId(), "accepted");
+        consumer.consume(
+                envelopeMessage(
+                        UUID.randomUUID(),
+                        SocialEventTypes.USER_FOLLOWED_V1,
+                        actor.getId(),
+                        recipient.getId()),
+                channel);
+        jdbcTemplate.update(
+                "DELETE FROM follows WHERE follower_id = ? AND following_id = ?",
+                actor.getId(),
+                recipient.getId());
+
+        consumer.consume(
+                MessageBuilder.withBody(
+                                DomainEventEnvelopeJson.write(
+                                                new DomainEventEnvelope(
+                                                        UUID.randomUUID(),
+                                                        SocialEventTypes.USER_UNFOLLOWED_V1,
+                                                        OffsetDateTime.now(ZoneOffset.UTC),
+                                                        actor.getId(),
+                                                        "user",
+                                                        recipient.getId(),
+                                                        Map.of(
+                                                                "followerId",
+                                                                actor.getId().toString(),
+                                                                "followingId",
+                                                                recipient.getId().toString(),
+                                                                "previousStatus",
+                                                                "accepted")))
+                                        .getBytes(StandardCharsets.UTF_8))
+                        .setDeliveryTag(0L)
+                        .build(),
+                channel);
+
+        List<Notification> rows = notificationRepository.findAll();
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getDeletedAt()).isNotNull();
+    }
+
+    @Test
+    void handle_approvedRequest_convertsTheRequestInPlace() throws Exception {
+        Channel channel = mock(Channel.class);
+        follow(actor.getId(), recipient.getId(), "pending");
+        consumer.consume(
+                envelopeMessage(
+                        UUID.randomUUID(),
+                        SocialEventTypes.USER_FOLLOW_REQUESTED_V1,
+                        actor.getId(),
+                        recipient.getId()),
+                channel);
+        UUID requestId = notificationRepository.findAll().get(0).getId();
+        jdbcTemplate.update(
+                "UPDATE follows SET status = 'accepted' WHERE follower_id = ? AND following_id = ?",
+                actor.getId(),
+                recipient.getId());
+
+        consumer.consume(
+                MessageBuilder.withBody(
+                                DomainEventEnvelopeJson.write(
+                                                new DomainEventEnvelope(
+                                                        UUID.randomUUID(),
+                                                        SocialEventTypes
+                                                                .USER_FOLLOW_REQUEST_APPROVED_V1,
+                                                        OffsetDateTime.now(ZoneOffset.UTC),
+                                                        recipient.getId(),
+                                                        "user",
+                                                        recipient.getId(),
+                                                        Map.of(
+                                                                "requesterId",
+                                                                actor.getId().toString(),
+                                                                "approverId",
+                                                                recipient.getId().toString())))
+                                        .getBytes(StandardCharsets.UTF_8))
+                        .setDeliveryTag(0L)
+                        .build(),
+                channel);
+
+        List<Notification> rows = notificationRepository.findAll();
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getId()).isEqualTo(requestId);
+        assertThat(rows.get(0).getType()).isEqualTo(NotificationType.FOLLOW);
     }
 
     @Test
@@ -241,6 +333,15 @@ class SocialNotificationConsumerIT {
                         DomainEventEnvelopeJson.write(env).getBytes(StandardCharsets.UTF_8))
                 .setDeliveryTag(0L)
                 .build();
+    }
+
+    private void follow(UUID follower, UUID following, String status) {
+        jdbcTemplate.update(
+                "INSERT INTO follows (follower_id, following_id, status)"
+                        + " VALUES (?, ?, CAST(? AS follow_status))",
+                follower,
+                following,
+                status);
     }
 
     private static User activeUser(String username) {

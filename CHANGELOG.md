@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Post likes now produce a notification, grouped per post, and every like, comment like, story view and follow joins one group per target for 24 hours from its first actor, moving it to the top and marking it unread again when a new actor joins.
+- Unliking a post or comment, unfollowing, cancelling or rejecting a follow request and blocking an account now withdraw that actor from the notifications they produced, without moving or re-alerting what remains; approving a request turns it into a follow notification in place.
+- Granting or revoking a verified badge rewrites the verified-actor flag on that account's notifications in bounded background batches.
+- `POST_NOTIFICATION_CONSUMER_ENABLED`, `NOTIFICATION_AGGREGATION_WINDOW`, `NOTIFICATION_SEEN_SESSION_GAP` and `NOTIFICATION_VERIFIED_RESYNC_BATCH_SIZE` configuration properties.
 - Verification badges in the development seed: eighteen granted across all eight categories, five later withdrawn, and thirteen left active. A withdrawal driven by a suspension or ban is recorded as a system action with no actor, and a deactivated account keeps its badge.
 - Fifty more seeded accounts, most of which never post: twenty-eight that write nothing at all, nineteen that only comment, and three small creator accounts so the music, screen and gaming verification categories have a plausible subject.
 - A seeded follow graph built on topical affinity, popularity and reciprocity rather than uniform sampling, so follower counts vary the way a real network's do and who follows whom now carries meaning.
@@ -319,6 +323,10 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- A comment that mentions the account it answers now notifies that account once instead of twice.
+- Support answers and verification decisions are platform notices with no actor, so they no longer name the staff member or disappear behind a block of that staff member.
+- Every moderation notice now records the audit decision behind it, which is what lets a removed or restored post and a warning offer an appeal.
+- An operator switching a notification type off in its configuration row now stops that type from being written.
 - Notifications gain a feed sort key that moves when a group gains an actor, a filter category, soft delete, actor membership for aggregated groups, a per-user seen watermark and a link to the moderation decision behind each notice; existing likes, comment likes, story views and follows are collapsed into one group per target and day, direct-message notifications leave the feed, and every original row is archived first.
 - Seeded post media is drawn from 631 assets rather than 165, so the worst-repeated image now appears in three posts instead of sixteen and every reference still matches its post's topic.
 - A seeded verification request now lands on an account whose profession matches the claim, and an approved request actually grants the badge it approved; previously the subject was chosen at random and an approval left no badge behind it.
@@ -714,6 +722,7 @@ A conversation that already has messages in it is kept, because unfollowing some
 - `CustomOidcUserService.resolveUniqueUsername` random-suffix branch now re-checks uniqueness via `ThreadLocalRandom` and a bounded retry loop, preventing the rare unique-constraint violation that previously surfaced as a 500.
 
 ### Removed
+- Direct messages no longer produce activity notifications; the retired `message.notification.queue` and its dead-letter queue are deleted from the broker at startup, and `MESSAGE_CONSUMER_ENABLED` is gone.
 - The redundant `is_read` notification column, whose value is fully carried by `read_at`, and three notification indexes superseded by the new feed indexes.
 - Mail campaigns, along with the administrator composer, the scheduled sender, the read-only Markdown samples and the per-account campaign email opt-out. Account, security, moderation and support mail are unaffected, and the send log that records every delivery attempt is unchanged.
 - The `ci-test.yml` CI workflow, which had been unintentionally disabled and was reporting a permanent failure on every push and pull request; its coverage was already fully subsumed by `sonarcloud.yml`.
@@ -840,6 +849,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- Repository tests for group open, join, window close, retraction, concurrent first actors, request conversion, block cleanup and the batched verified resync, and unit tests for the post like consumer, the retired-queue cleaner and the type policy.
 - A migration test that carries every pre-overhaul notification shape through the overhaul migrations and asserts the archive, the aggregation, the actor counts, the moderation links, the seen watermark and the index swap.
 - Media upload URL coverage now verifies that CDN object URLs preserve the HTTPS scheme.
 - The post index-sync integration tests now stub the Gorse recommender client, which is an external HTTP service with no container in those tests; left real, every post upsert failed on a refused connection and nothing reached Elasticsearch.

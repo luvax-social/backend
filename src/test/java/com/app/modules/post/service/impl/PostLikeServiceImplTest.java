@@ -202,6 +202,30 @@ class PostLikeServiceImplTest {
     }
 
     @Test
+    void unlikePost_removedLike_publishesTheUnlikeForTheNotificationTier() {
+        when(postRepository.findByIdAndDeletedAtIsNull(postId))
+                .thenReturn(Optional.of(publishedPost));
+        when(postVisibilityService.isVisibleTo(userId, publishedPost)).thenReturn(true);
+        when(postLikeRepository.deleteByUserAndPost(userId, postId)).thenReturn(1);
+        when(postRepository.findLikeCount(postId)).thenReturn(0);
+
+        service.unlikePost(userId, postId);
+
+        verify(outboxService)
+                .enqueue(
+                        eq(PostEventTypes.POST_UNLIKED_V1),
+                        eq(PostEventTypes.POST_UNLIKED_V1),
+                        eq("post"),
+                        eq(postId),
+                        eq(userId),
+                        eq(
+                                Map.of(
+                                        "postId", postId.toString(),
+                                        "postOwnerId", publishedPost.getUserId().toString(),
+                                        "userId", userId.toString())));
+    }
+
+    @Test
     void likePost_unlikeThenRelike_succeeds() {
         when(postLikeRepository.existsById(likeId)).thenReturn(false, false);
         when(postLikeRepository.saveAndFlush(any(PostLike.class)))

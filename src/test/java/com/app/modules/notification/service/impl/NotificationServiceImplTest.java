@@ -3,14 +3,19 @@ package com.app.modules.notification.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -21,10 +26,12 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
@@ -34,26 +41,38 @@ import com.app.common.pagination.CursorCodec;
 import com.app.common.pagination.CursorScope;
 import com.app.common.pagination.TimeCursors;
 import com.app.common.response.CursorPageResponse;
+import com.app.common.response.UserSummaryResponse;
+import com.app.modules.notification.config.NotificationProperties;
 import com.app.modules.notification.dto.response.NotificationResponse;
 import com.app.modules.notification.entity.Notification;
+import com.app.modules.notification.entity.enums.NotificationCategory;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.mapper.NotificationMapper;
 import com.app.modules.notification.messaging.NotificationEventTypes;
+import com.app.modules.notification.repository.NotificationAggregationRepository;
+import com.app.modules.notification.repository.NotificationAggregationRepository.GroupWrite;
+import com.app.modules.notification.repository.NotificationAggregationRepository.Removal;
 import com.app.modules.notification.repository.NotificationRepository;
-import com.app.modules.social.repository.BlockRepository;
-import com.app.modules.users.entity.UserSettings;
-import com.app.modules.users.repository.UserSettingsRepository;
+import com.app.modules.notification.service.NotificationDraft;
+import com.app.modules.social.service.SocialService;
+import com.app.modules.users.dto.response.NotificationPreferencesResponse;
+import com.app.modules.users.service.UserNotificationPreferencesService;
 import com.app.modules.users.service.UserSummaryService;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceImplTest {
 
+    private static final Duration WINDOW = Duration.ofHours(24);
+
     @Mock private NotificationRepository notificationRepository;
-    @Mock private UserSettingsRepository userSettingsRepository;
-    @Mock private BlockRepository blockRepository;
+    @Mock private NotificationAggregationRepository aggregationRepository;
+    @Mock private NotificationTypePolicy typePolicy;
     @Mock private NotificationMapper notificationMapper;
     @Mock private OutboxService outboxService;
     @Mock private UserSummaryService userSummaryService;
+    @Mock private UserNotificationPreferencesService preferencesService;
+    @Mock private SocialService socialService;
+    @Mock private PlatformTransactionManager transactionManager;
 
     private NotificationServiceImpl service;
 
@@ -62,136 +81,410 @@ class NotificationServiceImplTest {
         service =
                 new NotificationServiceImpl(
                         notificationRepository,
-                        userSettingsRepository,
-                        blockRepository,
+                        aggregationRepository,
+                        typePolicy,
+                        new NotificationProperties(WINDOW, Duration.ofMinutes(30), 2),
                         notificationMapper,
                         outboxService,
-                        userSummaryService);
-        lenient().when(userSettingsRepository.findById(any())).thenReturn(Optional.empty());
-        lenient().when(blockRepository.existsBetween(any(), any())).thenReturn(false);
-        lenient().when(userSummaryService.loadSummaries(any())).thenReturn(Map.of());
-        // The live-push path reads the persisted row's generated id immediately after save(); a
-        // freshly built (unsaved) entity has none, so every create()-path test needs a saved
-        // return value with an id, exactly as JPA would assign one on a real insert.
+                        userSummaryService,
+                        preferencesService,
+                        socialService,
+                        transactionManager);
+        lenient().when(typePolicy.isEnabled(any())).thenReturn(true);
         lenient()
-                .when(notificationRepository.save(any()))
-                .thenReturn(Notification.builder().id(UUID.randomUUID()).build());
+                .when(preferencesService.findNotificationPreferences(any()))
+                .thenReturn(NotificationPreferencesResponse.ALL_ENABLED);
+        lenient().when(socialService.isBlockedBetween(any(), any())).thenReturn(false);
+        lenient().when(userSummaryService.loadSummaries(any())).thenReturn(Map.of());
+        lenient()
+                .when(aggregationRepository.insertSingle(any(), any(), anyBoolean()))
+                .thenReturn(UUID.randomUUID());
+        lenient()
+                .when(transactionManager.getTransaction(any()))
+                .thenReturn(new SimpleTransactionStatus());
     }
 
     @Test
-    void create_selfNotification_skips() {
+    void create_selfNotification_writesNothing() {
         UUID userId = UUID.randomUUID();
 
-        service.create(userId, userId, NotificationType.LIKE_POST, "post", UUID.randomUUID(), null);
+        boolean written =
+                service.create(
+                        userId,
+                        userId,
+                        NotificationType.LIKE_POST,
+                        "post",
+                        UUID.randomUUID(),
+                        null);
 
-        verify(notificationRepository, never()).save(any());
+        assertThat(written).isFalse();
+        verifyNoInteractions(aggregationRepository, outboxService);
     }
 
     @Test
-    void create_notifyFollowsDisabled_skips() {
-        UUID actorId = UUID.randomUUID();
-        UUID recipientId = UUID.randomUUID();
-        UserSettings settings =
-                UserSettings.builder().userId(recipientId).notifyFollows(false).build();
-        when(userSettingsRepository.findById(recipientId)).thenReturn(Optional.of(settings));
+    void create_typeDisabledByOperator_writesNothing() {
+        when(typePolicy.isEnabled(NotificationType.COMMENT_POST)).thenReturn(false);
 
-        service.create(actorId, recipientId, NotificationType.FOLLOW, null, null, null);
+        boolean written =
+                service.create(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        NotificationType.COMMENT_POST,
+                        "comment",
+                        UUID.randomUUID(),
+                        UUID.randomUUID());
 
-        verify(notificationRepository, never()).save(any());
+        assertThat(written).isFalse();
+        verifyNoInteractions(aggregationRepository, outboxService);
     }
 
     @Test
-    void create_notifyFollowRequestsDisabled_skips() {
-        UUID actorId = UUID.randomUUID();
+    void create_notifyFollowsOff_writesNeitherFollowNorRequest() {
         UUID recipientId = UUID.randomUUID();
-        UserSettings settings =
-                UserSettings.builder().userId(recipientId).notifyFollows(false).build();
-        when(userSettingsRepository.findById(recipientId)).thenReturn(Optional.of(settings));
+        when(preferencesService.findNotificationPreferences(recipientId))
+                .thenReturn(new NotificationPreferencesResponse(true, true, false, true, true));
 
-        service.create(actorId, recipientId, NotificationType.FOLLOW_REQUEST, null, null, null);
+        service.create(UUID.randomUUID(), recipientId, NotificationType.FOLLOW, null, null, null);
+        service.create(
+                UUID.randomUUID(), recipientId, NotificationType.FOLLOW_REQUEST, null, null, null);
 
-        verify(notificationRepository, never()).save(any());
+        verifyNoInteractions(aggregationRepository, outboxService);
     }
 
     @Test
-    void create_actorBlockedByRecipient_skips() {
-        UUID actorId = UUID.randomUUID();
+    void create_notifyLikesOff_writesNoLike() {
         UUID recipientId = UUID.randomUUID();
-        when(blockRepository.existsBetween(actorId, recipientId)).thenReturn(true);
+        when(preferencesService.findNotificationPreferences(recipientId))
+                .thenReturn(new NotificationPreferencesResponse(false, true, true, true, true));
 
         service.create(
-                actorId, recipientId, NotificationType.LIKE_POST, "post", UUID.randomUUID(), null);
+                UUID.randomUUID(),
+                recipientId,
+                NotificationType.LIKE_POST,
+                "post",
+                UUID.randomUUID(),
+                null);
 
-        verify(notificationRepository, never()).save(any());
+        verifyNoInteractions(aggregationRepository, outboxService);
     }
 
     @Test
-    void create_allGuardsPass_savesNotification() {
-        UUID actorId = UUID.randomUUID();
+    void create_notifyCommentsOff_writesNoComment() {
         UUID recipientId = UUID.randomUUID();
-        UUID entityId = UUID.randomUUID();
+        when(preferencesService.findNotificationPreferences(recipientId))
+                .thenReturn(new NotificationPreferencesResponse(true, false, true, true, true));
 
-        service.create(actorId, recipientId, NotificationType.LIKE_POST, "post", entityId, null);
+        service.create(
+                UUID.randomUUID(),
+                recipientId,
+                NotificationType.COMMENT_POST,
+                "comment",
+                UUID.randomUUID(),
+                UUID.randomUUID());
 
-        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationRepository, times(1)).save(captor.capture());
-        Notification saved = captor.getValue();
-        assertThat(saved.getActorId()).isEqualTo(actorId);
-        assertThat(saved.getRecipientId()).isEqualTo(recipientId);
-        assertThat(saved.getType()).isEqualTo(NotificationType.LIKE_POST);
+        verifyNoInteractions(aggregationRepository, outboxService);
     }
 
     @Test
-    void create_postIdProvided_savedOnNotification() {
+    void create_storyView_isNeverPreferenceSuppressed() {
+        UUID recipientId = UUID.randomUUID();
+        lenient()
+                .when(preferencesService.findNotificationPreferences(recipientId))
+                .thenReturn(new NotificationPreferencesResponse(false, false, false, false, false));
+        when(aggregationRepository.upsertGroup(any(), any(), any(), any(), anyBoolean()))
+                .thenReturn(new GroupWrite(UUID.randomUUID(), true, true));
+
+        boolean written =
+                service.create(
+                        UUID.randomUUID(),
+                        recipientId,
+                        NotificationType.STORY_VIEW,
+                        "story",
+                        UUID.randomUUID(),
+                        null);
+
+        assertThat(written).isTrue();
+    }
+
+    @Test
+    void create_actorAndRecipientInABlock_writesNothing() {
         UUID actorId = UUID.randomUUID();
         UUID recipientId = UUID.randomUUID();
-        UUID entityId = UUID.randomUUID();
+        when(socialService.isBlockedBetween(actorId, recipientId)).thenReturn(true);
+
+        boolean written =
+                service.create(
+                        actorId,
+                        recipientId,
+                        NotificationType.COMMENT_POST,
+                        "comment",
+                        UUID.randomUUID(),
+                        UUID.randomUUID());
+
+        assertThat(written).isFalse();
+        verifyNoInteractions(aggregationRepository, outboxService);
+    }
+
+    @Test
+    void create_singleRow_insertsAddsMemberPublishesAndStampsActivityLast() {
+        UUID actorId = UUID.randomUUID();
+        UUID recipientId = UUID.randomUUID();
         UUID postId = UUID.randomUUID();
+        UUID notificationId = UUID.randomUUID();
+        when(aggregationRepository.insertSingle(any(), any(), anyBoolean()))
+                .thenReturn(notificationId);
+        when(userSummaryService.loadSummaries(List.of(actorId)))
+                .thenReturn(Map.of(actorId, summary(actorId, true)));
 
-        service.create(
-                actorId, recipientId, NotificationType.COMMENT_POST, "comment", entityId, postId);
+        boolean written =
+                service.create(
+                        actorId,
+                        recipientId,
+                        NotificationType.COMMENT_POST,
+                        "comment",
+                        UUID.randomUUID(),
+                        postId);
 
-        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationRepository, times(1)).save(captor.capture());
-        assertThat(captor.getValue().getPostId()).isEqualTo(postId);
+        assertThat(written).isTrue();
+        InOrder order = inOrder(aggregationRepository, outboxService);
+        order.verify(aggregationRepository)
+                .insertSingle(
+                        argThat(d -> d.postId().equals(postId) && d.actorId().equals(actorId)),
+                        eq(NotificationCategory.COMMENT),
+                        eq(true));
+        order.verify(aggregationRepository).addMember(notificationId, actorId);
+        order.verify(outboxService)
+                .enqueue(
+                        eq(NotificationEventTypes.NOTIFICATION_UPSERTED_V1),
+                        eq(NotificationEventTypes.NOTIFICATION_UPSERTED_V1),
+                        eq("notification"),
+                        eq(notificationId),
+                        eq(actorId),
+                        argThat(data -> recipientId.toString().equals(data.get("recipientId"))));
+        order.verify(aggregationRepository).touchActivity(notificationId);
     }
 
     @Test
-    void create_allGuardsPass_enqueuesOutboxEvent() {
-        UUID actorId = UUID.randomUUID();
+    void create_systemNotice_hasNoMemberAndCarriesItsAuditRow() {
         UUID recipientId = UUID.randomUUID();
-        UUID entityId = UUID.randomUUID();
+        UUID auditId = UUID.randomUUID();
 
-        service.create(actorId, recipientId, NotificationType.LIKE_POST, "post", entityId, null);
+        boolean written =
+                service.create(
+                        NotificationDraft.systemNotice(
+                                recipientId,
+                                NotificationType.COMMENT_REMOVED,
+                                "admin_action",
+                                auditId,
+                                null,
+                                "spam",
+                                auditId));
+
+        assertThat(written).isTrue();
+        verify(aggregationRepository)
+                .insertSingle(
+                        argThat(
+                                d ->
+                                        auditId.equals(d.adminActionId())
+                                                && "spam".equals(d.message())),
+                        eq(NotificationCategory.SYSTEM),
+                        eq(false));
+        verify(aggregationRepository, never()).addMember(any(), any());
+        verifyNoInteractions(preferencesService, socialService);
+    }
+
+    @Test
+    void create_aggregatableType_joinsTheGroupForItsTarget() {
+        UUID actorId = UUID.randomUUID();
+        UUID postId = UUID.randomUUID();
+        UUID groupId = UUID.randomUUID();
+        when(aggregationRepository.upsertGroup(any(), any(), any(), any(), anyBoolean()))
+                .thenReturn(new GroupWrite(groupId, false, true));
+
+        boolean written =
+                service.create(
+                        actorId,
+                        UUID.randomUUID(),
+                        NotificationType.LIKE_POST,
+                        "post",
+                        postId,
+                        postId);
+
+        assertThat(written).isTrue();
+        verify(aggregationRepository)
+                .upsertGroup(
+                        any(),
+                        eq(NotificationCategory.LIKE),
+                        eq("like_post:" + postId),
+                        eq(WINDOW),
+                        eq(false));
+        verify(aggregationRepository, never()).insertSingle(any(), any(), anyBoolean());
+        verify(aggregationRepository).touchActivity(groupId);
+    }
+
+    @Test
+    void create_actorAlreadyInTheGroup_changesNothingAndPublishesNothing() {
+        when(aggregationRepository.upsertGroup(any(), any(), any(), any(), anyBoolean()))
+                .thenReturn(new GroupWrite(UUID.randomUUID(), false, false));
+
+        boolean written =
+                service.create(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        NotificationType.FOLLOW,
+                        null,
+                        null,
+                        null);
+
+        assertThat(written).isFalse();
+        verifyNoInteractions(outboxService);
+        verify(aggregationRepository, never()).touchActivity(any());
+    }
+
+    @Test
+    void retract_likeLeavingOtherActors_publishesUpsertAndResyncsTheVerifiedFlag() {
+        UUID liker = UUID.randomUUID();
+        UUID remaining = UUID.randomUUID();
+        UUID recipientId = UUID.randomUUID();
+        UUID postId = UUID.randomUUID();
+        UUID groupId = UUID.randomUUID();
+        when(aggregationRepository.removeMemberFromGroups(
+                        recipientId, liker, "like_post:" + postId))
+                .thenReturn(List.of(new Removal(groupId, false, remaining)));
+        when(userSummaryService.loadSummaries(List.of(remaining)))
+                .thenReturn(Map.of(remaining, summary(remaining, true)));
+
+        service.retract(liker, recipientId, NotificationType.LIKE_POST, postId);
+
+        verify(aggregationRepository).setActorVerified(groupId, true);
+        verify(outboxService)
+                .enqueue(
+                        eq(NotificationEventTypes.NOTIFICATION_UPSERTED_V1),
+                        any(),
+                        any(),
+                        eq(groupId),
+                        eq(liker),
+                        any());
+        verify(aggregationRepository, never()).touchActivity(any());
+    }
+
+    @Test
+    void retract_lastActor_publishesDeleted() {
+        UUID liker = UUID.randomUUID();
+        UUID recipientId = UUID.randomUUID();
+        UUID commentId = UUID.randomUUID();
+        UUID groupId = UUID.randomUUID();
+        when(aggregationRepository.removeMemberFromGroups(
+                        recipientId, liker, "like_comment:" + commentId))
+                .thenReturn(List.of(new Removal(groupId, true, liker)));
+
+        service.retract(liker, recipientId, NotificationType.LIKE_COMMENT, commentId);
 
         verify(outboxService)
                 .enqueue(
-                        eq(NotificationEventTypes.NOTIFICATION_CREATED_V1),
-                        eq(NotificationEventTypes.NOTIFICATION_CREATED_V1),
-                        eq("notification"),
-                        any(UUID.class),
-                        eq(actorId),
-                        argThat(data -> recipientId.toString().equals(data.get("recipientId"))));
+                        eq(NotificationEventTypes.NOTIFICATION_DELETED_V1),
+                        any(),
+                        any(),
+                        eq(groupId),
+                        eq(liker),
+                        argThat(data -> List.of(groupId.toString()).equals(data.get("ids"))));
+        verify(aggregationRepository, never()).setActorVerified(any(), anyBoolean());
     }
 
     @Test
-    void create_selfNotification_doesNotEnqueueOutboxEvent() {
-        UUID userId = UUID.randomUUID();
-
-        service.create(userId, userId, NotificationType.LIKE_POST, "post", UUID.randomUUID(), null);
-
-        verify(outboxService, never()).enqueue(any(), any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void create_noUserSettings_guardPassesThrough() {
-        UUID actorId = UUID.randomUUID();
+    void retract_follow_removesTheActorFromEveryFollowRow() {
+        UUID follower = UUID.randomUUID();
         UUID recipientId = UUID.randomUUID();
-        when(userSettingsRepository.findById(recipientId)).thenReturn(Optional.empty());
 
-        service.create(actorId, recipientId, NotificationType.FOLLOW, null, null, null);
+        service.retract(follower, recipientId, NotificationType.FOLLOW, null);
 
-        verify(notificationRepository, times(1)).save(any());
+        verify(aggregationRepository).removeMemberFromFollowRows(recipientId, follower);
+    }
+
+    @Test
+    void retract_typeThatNeverRetracts_isRejected() {
+        assertThatThrownBy(
+                        () ->
+                                service.retract(
+                                        UUID.randomUUID(),
+                                        UUID.randomUUID(),
+                                        NotificationType.COMMENT_POST,
+                                        UUID.randomUUID()))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void resolveFollowRequest_approved_convertsTheRequestInPlace() {
+        UUID requester = UUID.randomUUID();
+        UUID approver = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        when(aggregationRepository.findLiveFollowRequest(approver, requester))
+                .thenReturn(Optional.of(requestId));
+        when(aggregationRepository.convertRequestToFollow(requestId)).thenReturn(true);
+
+        service.resolveFollowRequest(requester, approver, true);
+
+        verify(outboxService)
+                .enqueue(
+                        eq(NotificationEventTypes.NOTIFICATION_UPSERTED_V1),
+                        any(),
+                        any(),
+                        eq(requestId),
+                        eq(requester),
+                        argThat(data -> approver.toString().equals(data.get("recipientId"))));
+        verify(aggregationRepository, never()).touchActivity(any());
+    }
+
+    @Test
+    void resolveFollowRequest_approvedWithoutAStoredRequest_doesNothing() {
+        UUID requester = UUID.randomUUID();
+        UUID approver = UUID.randomUUID();
+        when(aggregationRepository.findLiveFollowRequest(approver, requester))
+                .thenReturn(Optional.empty());
+
+        service.resolveFollowRequest(requester, approver, true);
+
+        verifyNoInteractions(outboxService);
+    }
+
+    @Test
+    void resolveFollowRequest_rejected_withdrawsTheRequest() {
+        UUID requester = UUID.randomUUID();
+        UUID approver = UUID.randomUUID();
+
+        service.resolveFollowRequest(requester, approver, false);
+
+        verify(aggregationRepository).removeMemberFromFollowRows(approver, requester);
+    }
+
+    @Test
+    void onBlock_removesEachUserFromTheOthersGroups() {
+        UUID blocker = UUID.randomUUID();
+        UUID blocked = UUID.randomUUID();
+
+        service.onBlock(blocker, blocked);
+
+        verify(aggregationRepository).removeMemberOnBlock(blocker, blocked);
+        verify(aggregationRepository).removeMemberOnBlock(blocked, blocker);
+    }
+
+    @Test
+    void resyncActorVerified_rewritesInBatchesUntilAShortOne() {
+        UUID actorId = UUID.randomUUID();
+        when(userSummaryService.loadSummaries(List.of(actorId)))
+                .thenReturn(Map.of(actorId, summary(actorId, true)));
+        when(aggregationRepository.resyncActorVerified(eq(actorId), eq(true), anyInt()))
+                .thenReturn(2, 2, 1);
+
+        int rewritten = service.resyncActorVerified(actorId);
+
+        assertThat(rewritten).isEqualTo(5);
+        verify(aggregationRepository, times(3)).resyncActorVerified(actorId, true, 2);
+        verify(transactionManager, times(3)).commit(any());
+    }
+
+    private static UserSummaryResponse summary(UUID id, boolean verified) {
+        return new UserSummaryResponse(id, "user", "User", null, verified, null);
     }
 
     @Test
@@ -322,65 +615,6 @@ class NotificationServiceImplTest {
                 service.listNotifications(recipientId, null, limit);
 
         assertThat(result.getPageInfo().isHasNextPage()).isFalse();
-    }
-
-    @Test
-    void create_notifyLikesDisabled_skips() {
-        UUID actorId = UUID.randomUUID();
-        UUID recipientId = UUID.randomUUID();
-        UserSettings settings =
-                UserSettings.builder().userId(recipientId).notifyLikes(false).build();
-        when(userSettingsRepository.findById(recipientId)).thenReturn(Optional.of(settings));
-
-        service.create(
-                actorId, recipientId, NotificationType.LIKE_POST, "post", UUID.randomUUID(), null);
-
-        verify(notificationRepository, never()).save(any());
-    }
-
-    @Test
-    void create_notifyCommentsDisabled_skips() {
-        UUID actorId = UUID.randomUUID();
-        UUID recipientId = UUID.randomUUID();
-        UserSettings settings =
-                UserSettings.builder().userId(recipientId).notifyComments(false).build();
-        when(userSettingsRepository.findById(recipientId)).thenReturn(Optional.of(settings));
-
-        service.create(
-                actorId,
-                recipientId,
-                NotificationType.COMMENT_POST,
-                "post",
-                UUID.randomUUID(),
-                null);
-
-        verify(notificationRepository, never()).save(any());
-    }
-
-    @Test
-    void create_storyViewType_isNeverPreferenceSuppressed() {
-        UUID actorId = UUID.randomUUID();
-        UUID recipientId = UUID.randomUUID();
-        UserSettings settings =
-                UserSettings.builder()
-                        .userId(recipientId)
-                        .notifyFollows(false)
-                        .notifyLikes(false)
-                        .notifyComments(false)
-                        .notifyMentions(false)
-                        .notifyMessages(false)
-                        .build();
-        when(userSettingsRepository.findById(recipientId)).thenReturn(Optional.of(settings));
-
-        service.create(
-                actorId,
-                recipientId,
-                NotificationType.STORY_VIEW,
-                "story",
-                UUID.randomUUID(),
-                null);
-
-        verify(notificationRepository, times(1)).save(any());
     }
 
     @Test

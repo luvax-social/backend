@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -31,6 +32,7 @@ import com.app.common.messaging.config.ConsumerRetryProperties;
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.common.outbox.model.DomainEventEnvelopeJson;
 import com.app.modules.comment.messaging.CommentEventTypes;
+import com.app.modules.comment.repository.CommentLikeRepository;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.service.NotificationService;
 import com.rabbitmq.client.Channel;
@@ -47,6 +49,7 @@ class CommentNotificationConsumerTest {
 
     @Mock private ProcessedMessageService processedMessageService;
     @Mock private NotificationService notificationService;
+    @Mock private CommentLikeRepository commentLikeRepository;
     @Mock private Channel channel;
 
     private CommentNotificationConsumer consumer;
@@ -63,7 +66,8 @@ class CommentNotificationConsumerTest {
                         new DomainEventMessageParser(),
                         processedMessageService,
                         notificationService,
-                        retryProperties);
+                        retryProperties,
+                        commentLikeRepository);
     }
 
     @Test
@@ -134,6 +138,162 @@ class CommentNotificationConsumerTest {
 
         verify(channel).basicNack(1L, false, false);
         verify(channel, never()).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_commentMentioningThePostOwner_notifiesThemOnce() throws Exception {
+        UUID other = UUID.randomUUID();
+        runHandlers();
+        when(notificationService.create(
+                        ACTOR_ID,
+                        POST_OWNER_ID,
+                        NotificationType.COMMENT_POST,
+                        "comment",
+                        COMMENT_ID,
+                        POST_ID))
+                .thenReturn(true);
+
+        consumer.consume(
+                message(
+                        created(
+                                List.of(
+                                        POST_OWNER_ID.toString(),
+                                        other.toString(),
+                                        other.toString()))),
+                channel);
+
+        verify(notificationService, never())
+                .create(
+                        ACTOR_ID,
+                        POST_OWNER_ID,
+                        NotificationType.MENTION_COMMENT,
+                        "comment",
+                        COMMENT_ID,
+                        POST_ID);
+        verify(notificationService, times(1))
+                .create(
+                        ACTOR_ID,
+                        other,
+                        NotificationType.MENTION_COMMENT,
+                        "comment",
+                        COMMENT_ID,
+                        POST_ID);
+    }
+
+    @Test
+    void consume_postOwnerSuppressedTheCommentNotification_stillGetsTheMention() throws Exception {
+        runHandlers();
+
+        consumer.consume(message(created(List.of(POST_OWNER_ID.toString()))), channel);
+
+        verify(notificationService)
+                .create(
+                        ACTOR_ID,
+                        POST_OWNER_ID,
+                        NotificationType.MENTION_COMMENT,
+                        "comment",
+                        COMMENT_ID,
+                        POST_ID);
+    }
+
+    @Test
+    void consume_likeStillInPlace_createsTheLikeNotification() throws Exception {
+        runHandlers();
+        when(commentLikeRepository.existsByIdUserIdAndIdCommentId(ACTOR_ID, COMMENT_ID))
+                .thenReturn(true);
+
+        consumer.consume(message(like(CommentEventTypes.COMMENT_LIKED_V1)), channel);
+
+        verify(notificationService)
+                .create(
+                        ACTOR_ID,
+                        POST_OWNER_ID,
+                        NotificationType.LIKE_COMMENT,
+                        "comment",
+                        COMMENT_ID,
+                        POST_ID);
+    }
+
+    @Test
+    void consume_likeAlreadyWithdrawn_writesNothing() throws Exception {
+        runHandlers();
+        when(commentLikeRepository.existsByIdUserIdAndIdCommentId(ACTOR_ID, COMMENT_ID))
+                .thenReturn(false);
+
+        consumer.consume(message(like(CommentEventTypes.COMMENT_LIKED_V1)), channel);
+
+        verify(notificationService, never()).create(any(), any(), any(), any(), any(), any());
+        verify(channel).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_unlike_retractsTheLiker() throws Exception {
+        runHandlers();
+        when(commentLikeRepository.existsByIdUserIdAndIdCommentId(ACTOR_ID, COMMENT_ID))
+                .thenReturn(false);
+
+        consumer.consume(message(like(CommentEventTypes.COMMENT_UNLIKED_V1)), channel);
+
+        verify(notificationService)
+                .retract(ACTOR_ID, POST_OWNER_ID, NotificationType.LIKE_COMMENT, COMMENT_ID);
+    }
+
+    @Test
+    void consume_unlikeFollowedByAReLike_retractsNothing() throws Exception {
+        runHandlers();
+        when(commentLikeRepository.existsByIdUserIdAndIdCommentId(ACTOR_ID, COMMENT_ID))
+                .thenReturn(true);
+
+        consumer.consume(message(like(CommentEventTypes.COMMENT_UNLIKED_V1)), channel);
+
+        verify(notificationService, never()).retract(any(), any(), any(), any());
+    }
+
+    private void runHandlers() {
+        when(processedMessageService.processOnce(any(), any(), any(), any()))
+                .thenAnswer(
+                        inv -> {
+                            inv.getArgument(3, Runnable.class).run();
+                            return ProcessedMessageResult.PROCESSED;
+                        });
+    }
+
+    private DomainEventEnvelope created(List<String> mentionedUserIds) {
+        return new DomainEventEnvelope(
+                EVENT_ID,
+                CommentEventTypes.COMMENT_CREATED_V1,
+                OffsetDateTime.now(ZoneOffset.UTC),
+                ACTOR_ID,
+                "comment",
+                COMMENT_ID,
+                Map.of(
+                        "commentId",
+                        COMMENT_ID.toString(),
+                        "postOwnerId",
+                        POST_OWNER_ID.toString(),
+                        "postId",
+                        POST_ID.toString(),
+                        "depth",
+                        0,
+                        "mentionedUserIds",
+                        mentionedUserIds));
+    }
+
+    private DomainEventEnvelope like(String eventType) {
+        return new DomainEventEnvelope(
+                EVENT_ID,
+                eventType,
+                OffsetDateTime.now(ZoneOffset.UTC),
+                ACTOR_ID,
+                "comment",
+                COMMENT_ID,
+                Map.of(
+                        "commentId",
+                        COMMENT_ID.toString(),
+                        "commentOwnerId",
+                        POST_OWNER_ID.toString(),
+                        "postId",
+                        POST_ID.toString()));
     }
 
     private Message message(DomainEventEnvelope envelope) {

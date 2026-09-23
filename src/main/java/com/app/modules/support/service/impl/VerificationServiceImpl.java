@@ -15,12 +15,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
+import com.app.common.outbox.service.OutboxService;
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.admin.dto.response.AdminActionResponse;
 import com.app.modules.admin.enums.AdminActionType;
 import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.notification.entity.enums.NotificationType;
+import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.support.dto.request.CreateVerificationRequest;
 import com.app.modules.support.dto.request.VerificationDecisionRequest;
@@ -34,6 +36,7 @@ import com.app.modules.support.entity.VerificationRequest;
 import com.app.modules.support.enums.SupportCategory;
 import com.app.modules.support.enums.SupportSource;
 import com.app.modules.support.enums.SupportTicketStatus;
+import com.app.modules.support.messaging.SupportEventTypes;
 import com.app.modules.support.repository.SupportTicketRepository;
 import com.app.modules.support.repository.VerificationCategoryRepository;
 import com.app.modules.support.repository.VerificationRequestRepository;
@@ -79,6 +82,7 @@ public class VerificationServiceImpl implements VerificationService {
     private final NotificationService notificationService;
     private final UserRepository userRepository;
     private final UserSummaryService userSummaryService;
+    private final OutboxService outboxService;
 
     public VerificationServiceImpl(
             SupportTicketRepository supportTicketRepository,
@@ -90,7 +94,8 @@ public class VerificationServiceImpl implements VerificationService {
             AdminActionRecorder adminActionRecorder,
             NotificationService notificationService,
             UserRepository userRepository,
-            UserSummaryService userSummaryService) {
+            UserSummaryService userSummaryService,
+            OutboxService outboxService) {
         this.supportTicketRepository = supportTicketRepository;
         this.verificationRequestRepository = verificationRequestRepository;
         this.verificationCategoryRepository = verificationCategoryRepository;
@@ -101,6 +106,7 @@ public class VerificationServiceImpl implements VerificationService {
         this.notificationService = notificationService;
         this.userRepository = userRepository;
         this.userSummaryService = userSummaryService;
+        this.outboxService = outboxService;
     }
 
     @Override
@@ -343,15 +349,20 @@ public class VerificationServiceImpl implements VerificationService {
                             .grantedBy(actorId)
                             .grantedActionId(audit.id())
                             .build());
+            enqueueVerificationChanged(request.getUserId());
         }
 
+        // A platform notice: the deciding staff member is not named, as with every other
+        // support and enforcement notice.
         notificationService.create(
-                actorId,
-                request.getUserId(),
-                NotificationType.SUPPORT_TICKET_UPDATE,
-                TARGET_ENTITY_TYPE,
-                ticketId,
-                null);
+                NotificationDraft.systemNotice(
+                        request.getUserId(),
+                        NotificationType.SUPPORT_TICKET_UPDATE,
+                        TARGET_ENTITY_TYPE,
+                        ticketId,
+                        null,
+                        null,
+                        null));
         return toQueueItem(saved);
     }
 
@@ -447,6 +458,20 @@ public class VerificationServiceImpl implements VerificationService {
         grant.setRevocationReason(reason);
         grant.setRevokedActionId(auditId);
         userVerificationRepository.save(grant);
+        enqueueVerificationChanged(grant.getUserId());
+    }
+
+    // Enqueued in the transaction that changes the badge, so the notification tier rewrites the
+    // verified-actor flag if and only if the change committed. The rewrite itself runs in the
+    // consumer, off this request's path.
+    private void enqueueVerificationChanged(UUID userId) {
+        outboxService.enqueue(
+                SupportEventTypes.USER_VERIFICATION_CHANGED_V1,
+                SupportEventTypes.USER_VERIFICATION_CHANGED_V1,
+                "user",
+                userId,
+                null,
+                Map.of("userId", userId.toString()));
     }
 
     private VerificationQueueItemResponse toQueueItem(SupportTicket ticket) {
