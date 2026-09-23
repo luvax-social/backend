@@ -294,6 +294,15 @@ class DomainWritersSeedWriterIT {
                                         + " AND read_at < activity_at"))
                 .isZero();
 
+        // Every content moderation audit row names the content's owner, as AdminServiceImpl does,
+        // which is what lets the seeded notice show its snippet and appeal to that account.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions WHERE target_user_id IS NULL"
+                                        + " AND target_entity_type IN"
+                                        + " ('post', 'comment', 'story', 'message')"))
+                .isZero();
+
         // Nothing is dated after the seed clock: a future row would outrank every live one.
         assertThat(
                         jdbcTemplate.queryForObject(

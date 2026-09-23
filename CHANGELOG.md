@@ -525,6 +525,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Seeded content moderation audit rows now name the content's owner, as production does, so seeded removal and restoration notices show their snippet, date and appeal route to that account.
 - Per-instance live fanout queues for comments, messages, notifications and posts now expire after a minute without a consumer, so an instance that dies before its listener attaches no longer leaves a queue collecting every live event indefinitely.
 - The seeded showcase like group no longer ends in the future: its members are spread within the fifty minutes before the seed clock, so live notifications sort above it.
 - A seed run no longer fails its coverage check on the retired `message` notification category, which no producer writes since direct messages left the activity feed.
