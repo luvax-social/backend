@@ -331,6 +331,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- `/topic/notifications.{userId}` now carries a typed envelope (`upserted`, `read-state`, `deleted`, `seen` or `requests`) with the feed state after the event, instead of a bare notification; a pending follow request arrives as `requests` and never as a row; this is a breaking change that ships together with the matching frontend.
 - `PATCH /api/v1/notifications/read-all` now requires an `upTo` bound and marks read only notifications the client rendered, returning how many changed.
 - A comment that mentions the account it answers now notifies that account once instead of twice.
 - Support answers and verification decisions are platform notices with no actor, so they no longer name the staff member or disappear behind a block of that staff member.
