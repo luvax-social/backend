@@ -29,7 +29,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
@@ -40,26 +39,26 @@ import com.app.common.pagination.Cursor;
 import com.app.common.pagination.CursorCodec;
 import com.app.common.pagination.CursorScope;
 import com.app.common.pagination.TimeCursors;
-import com.app.common.response.CursorPageResponse;
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.notification.config.NotificationProperties;
 import com.app.modules.notification.dto.request.AdvanceSeenRequest;
+import com.app.modules.notification.dto.request.NotificationPositionRequest;
 import com.app.modules.notification.dto.response.FollowRequestSummaryResponse;
 import com.app.modules.notification.dto.response.NotificationKeyResponse;
-import com.app.modules.notification.dto.response.NotificationResponse;
+import com.app.modules.notification.dto.response.NotificationPageResponse;
+import com.app.modules.notification.dto.response.NotificationReadStateResponse;
 import com.app.modules.notification.dto.response.NotificationStateResponse;
 import com.app.modules.notification.dto.response.UnseenCountResponse;
-import com.app.modules.notification.entity.Notification;
 import com.app.modules.notification.entity.enums.NotificationCategory;
+import com.app.modules.notification.entity.enums.NotificationFilter;
 import com.app.modules.notification.entity.enums.NotificationType;
-import com.app.modules.notification.mapper.NotificationMapper;
 import com.app.modules.notification.messaging.NotificationEventTypes;
 import com.app.modules.notification.repository.NotificationAggregationRepository;
 import com.app.modules.notification.repository.NotificationAggregationRepository.GroupWrite;
 import com.app.modules.notification.repository.NotificationAggregationRepository.Removal;
 import com.app.modules.notification.repository.NotificationFeedRepository;
+import com.app.modules.notification.repository.NotificationFeedRepository.FeedRow;
 import com.app.modules.notification.repository.NotificationFeedRepository.Key;
-import com.app.modules.notification.repository.NotificationRepository;
 import com.app.modules.notification.repository.NotificationSeenStateRepository;
 import com.app.modules.notification.repository.NotificationSeenStateRepository.SeenState;
 import com.app.modules.notification.service.NotificationDraft;
@@ -74,13 +73,11 @@ class NotificationServiceImplTest {
 
     private static final Duration WINDOW = Duration.ofHours(24);
 
-    @Mock private NotificationRepository notificationRepository;
     @Mock private NotificationAggregationRepository aggregationRepository;
     @Mock private NotificationFeedRepository feedRepository;
     @Mock private NotificationSeenStateRepository seenStateRepository;
     @Mock private NotificationItemAssembler itemAssembler;
     @Mock private NotificationTypePolicy typePolicy;
-    @Mock private NotificationMapper notificationMapper;
     @Mock private OutboxService outboxService;
     @Mock private UserSummaryService userSummaryService;
     @Mock private UserNotificationPreferencesService preferencesService;
@@ -93,14 +90,12 @@ class NotificationServiceImplTest {
     void setUp() {
         service =
                 new NotificationServiceImpl(
-                        notificationRepository,
                         aggregationRepository,
                         feedRepository,
                         seenStateRepository,
                         itemAssembler,
                         typePolicy,
                         new NotificationProperties(WINDOW, Duration.ofMinutes(30), 2),
-                        notificationMapper,
                         outboxService,
                         userSummaryService,
                         preferencesService,
@@ -588,211 +583,206 @@ class NotificationServiceImplTest {
     }
 
     @Test
-    void markAsRead_notOwner_throws403() {
-        UUID notificationId = UUID.randomUUID();
-        UUID recipientId = UUID.randomUUID();
-        when(notificationRepository.findByIdAndRecipientId(notificationId, recipientId))
-                .thenReturn(Optional.empty());
+    void markRead_unreadRow_setsReadAtAndPublishesTheReadState() {
+        UUID userId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        when(aggregationRepository.markRead(userId, id)).thenReturn(Optional.of(now));
 
-        assertThatThrownBy(() -> service.markAsRead(notificationId, recipientId))
-                .isInstanceOf(AppException.class)
-                .satisfies(
-                        ex ->
-                                assertThat(((AppException) ex).getHttpStatus().value())
-                                        .isEqualTo(403));
+        NotificationReadStateResponse state = service.markRead(userId, id);
+
+        assertThat(state.readAt()).isEqualTo(now);
+        verify(outboxService)
+                .enqueue(
+                        eq(NotificationEventTypes.NOTIFICATION_READ_STATE_CHANGED_V1),
+                        any(),
+                        any(),
+                        eq(id),
+                        eq(userId),
+                        argThat(data -> List.of(id.toString()).equals(data.get("ids"))));
     }
 
     @Test
-    void markAsRead_alreadyRead_noUpdate() {
-        UUID notificationId = UUID.randomUUID();
-        UUID recipientId = UUID.randomUUID();
-        Notification notification =
-                Notification.builder()
-                        .id(notificationId)
-                        .recipientId(recipientId)
-                        .type(NotificationType.LIKE_POST)
-                        .category(NotificationType.LIKE_POST.category())
-                        .readAt(OffsetDateTime.now())
-                        .build();
-        when(notificationRepository.findByIdAndRecipientId(notificationId, recipientId))
-                .thenReturn(Optional.of(notification));
+    void markRead_alreadyRead_keepsTheOriginalTimeAndPublishesNothing() {
+        UUID userId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        OffsetDateTime earlier = OffsetDateTime.now(ZoneOffset.UTC).minusHours(1);
+        when(aggregationRepository.markRead(userId, id)).thenReturn(Optional.empty());
+        when(aggregationRepository.findLiveReadState(userId, id))
+                .thenReturn(Optional.of(Optional.of(earlier)));
 
-        service.markAsRead(notificationId, recipientId);
-
-        verify(notificationRepository, never()).save(any());
+        assertThat(service.markRead(userId, id).readAt()).isEqualTo(earlier);
+        verifyNoInteractions(outboxService);
     }
 
     @Test
-    void markAsRead_unread_setsReadFields() {
-        UUID notificationId = UUID.randomUUID();
-        UUID recipientId = UUID.randomUUID();
-        Notification notification =
-                Notification.builder()
-                        .id(notificationId)
-                        .recipientId(recipientId)
-                        .type(NotificationType.LIKE_POST)
-                        .category(NotificationType.LIKE_POST.category())
-                        .build();
-        when(notificationRepository.findByIdAndRecipientId(notificationId, recipientId))
-                .thenReturn(Optional.of(notification));
+    void markRead_rowOfAnotherAccountOrDeleted_isForbidden() {
+        UUID userId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        when(aggregationRepository.markRead(userId, id)).thenReturn(Optional.empty());
+        when(aggregationRepository.findLiveReadState(userId, id)).thenReturn(Optional.empty());
 
-        service.markAsRead(notificationId, recipientId);
-
-        verify(notificationRepository, times(1)).save(notification);
-        assertThat(notification.getReadAt()).isNotNull();
-    }
-
-    @Test
-    void markAllAsRead_called_delegatesToRepository() {
-        UUID recipientId = UUID.randomUUID();
-
-        service.markAllAsRead(recipientId);
-
-        verify(notificationRepository).markAllAsRead(eq(recipientId), any(OffsetDateTime.class));
-    }
-
-    @Test
-    void getUnreadCount_called_returnsRepositoryValue() {
-        UUID recipientId = UUID.randomUUID();
-        when(notificationRepository.countByRecipientIdAndIsReadFalse(recipientId)).thenReturn(7L);
-
-        assertThat(service.getUnreadCount(recipientId)).isEqualTo(7L);
-    }
-
-    @Test
-    void getUnreadCount_noUnreadNotifications_returnsZero() {
-        UUID recipientId = UUID.randomUUID();
-        when(notificationRepository.countByRecipientIdAndIsReadFalse(recipientId)).thenReturn(0L);
-
-        assertThat(service.getUnreadCount(recipientId)).isEqualTo(0L);
-    }
-
-    @Test
-    void listNotifications_firstPage_noCursor_returnsContent() {
-        UUID recipientId = UUID.randomUUID();
-        Notification row = mockNotification();
-        when(notificationRepository.findFirstByRecipient(eq(recipientId), any(PageRequest.class)))
-                .thenReturn(List.of(row));
-        when(notificationMapper.toResponse(any(), any())).thenReturn(mockResponse());
-
-        CursorPageResponse<NotificationResponse> result =
-                service.listNotifications(recipientId, null, 20);
-
-        assertThat(result.getContent()).hasSize(1);
-        assertThat(result.getPageInfo().isHasNextPage()).isFalse();
-        verify(notificationRepository, never()).findById(any());
-    }
-
-    @Test
-    void listNotifications_overFetchReturnsExtraRow_hasNextPage() {
-        UUID recipientId = UUID.randomUUID();
-        int limit = 2;
-        // The service over-fetches limit + 1 rows; the extra row proves a further page exists and
-        // is
-        // trimmed off before the content is returned.
-        List<Notification> rows =
-                List.of(mockNotification(), mockNotification(), mockNotification());
-        when(notificationRepository.findFirstByRecipient(eq(recipientId), any(PageRequest.class)))
-                .thenReturn(rows);
-        when(notificationMapper.toResponse(any(), any())).thenReturn(mockResponse());
-
-        CursorPageResponse<NotificationResponse> result =
-                service.listNotifications(recipientId, null, limit);
-
-        assertThat(result.getPageInfo().isHasNextPage()).isTrue();
-        assertThat(result.getContent()).hasSize(2);
-    }
-
-    @Test
-    void listNotifications_fewerThanLimit_hasNoNextPage() {
-        UUID recipientId = UUID.randomUUID();
-        int limit = 5;
-        when(notificationRepository.findFirstByRecipient(eq(recipientId), any(PageRequest.class)))
-                .thenReturn(List.of(mockNotification()));
-        when(notificationMapper.toResponse(any(), any())).thenReturn(mockResponse());
-
-        CursorPageResponse<NotificationResponse> result =
-                service.listNotifications(recipientId, null, limit);
-
-        assertThat(result.getPageInfo().isHasNextPage()).isFalse();
-    }
-
-    @Test
-    void listNotifications_malformedCursor_throwsInvalidCursor() {
-        UUID recipientId = UUID.randomUUID();
-
-        assertThatThrownBy(() -> service.listNotifications(recipientId, "!!!not-a-cursor!!!", 20))
+        assertThatThrownBy(() -> service.markRead(userId, id))
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode())
-                .isEqualTo(ApiErrorCode.INVALID_CURSOR);
+                .isEqualTo(ApiErrorCode.FORBIDDEN);
     }
 
     @Test
-    void listNotifications_validCursor_pagesFromCursorPosition() {
-        UUID recipientId = UUID.randomUUID();
+    void markUnread_readRow_clearsReadAtAndPublishes() {
+        UUID userId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        when(aggregationRepository.markUnread(userId, id)).thenReturn(true);
+
+        assertThat(service.markUnread(userId, id).readAt()).isNull();
+        verify(outboxService)
+                .enqueue(
+                        eq(NotificationEventTypes.NOTIFICATION_READ_STATE_CHANGED_V1),
+                        any(),
+                        any(),
+                        eq(id),
+                        eq(userId),
+                        argThat(data -> !data.containsKey("readAt")));
+    }
+
+    @Test
+    void markUnread_rowOfAnotherAccount_isForbidden() {
+        UUID userId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        when(aggregationRepository.markUnread(userId, id)).thenReturn(false);
+        when(aggregationRepository.findLiveReadState(userId, id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.markUnread(userId, id)).isInstanceOf(AppException.class);
+    }
+
+    @Test
+    void markReadUpTo_publishesOneEventCarryingTheBound() {
+        UUID userId = UUID.randomUUID();
+        NotificationPositionRequest upTo =
+                new NotificationPositionRequest(
+                        OffsetDateTime.now(ZoneOffset.UTC), UUID.randomUUID());
+        when(aggregationRepository.markReadUpTo(userId, upTo.activityAt(), upTo.id()))
+                .thenReturn(List.of(UUID.randomUUID(), UUID.randomUUID()));
+
+        assertThat(service.markReadUpTo(userId, upTo).updated()).isEqualTo(2);
+        verify(outboxService, times(1))
+                .enqueue(
+                        eq(NotificationEventTypes.NOTIFICATION_READ_STATE_CHANGED_V1),
+                        any(),
+                        any(),
+                        eq(userId),
+                        eq(userId),
+                        argThat(data -> data.get("upTo") != null && data.get("readAt") != null));
+    }
+
+    @Test
+    void markReadUpTo_nothingToRead_publishesNothing() {
+        UUID userId = UUID.randomUUID();
+        NotificationPositionRequest upTo =
+                new NotificationPositionRequest(
+                        OffsetDateTime.now(ZoneOffset.UTC), UUID.randomUUID());
+        when(aggregationRepository.markReadUpTo(any(), any(), any())).thenReturn(List.of());
+
+        assertThat(service.markReadUpTo(userId, upTo).updated()).isZero();
+        verifyNoInteractions(outboxService);
+    }
+
+    @Test
+    void delete_ownRow_softDeletesAndPublishes_andASecondDeleteIsANoOp() {
+        UUID userId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        when(aggregationRepository.softDelete(userId, id)).thenReturn(true, false);
+        when(aggregationRepository.isOwnedBy(userId, id)).thenReturn(true);
+
+        service.delete(userId, id);
+        service.delete(userId, id);
+
+        verify(outboxService, times(1))
+                .enqueue(
+                        eq(NotificationEventTypes.NOTIFICATION_DELETED_V1),
+                        any(),
+                        any(),
+                        eq(id),
+                        eq(userId),
+                        any());
+    }
+
+    @Test
+    void delete_rowOfAnotherAccount_isForbidden() {
+        UUID userId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        when(aggregationRepository.softDelete(userId, id)).thenReturn(false);
+        when(aggregationRepository.isOwnedBy(userId, id)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.delete(userId, id)).isInstanceOf(AppException.class);
+    }
+
+    @Test
+    void listFeed_firstPage_overFetchesOne_andCarriesTheHead() {
+        UUID userId = UUID.randomUUID();
+        List<FeedRow> rows = List.of(feedRow(), feedRow(), feedRow());
+        Key head = new Key(rows.get(0).activityAt(), rows.get(0).id());
+        when(feedRepository.findPage(userId, NotificationFilter.ALL, null, 3)).thenReturn(rows);
+        when(seenStateRepository.find(userId)).thenReturn(Optional.empty());
+        when(itemAssembler.assemble(eq(userId), any(), eq(null))).thenReturn(List.of());
+        when(feedRepository.findHead(userId)).thenReturn(Optional.of(head));
+
+        NotificationPageResponse page = service.listFeed(userId, NotificationFilter.ALL, null, 2);
+
+        assertThat(page.pageInfo().isHasNextPage()).isTrue();
+        assertThat(page.head())
+                .isEqualTo(new NotificationKeyResponse(head.activityAt(), head.id()));
+        verify(itemAssembler).assemble(userId, rows.subList(0, 2), null);
+    }
+
+    @Test
+    void listFeed_laterPage_seeksFromTheCursorAndHasNoHead() {
+        UUID userId = UUID.randomUUID();
         UUID cursorId = UUID.randomUUID();
         OffsetDateTime cursorTime = OffsetDateTime.now(ZoneOffset.UTC).minusHours(1);
         String cursor =
                 CursorCodec.encode(
                         new Cursor(TimeCursors.toMicros(cursorTime), cursorId),
                         CursorScope.NOTIFICATIONS);
-        // The codec carries microsecond precision; the decoded time round-trips through micros.
-        OffsetDateTime expectedTime = TimeCursors.fromMicros(TimeCursors.toMicros(cursorTime));
-        when(notificationRepository.findByRecipientBefore(
-                        eq(recipientId), eq(expectedTime), eq(cursorId), any(PageRequest.class)))
-                .thenReturn(List.of(mockNotification()));
-        when(notificationMapper.toResponse(any(), any())).thenReturn(mockResponse());
+        Key expected = new Key(TimeCursors.fromMicros(TimeCursors.toMicros(cursorTime)), cursorId);
+        when(feedRepository.findPage(userId, NotificationFilter.UNREAD, expected, 21))
+                .thenReturn(List.of());
+        when(seenStateRepository.find(userId)).thenReturn(Optional.empty());
+        when(itemAssembler.assemble(any(), any(), any())).thenReturn(List.of());
 
-        CursorPageResponse<NotificationResponse> result =
-                service.listNotifications(recipientId, cursor, 20);
+        NotificationPageResponse page =
+                service.listFeed(userId, NotificationFilter.UNREAD, cursor, 20);
 
-        assertThat(result.getContent()).hasSize(1);
-        verify(notificationRepository)
-                .findByRecipientBefore(
-                        eq(recipientId), eq(expectedTime), eq(cursorId), any(PageRequest.class));
+        assertThat(page.head()).isNull();
+        assertThat(page.pageInfo().isHasPreviousPage()).isTrue();
+        verify(feedRepository, never()).findHead(any());
     }
 
     @Test
-    void listNotifications_cursorIsAPositionNotAnIdLookup() {
-        UUID recipientId = UUID.randomUUID();
-        UUID cursorId = UUID.randomUUID();
-        OffsetDateTime cursorTime = OffsetDateTime.now(ZoneOffset.UTC);
-        String cursor =
-                CursorCodec.encode(
-                        new Cursor(TimeCursors.toMicros(cursorTime), cursorId),
-                        CursorScope.NOTIFICATIONS);
-        when(notificationRepository.findByRecipientBefore(
-                        eq(recipientId), any(), eq(cursorId), any(PageRequest.class)))
-                .thenReturn(List.of());
-
-        service.listNotifications(recipientId, cursor, 20);
-
-        // The opaque cursor is a keyset position, not a notification id, so no ownership or
-        // existence lookup occurs - there is no cross-tenant oracle to leak.
-        verify(notificationRepository, never()).findByIdAndRecipientId(any(), any());
+    void listFeed_malformedCursor_isInvalidCursor() {
+        assertThatThrownBy(
+                        () ->
+                                service.listFeed(
+                                        UUID.randomUUID(), NotificationFilter.ALL, "!!!", 20))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.INVALID_CURSOR);
     }
 
-    private static Notification mockNotification() {
-        return Notification.builder()
-                .id(UUID.randomUUID())
-                .recipientId(UUID.randomUUID())
-                .type(NotificationType.FOLLOW)
-                .category(NotificationType.FOLLOW.category())
-                .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .build();
-    }
-
-    private static NotificationResponse mockResponse() {
-        return new NotificationResponse(
+    private static FeedRow feedRow() {
+        OffsetDateTime at = OffsetDateTime.now(ZoneOffset.UTC);
+        return new FeedRow(
                 UUID.randomUUID(),
-                null,
                 NotificationType.FOLLOW,
+                NotificationType.FOLLOW.category(),
                 null,
                 null,
                 null,
                 null,
-                false,
                 null,
-                OffsetDateTime.now(ZoneOffset.UTC));
+                null,
+                at,
+                at,
+                1);
     }
 }

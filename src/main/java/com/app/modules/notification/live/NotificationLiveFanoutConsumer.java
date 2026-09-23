@@ -1,6 +1,5 @@
 package com.app.modules.notification.live;
 
-import java.util.List;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -13,13 +12,7 @@ import org.springframework.stereotype.Component;
 
 import com.app.common.messaging.DomainEventMessageParser;
 import com.app.common.outbox.model.DomainEventEnvelope;
-import com.app.common.response.UserSummaryResponse;
-import com.app.modules.notification.dto.response.NotificationResponse;
-import com.app.modules.notification.entity.Notification;
-import com.app.modules.notification.mapper.NotificationMapper;
-import com.app.modules.notification.repository.NotificationRepository;
-import com.app.modules.social.repository.BlockRepository;
-import com.app.modules.users.service.UserSummaryService;
+import com.app.modules.notification.service.NotificationService;
 
 /**
  * Pushes live notification events received on this instance's fanout queue to local STOMP
@@ -47,25 +40,16 @@ public class NotificationLiveFanoutConsumer {
     private static final Logger log = LoggerFactory.getLogger(NotificationLiveFanoutConsumer.class);
 
     private final DomainEventMessageParser parser;
-    private final NotificationRepository notificationRepository;
-    private final NotificationMapper notificationMapper;
+    private final NotificationService notificationService;
     private final SimpMessagingTemplate messagingTemplate;
-    private final UserSummaryService userSummaryService;
-    private final BlockRepository blockRepository;
 
     public NotificationLiveFanoutConsumer(
             DomainEventMessageParser parser,
-            NotificationRepository notificationRepository,
-            NotificationMapper notificationMapper,
-            SimpMessagingTemplate messagingTemplate,
-            UserSummaryService userSummaryService,
-            BlockRepository blockRepository) {
+            NotificationService notificationService,
+            SimpMessagingTemplate messagingTemplate) {
         this.parser = parser;
-        this.notificationRepository = notificationRepository;
-        this.notificationMapper = notificationMapper;
+        this.notificationService = notificationService;
         this.messagingTemplate = messagingTemplate;
-        this.userSummaryService = userSummaryService;
-        this.blockRepository = blockRepository;
     }
 
     @RabbitListener(
@@ -79,21 +63,12 @@ public class NotificationLiveFanoutConsumer {
                 return;
             }
             UUID recipientId = UUID.fromString(recipientIdValue.toString());
-            Notification notification =
-                    notificationRepository.findById(event.aggregateId()).orElse(null);
-            if (notification == null) {
-                return;
-            }
-            UUID actorId = notification.getActorId();
-            if (actorId != null && blockRepository.existsBetween(actorId, recipientId)) {
-                return;
-            }
-            UserSummaryResponse actor =
-                    actorId == null
-                            ? null
-                            : userSummaryService.loadSummaries(List.of(actorId)).get(actorId);
-            NotificationResponse response = notificationMapper.toResponse(notification, actor);
-            messagingTemplate.convertAndSend("/topic/notifications." + recipientId, response);
+            notificationService
+                    .findItem(recipientId, event.aggregateId())
+                    .ifPresent(
+                            item ->
+                                    messagingTemplate.convertAndSend(
+                                            "/topic/notifications." + recipientId, item));
         } catch (RuntimeException ex) {
             log.warn("Failed to push live notification event: {}", ex.getMessage());
         }

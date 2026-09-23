@@ -27,6 +27,7 @@ import com.app.common.security.util.SecurityUtils;
 import com.app.modules.comment.api.CommentApi;
 import com.app.modules.comment.dto.request.CreateCommentRequest;
 import com.app.modules.comment.dto.request.EditCommentRequest;
+import com.app.modules.comment.dto.response.CommentContextResponse;
 import com.app.modules.comment.dto.response.CommentDeletionScopeResponse;
 import com.app.modules.comment.dto.response.CommentResponse;
 import com.app.modules.comment.service.CommentService;
@@ -90,6 +91,17 @@ public class CommentController extends BaseController implements CommentApi {
         CursorPageResponse<CommentResponse> body =
                 commentService.listReplies(
                         SecurityUtils.getCurrentUserId(), commentId, cursor, limit);
+        return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
+    }
+
+    /** Returns a comment with its ancestors, top-level first; requires authentication. */
+    @Override
+    @GetMapping(ApiConstants.Comments.ROOT + ApiConstants.Comments.CONTEXT)
+    @RateLimiter(name = "highTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<CommentContextResponse>> getContext(
+            @PathVariable("commentId") UUID commentId) {
+        CommentContextResponse body =
+                commentService.getContext(SecurityUtils.getCurrentUserId(), commentId);
         return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
     }
 

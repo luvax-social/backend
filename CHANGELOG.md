@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `GET /api/v1/notifications` takes a `filter` (all, unread, comments, mentions, follows, system, verified) and returns hydrated feed rows with targets, previews, moderation and relationship blocks, and a `head` on the first page.
+- `GET /api/v1/notifications/state` returns the capped unseen badge, the seen and previous watermarks, and the pending follow request summary for the pinned entry; `POST /api/v1/notifications/seen` advances the watermark.
+- `PUT` and `DELETE /api/v1/notifications/{id}/read` mark one notification read or unread, and `DELETE /api/v1/notifications/{id}` removes it from the feed.
+- `GET /api/v1/comments/{commentId}/context` returns a comment with every ancestor, top-level first, so a notification can open a reply wherever it sits.
 - Notification rows are resolved at read time through the module that owns each target, so a deleted or removed post, an admin-removed comment, an expired story, a post that became private and a block all show as an unavailable target with no preview instead of a link that fails.
 - Batched previews for other modules: post availability and first media, comment and parent-comment text, story availability and media, moderation decisions with the affected text for its author only, and support ticket status for its owner.
 - A per-account seen watermark that advances only to notifications the client actually rendered, never moves backwards, and rotates the boundary of the new section only after a pause between visits, so the new section survives a reload.
@@ -327,6 +331,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- `PATCH /api/v1/notifications/read-all` now requires an `upTo` bound and marks read only notifications the client rendered, returning how many changed.
 - A comment that mentions the account it answers now notifies that account once instead of twice.
 - Support answers and verification decisions are platform notices with no actor, so they no longer name the staff member or disappear behind a block of that staff member.
 - Every moderation notice now records the audit decision behind it, which is what lets a removed or restored post and a warning offer an appeal.
@@ -726,6 +731,7 @@ A conversation that already has messages in it is kept, because unfollowing some
 - `CustomOidcUserService.resolveUniqueUsername` random-suffix branch now re-checks uniqueness via `ThreadLocalRandom` and a bounded retry loop, preventing the rare unique-constraint violation that previously surfaced as a 500.
 
 ### Removed
+- `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/{id}/read`, and the `actor`, `entityType`, `entityId`, `postId` and `message` fields of notification list items; this is a breaking change that ships together with the matching frontend.
 - Direct messages no longer produce activity notifications; the retired `message.notification.queue` and its dead-letter queue are deleted from the broker at startup, and `MESSAGE_CONSUMER_ENABLED` is gone.
 - The redundant `is_read` notification column, whose value is fully carried by `read_at`, and three notification indexes superseded by the new feed indexes.
 - Mail campaigns, along with the administrator composer, the scheduled sender, the read-only Markdown samples and the per-account campaign email opt-out. Account, security, moderation and support mail are unaffected, and the send log that records every delivery attempt is unchanged.
@@ -853,6 +859,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- An end-to-end controller test of the feed contract, filters, head, watermark, read state, deletion, unavailable targets, blocked and inactive actors, moderation notices and the comment context endpoint.
 - Unit tests for the notification row assembler and each preview service's availability rules, and for the code-point-safe snippet helper.
 - Repository tests for the seen watermark (monotonic advance, clamp, session rotation, ownership) and for the feed reads (visibility under blocks and account status, bounded count, head, keyset pagination per filter, and the index each filter uses).
 - Repository tests for group open, join, window close, retraction, concurrent first actors, request conversion, block cleanup and the batched verified resync, and unit tests for the post like consumer, the retired-queue cleaner and the type policy.

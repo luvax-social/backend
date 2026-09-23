@@ -1,6 +1,7 @@
 package com.app.modules.notification.repository;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -353,5 +354,104 @@ public class NotificationAggregationRepository {
                 .param("actorId", actorId)
                 .param("batchSize", batchSize)
                 .update();
+    }
+
+    /**
+     * Marks the recipient's live notification read, if it is unread.
+     *
+     * @return the new read time, or empty when the row was already read, is deleted or is not the
+     *     recipient's
+     */
+    public Optional<OffsetDateTime> markRead(UUID recipientId, UUID notificationId) {
+        return jdbc.sql(
+                        "UPDATE notifications SET read_at = now() WHERE id = :id"
+                                + " AND recipient_id = :recipientId AND deleted_at IS NULL"
+                                + " AND read_at IS NULL RETURNING read_at")
+                .param("id", notificationId)
+                .param("recipientId", recipientId)
+                .query(OffsetDateTime.class)
+                .optional();
+    }
+
+    /**
+     * Marks the recipient's live notification unread, if it is read.
+     *
+     * @return true when the row changed
+     */
+    public boolean markUnread(UUID recipientId, UUID notificationId) {
+        return jdbc.sql(
+                                "UPDATE notifications SET read_at = NULL WHERE id = :id"
+                                        + " AND recipient_id = :recipientId AND deleted_at IS NULL"
+                                        + " AND read_at IS NOT NULL")
+                        .param("id", notificationId)
+                        .param("recipientId", recipientId)
+                        .update()
+                > 0;
+    }
+
+    /**
+     * The read state of the recipient's live notification.
+     *
+     * @return empty when the row is deleted or not the recipient's; otherwise its read time, which
+     *     is itself empty when unread
+     */
+    public Optional<Optional<OffsetDateTime>> findLiveReadState(
+            UUID recipientId, UUID notificationId) {
+        return jdbc.sql(
+                        "SELECT read_at FROM notifications WHERE id = :id"
+                                + " AND recipient_id = :recipientId AND deleted_at IS NULL")
+                .param("id", notificationId)
+                .param("recipientId", recipientId)
+                .query((rs, rowNum) -> Optional.ofNullable(rs.getObject(1, OffsetDateTime.class)))
+                .optional();
+    }
+
+    /**
+     * Soft-deletes the recipient's notification and closes its group, so a later actor on the same
+     * target opens a new group rather than reviving the deleted one.
+     *
+     * @return true when the row changed; false when it was already deleted or is not the
+     *     recipient's
+     */
+    public boolean softDelete(UUID recipientId, UUID notificationId) {
+        return jdbc.sql(
+                                "UPDATE notifications SET deleted_at = now(), is_group_open = FALSE"
+                                        + " WHERE id = :id AND recipient_id = :recipientId"
+                                        + " AND deleted_at IS NULL")
+                        .param("id", notificationId)
+                        .param("recipientId", recipientId)
+                        .update()
+                > 0;
+    }
+
+    /** Whether the notification belongs to the recipient, deleted or not. */
+    public boolean isOwnedBy(UUID recipientId, UUID notificationId) {
+        return jdbc.sql(
+                        "SELECT EXISTS (SELECT 1 FROM notifications WHERE id = :id"
+                                + " AND recipient_id = :recipientId)")
+                .param("id", notificationId)
+                .param("recipientId", recipientId)
+                .query(Boolean.class)
+                .single();
+    }
+
+    /**
+     * Marks read every unread notification the recipient can see at or below {@code upTo}, so rows
+     * that arrived after the client rendered stay unread.
+     *
+     * @return the ids that changed
+     */
+    public List<UUID> markReadUpTo(UUID recipientId, OffsetDateTime upToActivityAt, UUID upToId) {
+        return jdbc.sql(
+                        "UPDATE notifications n SET read_at = now() WHERE "
+                                + NotificationFeedRepository.VISIBLE
+                                + " AND n.read_at IS NULL"
+                                + " AND (n.activity_at, n.id) <= (:upToAt, :upToId)"
+                                + " RETURNING n.id")
+                .param("viewer", recipientId)
+                .param("upToAt", upToActivityAt)
+                .param("upToId", upToId)
+                .query(UUID.class)
+                .list();
     }
 }

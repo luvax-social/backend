@@ -3,12 +3,13 @@ package com.app.modules.notification.service;
 import java.util.Optional;
 import java.util.UUID;
 
-import com.app.common.response.CursorPageResponse;
 import com.app.modules.notification.dto.request.AdvanceSeenRequest;
+import com.app.modules.notification.dto.request.NotificationPositionRequest;
 import com.app.modules.notification.dto.response.NotificationItemResponse;
 import com.app.modules.notification.dto.response.NotificationPageResponse;
-import com.app.modules.notification.dto.response.NotificationResponse;
+import com.app.modules.notification.dto.response.NotificationReadStateResponse;
 import com.app.modules.notification.dto.response.NotificationStateResponse;
+import com.app.modules.notification.dto.response.ReadAllResponse;
 import com.app.modules.notification.entity.enums.NotificationFilter;
 import com.app.modules.notification.entity.enums.NotificationType;
 
@@ -174,39 +175,39 @@ public interface NotificationService {
     Optional<NotificationItemResponse> findItem(UUID userId, UUID notificationId);
 
     /**
-     * Marks the notification as read. Throws {@link com.app.common.exception.AppException} with
-     * {@link com.app.common.enums.ApiErrorCode#FORBIDDEN} if the notification does not exist or
-     * belongs to a different recipient.
+     * Marks one of the caller's notifications read. Idempotent: a read notification keeps its
+     * original read time.
      *
-     * @param notificationId notification to mark as read
-     * @param recipientId authenticated user's id
+     * @return the notification id and its read time
+     * @throws com.app.common.exception.AppException {@code FORBIDDEN} when the notification is not
+     *     the caller's or was deleted
      */
-    void markAsRead(UUID notificationId, UUID recipientId);
+    NotificationReadStateResponse markRead(UUID userId, UUID notificationId);
 
     /**
-     * Marks all unread notifications for the recipient as read in a single operation.
+     * Marks one of the caller's notifications unread. Idempotent.
      *
-     * @param recipientId authenticated user's id
+     * @return the notification id with a null read time
+     * @throws com.app.common.exception.AppException {@code FORBIDDEN} when the notification is not
+     *     the caller's or was deleted
      */
-    void markAllAsRead(UUID recipientId);
+    NotificationReadStateResponse markUnread(UUID userId, UUID notificationId);
 
     /**
-     * Returns the count of unread notifications for the given recipient.
+     * Marks read every visible, unread notification of the caller's at or below {@code upTo}, the
+     * newest row the client rendered, so a notification that arrived after the client looked stays
+     * unread.
      *
-     * @param recipientId authenticated user's id
-     * @return count of notifications where is_read = false
+     * @return how many notifications changed
      */
-    long getUnreadCount(UUID recipientId);
+    ReadAllResponse markReadUpTo(UUID userId, NotificationPositionRequest upTo);
 
     /**
-     * Returns a cursor-paginated list of notifications for the recipient, ordered by creation time
-     * descending.
+     * Removes one of the caller's notifications from their feed (a soft delete) and closes its
+     * group, so a later like on the same post starts a new group. Idempotent.
      *
-     * @param recipientId authenticated user's id
-     * @param cursor opaque cursor of the last item on the previous page; null for first page
-     * @param limit maximum number of items to return (max 100)
-     * @return cursor page response containing notification items
+     * @throws com.app.common.exception.AppException {@code FORBIDDEN} when the notification is not
+     *     the caller's
      */
-    CursorPageResponse<NotificationResponse> listNotifications(
-            UUID recipientId, String cursor, int limit);
+    void delete(UUID userId, UUID notificationId);
 }

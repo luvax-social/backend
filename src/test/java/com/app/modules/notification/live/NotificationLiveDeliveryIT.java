@@ -183,7 +183,7 @@ class NotificationLiveDeliveryIT {
 
         byte[] payload = recipientListener.received().get(15, TimeUnit.SECONDS);
         String body = new String(payload);
-        assertThat(body).contains("\"actor\":{\"id\":\"" + actor.getId() + "\"");
+        assertThat(body).contains("\"actors\":[{\"id\":\"" + actor.getId() + "\"");
         assertThat(body).contains("\"type\":\"follow\"");
 
         assertThatThrownBy(() -> bystanderListener.received().get(3, TimeUnit.SECONDS))
