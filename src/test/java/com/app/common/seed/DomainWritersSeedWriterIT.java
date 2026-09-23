@@ -303,6 +303,17 @@ class DomainWritersSeedWriterIT {
                                         + " ('post', 'comment', 'story', 'message')"))
                 .isZero();
 
+        // The unavailable-target showcase is a like group on a post its owner cannot open.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications n JOIN users u"
+                                        + " ON u.id = n.recipient_id JOIN posts p ON p.id = n.post_id"
+                                        + " WHERE u.username = 'vivian.frontend'"
+                                        + " AND n.type = 'like_post' AND n.deleted_at IS NULL"
+                                        + " AND (p.status IN ('removed', 'draft')"
+                                        + " OR p.deleted_at IS NOT NULL)"))
+                .isPositive();
+
         // Nothing is dated after the seed clock: a future row would outrank every live one.
         assertThat(
                         jdbcTemplate.queryForObject(

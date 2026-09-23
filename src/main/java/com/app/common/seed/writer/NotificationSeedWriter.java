@@ -63,7 +63,7 @@ import lombok.extern.slf4j.Slf4j;
  *       follower it does not follow back), one soft-deleted row and an unseen count between 1 and
  *       99;
  *   <li>{@value #REQUESTS_SHOWCASE}: a private account holding pending follow requests;
- *   <li>{@value #UNAVAILABLE_SHOWCASE}: a like group on a post that is no longer published;
+ *   <li>{@value #UNAVAILABLE_SHOWCASE}: a like group on a post its owner can no longer open;
  *   <li>{@value #OVERFLOW_SHOWCASE}: no seen watermark at all, so the badge reads 99+;
  *   <li>{@value #QUIET_SHOWCASE}: a small feed with an ordinary badge.
  * </ul>
@@ -488,13 +488,14 @@ public class NotificationSeedWriter {
                 false);
     }
 
-    // A like group on a post that has since left the feed, so the row renders an unavailable
-    // target rather than a thumbnail.
+    // A like group on a post its owner can no longer open - removed, a draft, or deleted - so the
+    // row renders an unavailable target rather than a thumbnail. An archived post does not qualify:
+    // its owner still opens it from the archive.
     private void shapeUnavailableLike(
             UUID recipient, Instant now, List<Event> shaped, Set<String> reserved) {
         List<UUID> posts =
                 jdbc.queryForList(
-                        "SELECT id FROM posts WHERE user_id = ? AND (status <> 'published'"
+                        "SELECT id FROM posts WHERE user_id = ? AND (status IN ('removed', 'draft')"
                                 + " OR deleted_at IS NOT NULL) AND like_count > 0"
                                 + " ORDER BY like_count DESC, id",
                         UUID.class,
