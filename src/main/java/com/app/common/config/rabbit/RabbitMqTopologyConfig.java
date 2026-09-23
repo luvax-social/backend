@@ -65,6 +65,13 @@ public class RabbitMqTopologyConfig {
     public static final String RECOMMENDATION_FEEDBACK_DEAD_LETTER_ROUTING_KEY =
             "recommendation.feedback.dead-letter";
 
+    /**
+     * Idle lifetime of a per-instance live fanout queue: removed by the broker after this long with
+     * no consumer, so a queue left by an instance that died before its listener attached does not
+     * collect every live event forever.
+     */
+    public static final int LIVE_SERVER_QUEUE_EXPIRES_MILLIS = 60_000;
+
     public static final String POST_NOTIFICATION_QUEUE = "post.notification.queue";
     public static final String POST_NOTIFICATION_DEAD_LETTER_QUEUE = "post.notification.dlq";
     public static final String POST_NOTIFICATION_DEAD_LETTER_ROUTING_KEY =

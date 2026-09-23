@@ -525,6 +525,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Per-instance live fanout queues for comments, messages, notifications and posts now expire after a minute without a consumer, so an instance that dies before its listener attaches no longer leaves a queue collecting every live event indefinitely.
 - The seeded showcase like group no longer ends in the future: its members are spread within the fifty minutes before the seed clock, so live notifications sort above it.
 - A seed run no longer fails its coverage check on the retired `message` notification category, which no producer writes since direct messages left the activity feed.
 - The recommendation guide now gives the seeded accounts' real password.
@@ -867,6 +868,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- A unit test asserts every live fanout queue auto-deletes and carries the idle expiry.
 - An integration test drives the post like notification consumer against a real database: group join, redelivery, stale likes, retraction, emptied groups and invalid payloads.
 - Unit tests for the warning notice consumer cover the audit link, duplicate delivery, invalid payloads, retries and dead-lettering.
 - Seed tests assert the aggregated feed shape, the showcase group sizes and badge states, and that every replayed like and comment is already handled by its notification consumer.
