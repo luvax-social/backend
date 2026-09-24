@@ -18,6 +18,7 @@ import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -96,6 +97,7 @@ class CommentNotificationConsumerIT {
     @Autowired private CommentNotificationConsumer consumer;
     @Autowired private NotificationRepository notificationRepository;
     @Autowired private UserRepository userRepository;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     // Declared at the concrete type rather than at the MailSender interface, because
     // ModerationMailEventHandler injects AbstractTemplateMailSender rather than the
@@ -191,9 +193,26 @@ class CommentNotificationConsumerIT {
     void handle_commentLiked_createsLikeCommentNotification() throws Exception {
         Channel channel = mock(Channel.class);
         User commentOwner = userRepository.save(activeUser("liked_" + suffix()));
-        UUID postId = UUID.randomUUID();
+        // The consumer writes a like notification only while the like exists, so the like is
+        // recorded first, as CommentServiceImpl does before it enqueues the event.
+        UUID postId =
+                jdbcTemplate.queryForObject(
+                        "INSERT INTO posts (user_id) VALUES (?) RETURNING id",
+                        UUID.class,
+                        commentOwner.getId());
+        UUID commentId =
+                jdbcTemplate.queryForObject(
+                        "INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, 'hi')"
+                                + " RETURNING id",
+                        UUID.class,
+                        postId,
+                        commentOwner.getId());
+        jdbcTemplate.update(
+                "INSERT INTO comment_likes (user_id, comment_id) VALUES (?, ?)",
+                actor.getId(),
+                commentId);
         Map<String, Object> data = new HashMap<>();
-        data.put("commentId", UUID.randomUUID().toString());
+        data.put("commentId", commentId.toString());
         data.put("commentOwnerId", commentOwner.getId().toString());
         data.put("postId", postId.toString());
 

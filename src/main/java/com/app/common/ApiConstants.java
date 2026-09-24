@@ -73,6 +73,7 @@ public final class ApiConstants {
         public static final String BY_ID = "/{commentId}";
         public static final String LIKE = "/{commentId}/like";
         public static final String REPLIES = "/{commentId}/replies";
+        public static final String CONTEXT = "/{commentId}/context";
         public static final String DELETION_SCOPE = "/{commentId}/deletion-scope";
     }
 
@@ -122,9 +123,11 @@ public final class ApiConstants {
         private Notifications() {}
 
         public static final String ROOT = API_V1 + "/notifications";
-        public static final String MARK_READ = "/{notificationId}/read";
-        public static final String MARK_ALL_READ = "/read-all";
-        public static final String UNREAD_COUNT = "/unread-count";
+        public static final String STATE = "/state";
+        public static final String SEEN = "/seen";
+        public static final String BY_ID = "/{notificationId}";
+        public static final String READ = "/{notificationId}/read";
+        public static final String READ_ALL = "/read-all";
     }
 
     public static final class Hashtags {

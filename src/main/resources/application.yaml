@@ -183,6 +183,12 @@ app:
     verify-email-path: ${MAIL_VERIFY_EMAIL_PATH:/verify-email}
     frontend-base-url: ${FRONTEND_BASE_URL}
   notification:
+    # How long a like, story-view or follow group accepts new actors, from its first actor.
+    aggregation-window: ${NOTIFICATION_AGGREGATION_WINDOW:PT24H}
+    # The pause that separates two visits to the feed; the "new" section resets only after it.
+    seen-session-gap: ${NOTIFICATION_SEEN_SESSION_GAP:PT30M}
+    # Rows rewritten per transaction when a verified badge is granted or revoked.
+    verified-resync-batch-size: ${NOTIFICATION_VERIFIED_RESYNC_BATCH_SIZE:500}
     consumer:
       enabled: ${NOTIFICATION_CONSUMER_ENABLED:false}
     live:
@@ -228,6 +234,10 @@ app:
   post:
     consumer:
       enabled: ${POST_CONSUMER_ENABLED:false}
+    # PostNotificationConsumer: post likes into like notifications. Separate from the index-sync
+    # consumer above because the seed profile must hold this one off while keeping that one.
+    notification-consumer:
+      enabled: ${POST_NOTIFICATION_CONSUMER_ENABLED:false}
     seed:
       enabled: ${POST_SEED_ENABLED:true}
     live:
@@ -293,8 +303,6 @@ app:
       fixed-delay: ${STORY_CLEANUP_FIXED_DELAY:PT1H}
   message:
     idempotency-ttl-hours: ${MESSAGE_IDEMPOTENCY_TTL_HOURS:24}
-    consumer:
-      enabled: ${MESSAGE_CONSUMER_ENABLED:false}
     live:
       enabled: ${MESSAGE_LIVE_ENABLED:false}
   gorse:

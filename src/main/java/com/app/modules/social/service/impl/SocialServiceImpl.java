@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -34,6 +35,7 @@ import com.app.modules.report.enums.ReportType;
 import com.app.modules.report.service.ReportedTargetService;
 import com.app.modules.social.dto.response.FollowRequestResponse;
 import com.app.modules.social.dto.response.FollowResponse;
+import com.app.modules.social.dto.response.PendingFollowRequestSummary;
 import com.app.modules.social.entity.Block;
 import com.app.modules.social.entity.BlockId;
 import com.app.modules.social.entity.Follow;
@@ -163,16 +165,30 @@ public class SocialServiceImpl implements SocialService {
             throw new AppException(ApiErrorCode.NOT_FOUND, "Target user not found");
         }
 
+        // The status is read first because the event names it: an unfollow retracts a follow
+        // notification, a cancelled request withdraws the request.
+        FollowStatus previousStatus =
+                followRepository
+                        .findById(new FollowId(currentUserId, targetUserId))
+                        .map(Follow::getStatus)
+                        .orElseThrow(
+                                () ->
+                                        new AppException(
+                                                ApiErrorCode.NOT_FOUND,
+                                                "Follow relationship not found"));
+
         // Conditional delete rather than load-then-delete(entity): the latter raises
         // ObjectOptimisticLockingFailureException (-> 500) when a concurrent duplicate request
         // already removed the same row, since Hibernate's entity-based DELETE always checks the
         // affected-row count. Branching on the returned count here instead makes the loser of the
         // race a clean 404, not a 500.
         int deleted =
-                followRepository.deleteByFollowerIdAndFollowingId(currentUserId, targetUserId);
+                followRepository.deleteByFollowerIdAndFollowingIdAndStatus(
+                        currentUserId, targetUserId, previousStatus);
         if (deleted == 0) {
             throw new AppException(ApiErrorCode.NOT_FOUND, "Follow relationship not found");
         }
+        socialEventService.publishUnfollowed(currentUserId, targetUserId, previousStatus);
 
         // Only an empty conversation goes. One carrying messages is history, and history is not a
         // side effect of a follow button.
@@ -201,6 +217,7 @@ public class SocialServiceImpl implements SocialService {
             if (deleted == 0) {
                 throw new AppException(ApiErrorCode.SOCIAL_REQUEST_NOT_FOUND);
             }
+            socialEventService.publishFollowRequestResolved(requesterId, currentUserId, false);
             return;
         }
 
@@ -214,6 +231,7 @@ public class SocialServiceImpl implements SocialService {
         if ("approve".equalsIgnoreCase(action)) {
             follow.setStatus(FollowStatus.ACCEPTED);
             followRepository.save(follow);
+            socialEventService.publishFollowRequestResolved(requesterId, currentUserId, true);
 
             // The approved edge runs requester -> approver. The pair is mutual only if the
             // approver already follows the requester back.
@@ -246,6 +264,7 @@ public class SocialServiceImpl implements SocialService {
 
         Block block = Block.builder().id(blockId).build();
         blockRepository.save(block);
+        socialEventService.publishBlocked(currentUserId, targetUserId);
 
         FollowId followIdDirect = new FollowId(currentUserId, targetUserId);
         followRepository.findById(followIdDirect).ifPresent(followRepository::delete);
@@ -566,6 +585,41 @@ public class SocialServiceImpl implements SocialService {
     public boolean hasAcceptedFollow(UUID followerId, UUID followingId) {
         return followRepository.existsByIdAndStatus(
                 new FollowId(followerId, followingId), FollowStatus.ACCEPTED);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<FollowStatus> findFollowStatus(UUID followerId, UUID followingId) {
+        return followRepository
+                .findById(new FollowId(followerId, followingId))
+                .map(Follow::getStatus);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PendingFollowRequestSummary summarizePendingFollowRequests(
+            UUID userId, int recentLimit, int countLimit) {
+        long count = followRepository.countPendingRequestsUpTo(userId, countLimit);
+        if (count == 0) {
+            return new PendingFollowRequestSummary(0, List.of());
+        }
+        List<UUID> recent =
+                followRepository
+                        .findFirstPendingRequests(userId, PageRequest.of(0, recentLimit))
+                        .stream()
+                        .map(follow -> follow.getId().getFollowerId())
+                        .toList();
+        return new PendingFollowRequestSummary(count, recent);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findPendingRequesters(UUID userId, Collection<UUID> candidateIds) {
+        if (candidateIds == null || candidateIds.isEmpty()) {
+            return Set.of();
+        }
+        return new HashSet<>(
+                followRepository.findPendingRequesterIdsAmong(userId, Set.copyOf(candidateIds)));
     }
 
     @Override

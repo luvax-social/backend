@@ -25,6 +25,7 @@ import com.app.modules.admin.messaging.AppealCategories;
 import com.app.modules.admin.repository.AdminActionRepository;
 import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.notification.entity.enums.NotificationType;
+import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.support.dto.request.CreateSupportTicketRequest;
 import com.app.modules.support.dto.request.EscalateSupportTicketRequest;
@@ -520,13 +521,18 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         if (ticket.getUserId() == null) {
             return;
         }
+        // The answer comes from the platform, not from the staff member who wrote it, so the
+        // notice carries no actor: naming them sent the account to a moderator's profile, and a
+        // block against that moderator would have hidden the answer.
         notificationService.create(
-                ticket.getRespondedBy(),
-                ticket.getUserId(),
-                NotificationType.SUPPORT_TICKET_UPDATE,
-                TARGET_ENTITY_TYPE,
-                ticket.getId(),
-                null);
+                NotificationDraft.systemNotice(
+                        ticket.getUserId(),
+                        NotificationType.SUPPORT_TICKET_UPDATE,
+                        TARGET_ENTITY_TYPE,
+                        ticket.getId(),
+                        null,
+                        null,
+                        null));
     }
 
     /**

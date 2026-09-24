@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `GET /api/v1/notifications` takes a `filter` (all, unread, comments, mentions, follows, system, verified) and returns hydrated feed rows with targets, previews, moderation and relationship blocks, and a `head` on the first page.
+- `GET /api/v1/notifications/state` returns the capped unseen badge, the seen and previous watermarks, and the pending follow request summary for the pinned entry; `POST /api/v1/notifications/seen` advances the watermark.
+- `PUT` and `DELETE /api/v1/notifications/{id}/read` mark one notification read or unread, and `DELETE /api/v1/notifications/{id}` removes it from the feed.
+- `GET /api/v1/comments/{commentId}/context` returns a comment with every ancestor, top-level first, so a notification can open a reply wherever it sits.
+- Notification rows are resolved at read time through the module that owns each target, so a deleted or removed post, an admin-removed comment, an expired story, a post that became private and a block all show as an unavailable target with no preview instead of a link that fails.
+- Batched previews for other modules: post availability and first media, comment and parent-comment text, story availability and media, moderation decisions with the affected text for its author only, and support ticket status for its owner.
+- A per-account seen watermark that advances only to notifications the client actually rendered, never moves backwards, and rotates the boundary of the new section only after a pause between visits, so the new section survives a reload.
+- A notification badge count bounded at 99+ that reads at most 100 rows however large the backlog, and a summary of pending follow requests for the pinned entry above the feed.
+- Post likes now produce a notification, grouped per post, and every like, comment like, story view and follow joins one group per target for 24 hours from its first actor, moving it to the top and marking it unread again when a new actor joins.
+- Unliking a post or comment, unfollowing, cancelling or rejecting a follow request and blocking an account now withdraw that actor from the notifications they produced, without moving or re-alerting what remains; approving a request turns it into a follow notification in place.
+- Granting or revoking a verified badge rewrites the verified-actor flag on that account's notifications in bounded background batches.
+- `POST_NOTIFICATION_CONSUMER_ENABLED`, `NOTIFICATION_AGGREGATION_WINDOW`, `NOTIFICATION_SEEN_SESSION_GAP` and `NOTIFICATION_VERIFIED_RESYNC_BATCH_SIZE` configuration properties.
 - Verification badges in the development seed: eighteen granted across all eight categories, five later withdrawn, and thirteen left active. A withdrawal driven by a suspension or ban is recorded as a system action with no actor, and a deactivated account keeps its badge.
 - Fifty more seeded accounts, most of which never post: twenty-eight that write nothing at all, nineteen that only comment, and three small creator accounts so the music, screen and gaming verification categories have a plausible subject.
 - A seeded follow graph built on topical affinity, popularity and reciprocity rather than uniform sampling, so follower counts vary the way a real network's do and who follows whom now carries meaning.
@@ -319,6 +331,16 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- The WebSocket guide describes the typed notification live events in place of the retired `notification.created.v1` frame.
+- The notification data rules, the dependency sections of the post, comment, story, admin, support, message, social and users modules, the global counter and soft-delete tables, the structure document and the reference schema now describe the aggregated activity feed through V123.
+- The seed pipeline writes the activity feed through the production aggregation path, with like, follow and story-view groups, platform notices linked to their audit rows, seen watermarks for every account, and showcase accounts covering every feed state including a 99+ badge.
+- `/topic/notifications.{userId}` now carries a typed envelope (`upserted`, `read-state`, `deleted`, `seen` or `requests`) with the feed state after the event, instead of a bare notification; a pending follow request arrives as `requests` and never as a row; this is a breaking change that ships together with the matching frontend.
+- `PATCH /api/v1/notifications/read-all` now requires an `upTo` bound and marks read only notifications the client rendered, returning how many changed.
+- A comment that mentions the account it answers now notifies that account once instead of twice.
+- Support answers and verification decisions are platform notices with no actor, so they no longer name the staff member or disappear behind a block of that staff member.
+- Every moderation notice now records the audit decision behind it, which is what lets a removed or restored post and a warning offer an appeal.
+- An operator switching a notification type off in its configuration row now stops that type from being written.
+- Notifications gain a feed sort key that moves when a group gains an actor, a filter category, soft delete, actor membership for aggregated groups, a per-user seen watermark and a link to the moderation decision behind each notice; existing likes, comment likes, story views and follows are collapsed into one group per target and day, direct-message notifications leave the feed, and every original row is archived first.
 - Seeded post media is drawn from 631 assets rather than 165, so the worst-repeated image now appears in three posts instead of sixteen and every reference still matches its post's topic.
 - A seeded verification request now lands on an account whose profession matches the claim, and an approved request actually grants the badge it approved; previously the subject was chosen at random and an approval left no badge behind it.
 - A Cloudflare outage no longer blocks authentication: the six new surfaces allow a request through when the verification service cannot be reached, because each already carries a per-caller rate limit as its real defence.
@@ -504,7 +526,16 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The seeded unavailable-target showcase now likes a post its owner cannot open, instead of an archived post the owner still opens from the archive.
+- Seeded content moderation audit rows now name the content's owner, as production does, so seeded removal and restoration notices show their snippet, date and appeal route to that account.
+- Per-instance live fanout queues for comments, messages, notifications and posts now expire after a minute without a consumer, so an instance that dies before its listener attaches no longer leaves a queue collecting every live event indefinitely.
+- The seeded showcase like group no longer ends in the future: its members are spread within the fifty minutes before the seed clock, so live notifications sort above it.
+- A seed run no longer fails its coverage check on the retired `message` notification category, which no producer writes since direct messages left the activity feed.
+- The recommendation guide now gives the seeded accounts' real password.
+- Startup now fails with a clear message when `app.turnstile.verify-url` (`TURNSTILE_VERIFY_URL`) is not an absolute http or https URL, instead of every sign-in failing its challenge at runtime.
+- Draining the seed's replayed like and comment events after a seed run no longer writes every seeded notification a second time with the current date.
 - The OAuth2 code exchange endpoint had no per-caller rate limit under the base configuration, which both deployment profiles had set but the base file had omitted.
+- The recommendation feedback consumer now discards feedback for a user or post that no longer exists instead of retrying it forever.
 - The commit subject check now fails when it cannot resolve the revision range it was given, instead of reporting that all zero subjects were within the limit and exiting successfully.
 - Addressing a route with a method it does not support now answers `405` with an `Allow` header naming the methods it does, and the generated API document declares that response on every operation. It previously answered a generic `400`, which a client could not tell from a malformed request.
 - Every error response now declares its own JSON content type instead of negotiating one, so a request carrying an `Accept` header the API cannot satisfy receives its real status rather than an empty `500`. An unauthenticated call asking for XML returned `500` with no body.
@@ -713,6 +744,9 @@ A conversation that already has messages in it is kept, because unfollowing some
 - `CustomOidcUserService.resolveUniqueUsername` random-suffix branch now re-checks uniqueness via `ThreadLocalRandom` and a bounded retry loop, preventing the rare unique-constraint violation that previously surfaced as a 500.
 
 ### Removed
+- `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/{id}/read`, and the `actor`, `entityType`, `entityId`, `postId` and `message` fields of notification list items; this is a breaking change that ships together with the matching frontend.
+- Direct messages no longer produce activity notifications; the retired `message.notification.queue` and its dead-letter queue are deleted from the broker at startup, and `MESSAGE_CONSUMER_ENABLED` is gone.
+- The redundant `is_read` notification column, whose value is fully carried by `read_at`, and three notification indexes superseded by the new feed indexes.
 - Mail campaigns, along with the administrator composer, the scheduled sender, the read-only Markdown samples and the per-account campaign email opt-out. Account, security, moderation and support mail are unaffected, and the send log that records every delivery attempt is unchanged.
 - The `ci-test.yml` CI workflow, which had been unintentionally disabled and was reporting a permanent failure on every push and pull request; its coverage was already fully subsumed by `sonarcloud.yml`.
 - The local SMTP mail transport and its Mailpit sink.
@@ -838,6 +872,16 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- The banned-hashtag restore test counts the notification outbox event by its current type, `notification.upserted.v1`.
+- A unit test asserts every live fanout queue auto-deletes and carries the idle expiry.
+- An integration test drives the post like notification consumer against a real database: group join, redelivery, stale likes, retraction, emptied groups and invalid payloads.
+- Unit tests for the warning notice consumer cover the audit link, duplicate delivery, invalid payloads, retries and dead-lettering.
+- Seed tests assert the aggregated feed shape, the showcase group sizes and badge states, and that every replayed like and comment is already handled by its notification consumer.
+- An end-to-end controller test of the feed contract, filters, head, watermark, read state, deletion, unavailable targets, blocked and inactive actors, moderation notices and the comment context endpoint.
+- Unit tests for the notification row assembler and each preview service's availability rules, and for the code-point-safe snippet helper.
+- Repository tests for the seen watermark (monotonic advance, clamp, session rotation, ownership) and for the feed reads (visibility under blocks and account status, bounded count, head, keyset pagination per filter, and the index each filter uses).
+- Repository tests for group open, join, window close, retraction, concurrent first actors, request conversion, block cleanup and the batched verified resync, and unit tests for the post like consumer, the retired-queue cleaner and the type policy.
+- A migration test that carries every pre-overhaul notification shape through the overhaul migrations and asserts the archive, the aggregation, the actor counts, the moderation links, the seen watermark and the index swap.
 - Media upload URL coverage now verifies that CDN object URLs preserve the HTTPS scheme.
 - The post index-sync integration tests now stub the Gorse recommender client, which is an external HTTP service with no container in those tests; left real, every post upsert failed on a refused connection and nothing reached Elasticsearch.
 - Coverage proving the anonymous appeal status read never carries the staff-only note, never consumes its token, and answers every negative case identically.

@@ -75,6 +75,7 @@ These tables cannot be rebuilt from any other source if lost.
 | `users` | inbound | Every story belongs to a `user_id`; viewer identity tracked via `story_views.viewer_id` |
 | `media` | outbound | Each story references exactly one `media_asset_id` |
 | `social` | inbound | Follow/block state governs story visibility |
-| `notification` | outbound | Story view events trigger `story_view` notification for the story owner |
+| `notification` | outbound | Story view events trigger a `story_view` notification for the story owner; the views of one story aggregate into one group |
+| `notification` | inbound | `StoryPreviewService` gives the notification feed each story's availability, expiry and thumbnail |
 | `message` | inbound | Stories can be shared into conversations via `messages.shared_story_id` |
 | `report` | inbound | Reports can target a story via polymorphic `entity_id` |

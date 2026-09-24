@@ -2,6 +2,9 @@ package com.app.modules.notification.messaging;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,11 +28,22 @@ import com.app.common.messaging.exception.PermanentMessageException;
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.service.NotificationService;
+import com.app.modules.social.enums.FollowStatus;
 import com.app.modules.social.messaging.SocialEventTypes;
+import com.app.modules.social.service.SocialService;
+import com.app.modules.support.messaging.SupportEventTypes;
 import com.rabbitmq.client.Channel;
 
 /**
- * RabbitMQ consumer for social follow events. Creates follow and follow-request notifications.
+ * RabbitMQ consumer for {@code notification.queue}: the social-graph and identity events that
+ * change the activity feed.
+ *
+ * <p>A follow or a follow request writes a notification; an unfollow, a cancelled or rejected
+ * request, and a block withdraw one; an approved request converts the request into a follow in
+ * place; a verification grant or revocation rewrites the verified-actor flag. Every branch acts on
+ * the relationship as it stands when the event is processed, read through {@link SocialService},
+ * rather than as the event described it, so a redelivered or reordered event cannot leave a
+ * notification describing a relationship that no longer exists.
  *
  * <p>Uses manual acknowledgement: ack after idempotent duplicate detection or successful side
  * effect, route poison messages to DLQ, and nack with requeue if DLQ publishing itself fails.
@@ -44,6 +58,16 @@ public class SocialNotificationConsumer {
 
     static final String CONSUMER_NAME = "social-notification-consumer";
 
+    static final Set<String> HANDLED_EVENT_TYPES =
+            Set.of(
+                    SocialEventTypes.USER_FOLLOWED_V1,
+                    SocialEventTypes.USER_FOLLOW_REQUESTED_V1,
+                    SocialEventTypes.USER_UNFOLLOWED_V1,
+                    SocialEventTypes.USER_FOLLOW_REQUEST_APPROVED_V1,
+                    SocialEventTypes.USER_FOLLOW_REQUEST_REJECTED_V1,
+                    SocialEventTypes.USER_BLOCKED_V1,
+                    SupportEventTypes.USER_VERIFICATION_CHANGED_V1);
+
     private static final Logger log = LoggerFactory.getLogger(SocialNotificationConsumer.class);
 
     private final DomainEventMessageParser parser;
@@ -51,6 +75,7 @@ public class SocialNotificationConsumer {
     private final NotificationService notificationService;
     private final ConsumerRetryProperties retryProperties;
     private final DeadLetterPublisher deadLetterPublisher;
+    private final SocialService socialService;
     private final Sleeper sleeper;
 
     @Autowired
@@ -59,13 +84,15 @@ public class SocialNotificationConsumer {
             ProcessedMessageService processedMessageService,
             NotificationService notificationService,
             ConsumerRetryProperties retryProperties,
-            DeadLetterPublisher deadLetterPublisher) {
+            DeadLetterPublisher deadLetterPublisher,
+            SocialService socialService) {
         this(
                 parser,
                 processedMessageService,
                 notificationService,
                 retryProperties,
                 deadLetterPublisher,
+                socialService,
                 Thread::sleep);
     }
 
@@ -75,12 +102,14 @@ public class SocialNotificationConsumer {
             NotificationService notificationService,
             ConsumerRetryProperties retryProperties,
             DeadLetterPublisher deadLetterPublisher,
+            SocialService socialService,
             Sleeper sleeper) {
         this.parser = parser;
         this.processedMessageService = processedMessageService;
         this.notificationService = notificationService;
         this.retryProperties = retryProperties;
         this.deadLetterPublisher = deadLetterPublisher;
+        this.socialService = socialService;
         this.sleeper = sleeper;
     }
 
@@ -100,8 +129,7 @@ public class SocialNotificationConsumer {
     }
 
     private void processWithRetry(DomainEventEnvelope event) {
-        NotificationType type = resolveType(event.eventType());
-        if (type == null) {
+        if (!HANDLED_EVENT_TYPES.contains(event.eventType())) {
             return;
         }
         int maxAttempts = retryProperties.resolvedMaxAttempts();
@@ -109,17 +137,7 @@ public class SocialNotificationConsumer {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 processedMessageService.processOnce(
-                        CONSUMER_NAME,
-                        event.eventId(),
-                        event.eventType(),
-                        () ->
-                                notificationService.create(
-                                        event.actorId(),
-                                        event.aggregateId(),
-                                        type,
-                                        null,
-                                        null,
-                                        null));
+                        CONSUMER_NAME, event.eventId(), event.eventType(), () -> dispatch(event));
                 return;
             } catch (RuntimeException ex) {
                 if (isPermanent(ex)) {
@@ -150,12 +168,73 @@ public class SocialNotificationConsumer {
         }
     }
 
-    private static NotificationType resolveType(String eventType) {
-        return switch (eventType) {
-            case SocialEventTypes.USER_FOLLOWED_V1 -> NotificationType.FOLLOW;
-            case SocialEventTypes.USER_FOLLOW_REQUESTED_V1 -> NotificationType.FOLLOW_REQUEST;
-            default -> null;
-        };
+    void dispatch(DomainEventEnvelope event) {
+        Map<String, Object> data = event.data() == null ? Map.of() : event.data();
+        switch (event.eventType()) {
+            case SocialEventTypes.USER_FOLLOWED_V1 -> {
+                UUID follower = event.actorId();
+                UUID following = event.aggregateId();
+                if (hasEdge(follower, following, FollowStatus.ACCEPTED)) {
+                    notificationService.create(
+                            follower, following, NotificationType.FOLLOW, null, null, null);
+                }
+            }
+            case SocialEventTypes.USER_FOLLOW_REQUESTED_V1 -> {
+                UUID requester = event.actorId();
+                UUID target = event.aggregateId();
+                if (hasEdge(requester, target, FollowStatus.PENDING)) {
+                    notificationService.create(
+                            requester, target, NotificationType.FOLLOW_REQUEST, null, null, null);
+                }
+            }
+            case SocialEventTypes.USER_UNFOLLOWED_V1 -> {
+                UUID follower = uuid(data.get("followerId"));
+                UUID following = uuid(data.get("followingId"));
+                if (socialService.findFollowStatus(follower, following).isEmpty()) {
+                    notificationService.retract(follower, following, NotificationType.FOLLOW, null);
+                }
+            }
+            case SocialEventTypes.USER_FOLLOW_REQUEST_APPROVED_V1 -> {
+                UUID requester = uuid(data.get("requesterId"));
+                UUID approver = uuid(data.get("approverId"));
+                if (hasEdge(requester, approver, FollowStatus.ACCEPTED)) {
+                    notificationService.resolveFollowRequest(requester, approver, true);
+                }
+            }
+            case SocialEventTypes.USER_FOLLOW_REQUEST_REJECTED_V1 -> {
+                UUID requester = uuid(data.get("requesterId"));
+                UUID approver = uuid(data.get("approverId"));
+                if (socialService.findFollowStatus(requester, approver).isEmpty()) {
+                    notificationService.resolveFollowRequest(requester, approver, false);
+                }
+            }
+            case SocialEventTypes.USER_BLOCKED_V1 -> {
+                UUID blocker = uuid(data.get("blockerId"));
+                UUID blocked = uuid(data.get("blockedId"));
+                if (socialService.isBlockedBetween(blocker, blocked)) {
+                    notificationService.onBlock(blocker, blocked);
+                }
+            }
+            case SupportEventTypes.USER_VERIFICATION_CHANGED_V1 ->
+                    notificationService.resyncActorVerified(event.aggregateId());
+            default -> {
+                // Filtered out by HANDLED_EVENT_TYPES before the inbox record is written.
+            }
+        }
+    }
+
+    private boolean hasEdge(UUID follower, UUID following, FollowStatus status) {
+        return socialService
+                .findFollowStatus(follower, following)
+                .filter(status::equals)
+                .isPresent();
+    }
+
+    private static UUID uuid(Object value) {
+        if (value == null) {
+            throw new PermanentMessageException("Event data is missing a user id");
+        }
+        return UUID.fromString(value.toString());
     }
 
     private void sleepBeforeRetry(int attempt) {

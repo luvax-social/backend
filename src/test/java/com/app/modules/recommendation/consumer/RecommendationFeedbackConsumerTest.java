@@ -28,6 +28,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
@@ -342,6 +343,30 @@ class RecommendationFeedbackConsumerTest {
         verify(gorseClient, times(1)).insertFeedback(anyList());
         verify(channel).basicNack(1L, false, false);
         verify(channel, never()).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_userEventForeignKeyViolation_nacksWithoutRetry() throws Exception {
+        // Reproduces the defect: a stale event whose actor was deleted (e.g. by a seed reset)
+        // violates user_events.user_id's foreign key on every attempt, since retrying an insert
+        // against a user that no longer exists can never succeed. Before the fix this exception
+        // was classified transient and retried to exhaustion (see consume_gorseTransientFailure_
+        // retriesThenNacksWithoutRequeue for what that costs); after the fix it must dead-letter
+        // on the very first attempt with no wasted retries.
+        Message message = message(envelope(PostEventTypes.POST_LIKED_V1));
+        stubProcessOnce();
+        doThrow(new DataIntegrityViolationException("FK violation"))
+                .when(userEventJdbcRepository)
+                .insertIgnoreDuplicate(any(), any(), any(), any(), any(), any());
+
+        consumer.consume(message, channel);
+
+        verify(userEventJdbcRepository, times(1))
+                .insertIgnoreDuplicate(any(), any(), any(), any(), any(), any());
+        verify(gorseClient, never()).insertFeedback(anyList());
+        verify(channel).basicNack(1L, false, false);
+        verify(channel, never()).basicAck(1L, false);
+        assertThat(sleptMillis).isEmpty();
     }
 
     @Test

@@ -14,7 +14,7 @@ It is Markdown rather than a machine-readable schema on purpose: a consumer need
 |---|---|---|
 | Comments | create, edit, delete, like, unlike on one post | the initial page of comments |
 | Post engagement | like and unlike on one post | the post itself, saves, view counts |
-| Notifications | every new notification for one account | the notification list, unread counts |
+| Notifications | typed feed events for one account (a row written, grouped or retracted, read state, deletion, the seen watermark, a new follow request), each with the feed state after it | the notification list after load and after a reconnect |
 | Direct messages | every new message in one conversation | the conversation list, read state, unread counts |
 | Reports and moderation | **nothing** | the escalated-report count, the report queue, the audit log |
 | Hashtags and trending | **nothing** | trending, search, the registry |
@@ -124,13 +124,13 @@ The filter is on the outbound channel rather than at publication, because one ev
 
 ## 4. Frame payloads
 
-Every frame is a JSON object carrying an `eventType` discriminator plus the fields for that type.
+Every frame is a JSON object carrying an `eventType` discriminator plus the fields for that type, except the notification topic, whose discriminator is `event`.
 
 | Destination | `eventType` values |
 |---|---|
 | `/topic/comments.{postId}.events` | `comment.created.v1`, `comment.edited.v1`, `comment.deleted.v1`, `comment.liked.v1`, `comment.unliked.v1` |
 | `/topic/posts.{postId}.events` | `post.live.liked.v1`, `post.live.unliked.v1` |
-| `/topic/notifications.{userId}` | `notification.created.v1` |
+| `/topic/notifications.{userId}` | `event`: `upserted`, `read-state`, `deleted`, `seen`, `requests`; every frame carries `state` (badge, watermarks, pinned follow requests). See `notification/DATA_RULES.md` and the `NotificationLiveEnvelope` record |
 | `/topic/conversations.{conversationId}.messages` | the message payload, sent without an event wrapper |
 
 Switch on `eventType`.

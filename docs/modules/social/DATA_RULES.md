@@ -57,6 +57,7 @@ These tables cannot be rebuilt from any other source if lost.
 | A blocked user must be excluded from follower/following lists and the accepted-following feed set | `FollowRepository` (block-exclusion subqueries on the followers/following keyset queries), `SocialServiceImpl.getAcceptedFollowingExcludingBlocks` |
 | A follow request records `user.follow-requested.v1`; an accepted follow records `user.followed.v1` in the transactional outbox | `SocialEventServiceImpl` |
 | The `user.followed.v1` / `user.follow-requested.v1` events are consumed to create notifications | `SocialNotificationConsumer` (`notification` module) |
+| Unfollow, approve, reject and block publish `user.unfollowed.v1`, `user.follow-request.approved.v1`, `user.follow-request.rejected.v1` and `user.blocked.v1` through the outbox, in the same transaction as the relationship write, so the feed retracts, converts or removes the affected rows | `SocialServiceImpl`, `SocialEventService` |
 | When a private account is made public, all `'pending'` follow rows for that account must be transitioned to `'accepted'` | `[NOT YET IMPLEMENTED]` — `UserServiceImpl.updateMyProfile` flips `is_private` only; no pending-follow transition runs |
 
 **Block directionality**:
@@ -97,6 +98,7 @@ See `docs/modules/users/DATA_RULES.md` Section 3D for the same entry from the pr
 | Dependency | Direction | Nature |
 |------------|-----------|--------|
 | `users` | inbound and outbound | Inbound: `follower_id`, `following_id`, `blocker_id`, `blocked_id` all reference `users.id`; counters written back to `users`. Outbound: `SocialServiceImpl` calls `UserSummaryService` to resolve a public summary (with a deleted/unknown placeholder) for each pending-request requester |
-| `notification` | outbound | Follow and follow-request events trigger notification creation |
+| `notification` | outbound | Follow, request, unfollow, approve, reject and block events drive notification creation, retraction and in-place conversion |
+| `notification` | inbound | `SocialService` answers block checks, follow status, the relationship block of a feed row, and the pending-request summary of the pinned entry (`countPendingRequestsUpTo`, `summarizePendingFollowRequests`) |
 | `post` | inbound | Post visibility (private account) is gated by `follows.status = 'accepted'` |
 | `message` | inbound | Messaging permissions depend on whether a block relationship exists |

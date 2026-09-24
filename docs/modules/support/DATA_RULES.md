@@ -301,6 +301,9 @@ A terminal status change notifies the user twice.
 
 In-product: a `support_ticket_update` notification (V98, config row in V99).
 It is not user-toggleable, for the reason V61 gives for the warning row: an account that could switch it off would ask a question and never be told it had been answered.
+It is a platform notice with no actor: the staff member who decided the ticket is not named, and opening the notice opens the ticket.
+A verification decision sends the same notice, anchored to the `verification_request`.
+Granting or revoking a badge also enqueues `user.verification-changed.v1`, on which the notification module rewrites `actor_verified` on the feed rows that account leads, in batches.
 
 By mail: through `moderation.mail.queue`, the path built for moderation notices.
 That path applies no `ACTIVE`-only gate, which is exactly what a reply to a banned account requires.
@@ -324,7 +327,7 @@ A public ticket that never resolved to an account gets no in-product notificatio
 | `notification` | The in-product notification |
 | `common/security` | The Redis sliding window and `IpExtractor` |
 
-Nothing depends on this module in return.
+The notification module depends on this one in return, through `SupportTicketPreviewService`, for the target of a `support_ticket_update` row.
 
 ---
 

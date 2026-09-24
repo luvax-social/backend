@@ -82,4 +82,72 @@ class SocialEventServiceImplTest {
     private static Follow follow(UUID followerId, UUID followingId, FollowStatus status) {
         return Follow.builder().id(new FollowId(followerId, followingId)).status(status).build();
     }
+
+    @Test
+    void publishUnfollowed_recordsFollowerFollowingAndPreviousStatus() {
+        UUID follower = UUID.randomUUID();
+        UUID following = UUID.randomUUID();
+
+        service.publishUnfollowed(follower, following, FollowStatus.PENDING);
+
+        verify(outboxService)
+                .enqueue(
+                        SocialEventTypes.USER_UNFOLLOWED_V1,
+                        SocialEventTypes.USER_UNFOLLOWED_V1,
+                        "user",
+                        following,
+                        follower,
+                        Map.of(
+                                "followerId",
+                                follower.toString(),
+                                "followingId",
+                                following.toString(),
+                                "previousStatus",
+                                FollowStatus.PENDING));
+    }
+
+    @Test
+    void publishFollowRequestResolved_approvalAndRejection_useTheirOwnEventTypes() {
+        UUID requester = UUID.randomUUID();
+        UUID approver = UUID.randomUUID();
+        Map<String, Object> data =
+                Map.of("requesterId", requester.toString(), "approverId", approver.toString());
+
+        service.publishFollowRequestResolved(requester, approver, true);
+        service.publishFollowRequestResolved(requester, approver, false);
+
+        verify(outboxService)
+                .enqueue(
+                        SocialEventTypes.USER_FOLLOW_REQUEST_APPROVED_V1,
+                        SocialEventTypes.USER_FOLLOW_REQUEST_APPROVED_V1,
+                        "user",
+                        approver,
+                        approver,
+                        data);
+        verify(outboxService)
+                .enqueue(
+                        SocialEventTypes.USER_FOLLOW_REQUEST_REJECTED_V1,
+                        SocialEventTypes.USER_FOLLOW_REQUEST_REJECTED_V1,
+                        "user",
+                        approver,
+                        approver,
+                        data);
+    }
+
+    @Test
+    void publishBlocked_recordsBothUsers() {
+        UUID blocker = UUID.randomUUID();
+        UUID blocked = UUID.randomUUID();
+
+        service.publishBlocked(blocker, blocked);
+
+        verify(outboxService)
+                .enqueue(
+                        SocialEventTypes.USER_BLOCKED_V1,
+                        SocialEventTypes.USER_BLOCKED_V1,
+                        "user",
+                        blocked,
+                        blocker,
+                        Map.of("blockerId", blocker.toString(), "blockedId", blocked.toString()));
+    }
 }

@@ -65,10 +65,17 @@ public class RabbitMqTopologyConfig {
     public static final String RECOMMENDATION_FEEDBACK_DEAD_LETTER_ROUTING_KEY =
             "recommendation.feedback.dead-letter";
 
-    public static final String MESSAGE_NOTIFICATION_QUEUE = "message.notification.queue";
-    public static final String MESSAGE_NOTIFICATION_DEAD_LETTER_QUEUE = "message.notification.dlq";
-    public static final String MESSAGE_NOTIFICATION_DEAD_LETTER_ROUTING_KEY =
-            "message.notification.dead-letter";
+    /**
+     * Idle lifetime of a per-instance live fanout queue: removed by the broker after this long with
+     * no consumer, so a queue left by an instance that died before its listener attached does not
+     * collect every live event forever.
+     */
+    public static final int LIVE_SERVER_QUEUE_EXPIRES_MILLIS = 60_000;
+
+    public static final String POST_NOTIFICATION_QUEUE = "post.notification.queue";
+    public static final String POST_NOTIFICATION_DEAD_LETTER_QUEUE = "post.notification.dlq";
+    public static final String POST_NOTIFICATION_DEAD_LETTER_ROUTING_KEY =
+            "post.notification.dead-letter";
 
     public static final String NOTIFICATION_LIVE_EVENTS_EXCHANGE = "notification.live.events";
 
@@ -97,7 +104,7 @@ public class RabbitMqTopologyConfig {
     // publish fails. The argument would therefore never fire on this queue.
     //
     // This is the consistent rule across the topology rather than an exception to it. Every queue
-    // whose consumer rejects with requeue=false carries the argument (comment, message,
+    // whose consumer rejects with requeue=false carries the argument (comment, post,
     // recommendation and story notification); every queue whose consumer publishes to the
     // dead-letter exchange itself omits it (mail, notification, hashtag.index.sync,
     // post.index.sync). The one queue that breaks the rule is adminNotificationQueue below, which
@@ -297,11 +304,11 @@ public class RabbitMqTopologyConfig {
     }
 
     @Bean
-    Queue messageNotificationQueue() {
-        return QueueBuilder.durable(MESSAGE_NOTIFICATION_QUEUE)
+    Queue postNotificationQueue() {
+        return QueueBuilder.durable(POST_NOTIFICATION_QUEUE)
                 .withArgument("x-dead-letter-exchange", SOCIAL_EVENTS_DEAD_LETTER_EXCHANGE)
                 .withArgument(
-                        "x-dead-letter-routing-key", MESSAGE_NOTIFICATION_DEAD_LETTER_ROUTING_KEY)
+                        "x-dead-letter-routing-key", POST_NOTIFICATION_DEAD_LETTER_ROUTING_KEY)
                 .build();
     }
 
@@ -320,17 +327,16 @@ public class RabbitMqTopologyConfig {
     }
 
     @Bean
-    Queue messageNotificationDeadLetterQueue() {
-        return QueueBuilder.durable(MESSAGE_NOTIFICATION_DEAD_LETTER_QUEUE).build();
+    Queue postNotificationDeadLetterQueue() {
+        return QueueBuilder.durable(POST_NOTIFICATION_DEAD_LETTER_QUEUE).build();
     }
 
     @Bean
-    Binding messageNotificationDeadLetterBinding(
-            Queue messageNotificationDeadLetterQueue,
-            TopicExchange socialEventsDeadLetterExchange) {
-        return BindingBuilder.bind(messageNotificationDeadLetterQueue)
+    Binding postNotificationDeadLetterBinding(
+            Queue postNotificationDeadLetterQueue, TopicExchange socialEventsDeadLetterExchange) {
+        return BindingBuilder.bind(postNotificationDeadLetterQueue)
                 .to(socialEventsDeadLetterExchange)
-                .with(MESSAGE_NOTIFICATION_DEAD_LETTER_ROUTING_KEY);
+                .with(POST_NOTIFICATION_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean

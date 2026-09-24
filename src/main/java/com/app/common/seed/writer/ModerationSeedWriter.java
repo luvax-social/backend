@@ -577,7 +577,7 @@ public class ModerationSeedWriter {
                 adminActionId,
                 actorId,
                 actionType,
-                targetUserId,
+                auditTargetUser(targetUserId, target),
                 target == null ? null : target.entityType(),
                 target == null ? null : target.entityId(),
                 caseReportId,
@@ -641,7 +641,7 @@ public class ModerationSeedWriter {
                 adminActionId,
                 actorId,
                 action.actionType(),
-                targetUserId,
+                auditTargetUser(targetUserId, target),
                 target == null ? null : target.entityType(),
                 target == null ? null : target.entityId(),
                 reportId,
@@ -919,6 +919,29 @@ public class ModerationSeedWriter {
     }
 
     private record TargetEntity(String entityType, UUID entityId) {}
+
+    // AdminServiceImpl records the content's owner as target_user_id on every content action, and
+    // the moderation notice shows its snippet, date and appeal only to that account. A case entry
+    // that names only the content therefore takes its owner from the content row.
+    private UUID auditTargetUser(UUID targetUserId, TargetEntity target) {
+        if (targetUserId != null || target == null) {
+            return targetUserId;
+        }
+        String sql =
+                switch (target.entityType()) {
+                    case "post" -> "SELECT user_id FROM posts WHERE id = ?";
+                    case "comment" -> "SELECT user_id FROM comments WHERE id = ?";
+                    case "story" -> "SELECT user_id FROM stories WHERE id = ?";
+                    case "message" -> "SELECT sender_id FROM messages WHERE id = ?";
+                    default -> null;
+                };
+        if (sql == null) {
+            return null;
+        }
+        return jdbc.queryForList(sql, UUID.class, target.entityId()).stream()
+                .findFirst()
+                .orElse(null);
+    }
 
     private TargetEntity resolveActionTarget(
             String actionType,

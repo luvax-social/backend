@@ -13,6 +13,7 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -162,13 +163,26 @@ public class RecommendationFeedbackConsumer {
             throw new PermanentMessageException(
                     "Engagement event has no actor: " + event.eventId());
         }
-        userEventJdbcRepository.insertIgnoreDuplicate(
-                event.eventId(),
-                actorId,
-                mapping.userEventType(),
-                "post",
-                postId,
-                event.occurredAt());
+        try {
+            userEventJdbcRepository.insertIgnoreDuplicate(
+                    event.eventId(),
+                    actorId,
+                    mapping.userEventType(),
+                    "post",
+                    postId,
+                    event.occurredAt());
+        } catch (DataIntegrityViolationException ex) {
+            // A foreign-key violation here means the referenced user (or a post, if a constraint
+            // is ever added for it) no longer exists - a permanent condition that retrying can
+            // never resolve. Without this, isTransient's default DataAccessException branch
+            // classified it as retryable, so a stale event (e.g. one left behind by a seed reset
+            // that removed its actor) exhausted the full retry budget on every redelivery instead
+            // of dead-lettering once.
+            throw new PermanentMessageException(
+                    "Engagement event references a user or post that no longer exists: "
+                            + event.eventId(),
+                    ex);
+        }
         gorseClient.insertFeedback(
                 List.of(
                         new GorseFeedback(

@@ -20,6 +20,25 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
     Optional<Comment> findByIdAndDeletedAtIsNull(UUID id);
 
     /**
+     * A comment and every ancestor above it, tombstoned ones included, top-level first.
+     *
+     * <p>Native so the entity's {@code @SQLRestriction} does not silently drop a removed ancestor:
+     * the caller must see it to refuse the thread. The walk is bounded by the depth cap, so a
+     * corrupt parent cycle cannot loop.
+     *
+     * @param commentId the comment at the bottom of the chain
+     * @return the chain ordered by depth ascending; empty when the comment does not exist
+     */
+    @Query(
+            value =
+                    "WITH RECURSIVE chain AS (SELECT c.*, 0 AS hop FROM comments c"
+                            + " WHERE c.id = :commentId UNION ALL SELECT p.*, chain.hop + 1"
+                            + " FROM comments p JOIN chain ON p.id = chain.parent_id"
+                            + " WHERE chain.hop < 11) SELECT * FROM chain ORDER BY depth",
+            nativeQuery = true)
+    List<Comment> findAncestryIncludingHidden(@Param("commentId") UUID commentId);
+
+    /**
      * Reads the author of a comment regardless of its soft-delete state.
      *
      * @param commentId comment identifier

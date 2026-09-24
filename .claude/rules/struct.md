@@ -44,7 +44,7 @@ app/
 │   │   │   ├── modules/            # 15 domain modules (see §2)
 │   │   │   └── Application.java    # @SpringBootApplication @ConfigurationPropertiesScan
 │   │   └── resources/
-│   │       ├── db/migration/       # Flyway V01-V113 SQL migrations
+│   │       ├── db/migration/       # Flyway V01-V123 SQL migrations
 │   │       ├── elasticsearch/
 │   │       │   └── settings/       # hashtags.json, posts.json (Elasticsearch index settings)
 │   │       ├── resilience/
@@ -172,10 +172,10 @@ Extra sub-packages (e.g. `oauth2/`, `validation/`, `storage/`) follow the same p
 | `media` | **Implemented** | api, config, controller, converter, dto/{request,response}, entity, enums, mapper, messaging, repository, service/impl, storage, validation |
 | `post` | **Implemented** | api, config, consumer, controller, converter, dto/{request,response}, entity, enums, event, live, mapper, messaging, repository, runner, search, service/impl, validation |
 | `hashtag` | **Implemented** | api, config, consumer, controller, converter, dto/{request,response}, entity, enums, event, mapper, messaging, repository, runner, search, service/impl |
-| `notification` | **Implemented** | api, config, controller, dto/response, entity, entity/converter, entity/enums, live, mapper, messaging, repository, service/impl |
+| `notification` | **Implemented** | api, config, controller, dto/{request,response}, entity, entity/converter, entity/enums, live, messaging, repository, service/impl |
 | `comment` | **Implemented** | api, config, consumer, controller, dto/{request,response}, entity, live, mapper, messaging, observability, repository, service/impl, util |
 | `story` | **Implemented** | api, consumer, controller, converter, dto/{request,response}, entity, enums, mapper, messaging, repository, service/impl |
-| `message` | **Implemented** | api, config, controller, converter, dto/{request,response}, entity, enums, mapper, repository, service/impl |
+| `message` | **Implemented** | api, config, controller, converter, dto/{request,response}, entity, enums, live, mapper, messaging, repository, service/impl |
 | `report` | **Implemented** | api, controller, converter, dto/{request,response}, entity, enums, mapper, repository, service/impl |
 | `admin` | **Implemented** | api, config, controller, converter, dto/{request,response}, entity, enums, mapper, messaging, repository, service/impl |
 | `recommendation` | **Implemented** | api, client/{dto,impl}, config, consumer, controller, converter, dto/{request,response}, entity, enums, messaging, observability, repository, service/impl/feed |
@@ -189,8 +189,8 @@ Extra sub-packages (e.g. `oauth2/`, `validation/`, `storage/`) follow the same p
 - **`media`**: Pre-signed Cloudflare R2 upload URLs, media asset lifecycle, MIME/metadata/path validation.
 - **`post`**: Post CRUD (image/video/carousel), likes, saves, view recording, post edit history, visibility enforcement, Elasticsearch index sync via outbox.
 - **`hashtag`**: Hashtag creation/normalization, trending computation, Elasticsearch index sync via outbox, trigram-search fallback, and the `active`/`banned`/`deleted` lifecycle that governs what every hashtag surface shows and what every post write path accepts. `HashtagLifecycleService` owns the status transitions, the immediate `hashtag_trending` purge, and the status-spanning administrative reads.
-- **`notification`**: Notification persistence and retrieval; `SocialNotificationConsumer` handles `user.followed.v1` and `user.follow-requested.v1` events.
-- **`comment`**: Threaded comment CRUD (create with idempotency, edit, soft-delete subtree), likes, moderation, and real-time live fanout via WebSocket (STOMP over SockJS); `CommentNotificationConsumer` handles `comment.created.v1` and `comment.liked.v1` for notifications; `CommentLiveFanoutConsumer` fans out all `comment.*` events to connected WebSocket sessions; `CommentMaintenanceScheduler` performs periodic pruning tasks.
+- **`notification`**: The activity feed. `NotificationAggregationRepository` writes rows and aggregates likes, story views and follows into windowed groups with their members in `notification_actors`; `NotificationFeedRepository` serves the filtered keyset list, the head and the bounded unseen badge under one visibility predicate; `NotificationSeenStateRepository` keeps the per-user seen and previous watermarks. `NotificationItemAssembler` hydrates rows through the owning modules' preview services. `SocialNotificationConsumer` handles the follow, unfollow, request, approve, reject, block and verification events, `AdminNotificationConsumer` the warning notice, and `NotificationLiveFanoutConsumer` pushes typed envelopes to `/topic/notifications.{userId}`. See `docs/modules/notification/DATA_RULES.md`.
+- **`comment`**: Threaded comment CRUD (create with idempotency, edit, soft-delete subtree), likes, moderation, and real-time live fanout via WebSocket (STOMP over SockJS); `CommentNotificationConsumer` handles `comment.created.v1`, `comment.liked.v1` and `comment.unliked.v1` for notifications; `CommentLiveFanoutConsumer` fans out all `comment.*` events to connected WebSocket sessions; `CommentMaintenanceScheduler` performs periodic pruning tasks.
 - **`report`**: User-submitted content flag lifecycle (submit, list, triage, status transitions); `ReportServiceImpl` enforces self-report prevention, duplicate suppression, entity existence validation, valid status-machine transitions, and resolution-note requirements for terminal states.
 - **`admin`**: Immutable moderation audit log, atomic moderation actions, the warning and strike discipline ladder, report escalation, the report-anchored moderation view of a reported entity, the administrative hashtag registry, the behavioural activity log read surface, and platform statistics; `AdminServiceImpl` handles ban/unban, suspend/unsuspend, post/comment remove/restore, and report resolve/dismiss, and `AdminHashtagServiceImpl` handles hashtag create/ban/unban/delete — each writing an `admin_actions` row and mutating the target entity in the same transaction. `AdminAuthorizationServiceImpl` holds every actor-and-target rule for both status and role changes. `StatsCollectionJob` fills `platform_stats` one completed bucket at a time and `StatsRollupJob` compacts fine buckets into daily rows and enforces retention; `AdminStatsServiceImpl` and `AdminUserEventServiceImpl` are the administrator-only read paths.
 - **`support`**: The support ticket lifecycle, the appeal route a disciplined account reaches without a session, and account verification requests. `SupportTokenServiceImpl` mints the two single-use link families (`support:token:appeal:`, `support:token:confirmation:`) that authorise exactly one ticket against one audit row without ever minting a session; `SupportTicketServiceImpl` enforces the one-open-ticket guard (V107) and the per-client daily cap on the anonymous public form. See `docs/modules/support/DATA_RULES.md`.
@@ -218,7 +218,7 @@ All domain events flow through shared outbox/inbox infrastructure in `common/out
 ### Test Coverage
 
 Generated by `./scripts/regenerate_struct_figures.sh tests`, which counts what `git ls-files`
-reports under `src/test/java` rather than what this table last said; 264 test classes total.
+reports under `src/test/java` rather than what this table last said; 288 test classes total.
 Re-run it and paste the output back here whenever a test class is added, moved or renamed.
 
 | Package | Test Classes |
@@ -226,10 +226,10 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `(root)` | `ApplicationTests` |
 | `common` | `ApiConstantsSocialTest`, `ApiConstantsUnroutedFieldsTest`, `UpdatedAtSingleWriterIT` |
 | `common/base` | `BaseControllerTest` |
-| `common/config` | `ProdProfileConsumerActivationIT` |
+| `common/config` | `ActuatorEndpointAccessIT`, `ProdProfileConsumerActivationIT`, `RequiredEnvironmentGuardTest` |
 | `common/config/elasticsearch` | `ElasticsearchConfigTest`, `ElasticsearchHealthIT` |
 | `common/config/openapi` | `OpenApiContractIT` |
-| `common/config/rabbit` | `RabbitMqTopologyConfigTest` |
+| `common/config/rabbit` | `RabbitMqTopologyConfigTest`, `RetiredQueueCleanerTest` |
 | `common/config/security` | `RefreshCookiePropertiesTest`, `SecurityPropertiesValidationTest` |
 | `common/enums` | `ApiErrorCodeMessageTest` |
 | `common/exception` | `ApiExceptionTest`, `AppExceptionTest`, `GlobalExceptionHandlerTest`, `HttpNegotiationExceptionHandlersIT`, `MalformedRequestBodyIT` |
@@ -245,12 +245,14 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `common/security/config` | `CorsPropertiesTest` |
 | `common/security/filter` | `AuthRateLimitFilterTest`, `JwtAuthenticationFilterTest` |
 | `common/security/jwt` | `JwtTokenProviderTest` |
-| `common/security/service/impl` | `RateLimiterServiceImplTest`, `RefreshTokenServiceImplTest`, `TokenBlacklistServiceImplTest`, `TokenPrincipalResolverImplTest` |
+| `common/security/service/impl` | `RateLimiterServiceImplTest`, `RefreshTokenReplayRevocationIT`, `RefreshTokenServiceImplTest`, `TokenBlacklistServiceImplTest`, `TokenPrincipalResolverImplTest` |
 | `common/security/user` | `UserPrincipalTest` |
 | `common/security/util` | `CachedBodyHttpServletRequestTest`, `IpExtractorTest`, `SecurityUtilsTest` |
 | `common/security/websocket` | `BrokerSendGuardRegistrationIT`, `BrokerTopicSendGuardIT`, `JwtHandshakeInterceptorTest`, `WebSocketHandshakeRateLimitIT`, `WebSocketRevocationIT`, `WebSocketRevocationSweepServiceTest` |
-| `common/seed` | `CommentAndEngagementSeedWriterIT`, `DomainWritersSeedWriterIT`, `MediaAndSocialGraphSeedWriterIT`, `PostSeedWriterIT`, `SeedDataLoaderRealDataTest`, `SeedDataLoaderTest`, `SeedOutboxEmitterIT`, `SeedProfileConsumerOverrideIT`, `SeedResetServiceIT`, `SeedRunnerDatasourceGuardTest`, `SeedRunnerIT`, `SeedTimelineTest`, `UserSeedWriterIT` |
+| `common/seed` | `CommentAndEngagementSeedWriterIT`, `DomainWritersSeedWriterIT`, `MediaAndSocialGraphSeedWriterIT`, `PostSeedWriterIT`, `SeedDataLoaderRealDataTest`, `SeedDataLoaderTest`, `SeedOutboxEmitterIT`, `SeedProfileConsumerOverrideIT`, `SeedResetServiceIT`, `SeedRunnerDatasourceGuardTest`, `SeedRunnerIT`, `SeedTimelineTest`, `SupportSeedWriterIT`, `UserSeedWriterIT` |
 | `common/settings/service/impl` | `SystemSettingServiceImplTest` |
+| `common/text` | `SnippetsTest` |
+| `common/turnstile` | `AuthTurnstileGuardTest`, `TurnstilePropertiesValidationTest`, `TurnstileVerifierTest` |
 | `common/vocabulary/controller` | `VocabularyControllerIT` |
 | `common/web` | `StrictQueryParameterInterceptorTest` |
 | `modules/admin/controller` | `AdminContentControllerIT`, `AdminControllerIT`, `AdminDisciplineControllerIT`, `AdminHashtagControllerIT`, `AdminStatsControllerIT`, `AdminUserControllerIT`, `AdminUserEventControllerIT` |
@@ -258,24 +260,24 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/admin/messaging` | `ModerationMailEventHandlerTest` |
 | `modules/admin/repository` | `AdminActionKeysetRowLossIT`, `AdminActionRepositoryTest`, `AdminContentMediaStatementCountIT`, `UserWarningRepositoryIT` |
 | `modules/admin/service` | `AdminActionRecorderTest`, `StatsBucketsTest` |
-| `modules/admin/service/impl` | `AdminAuthorizationServiceImplTest`, `AdminHashtagServiceImplTest`, `AdminServiceImplTest`, `AdminUserEventServiceImplTest`, `AdminUserServiceImplTest`, `PlatformStatsIT`, `StatsCollectionJobTest`, `SuspensionExpiryServiceImplTest`, `UserDisciplineServiceImplTest` |
+| `modules/admin/service/impl` | `AdminAuthorizationServiceImplTest`, `AdminHashtagServiceImplTest`, `AdminServiceImplTest`, `AdminUserEventServiceImplTest`, `AdminUserServiceImplTest`, `ModerationNoticeServiceImplTest`, `PlatformStatsIT`, `StatsCollectionJobTest`, `SuspensionExpiryServiceImplTest`, `UserDisciplineServiceImplTest` |
 | `modules/auth/controller` | `AuthControllerIT`, `PasswordPolicyIT` |
 | `modules/auth/converter` | `OAuthProviderConverterTest` |
 | `modules/auth/cookie` | `RefreshTokenCookieManagerTest` |
 | `modules/auth/dto/request` | `RegisterRequestDeserializationTest`, `ResetPasswordRequestDeserializationTest` |
 | `modules/auth/messaging` | `AuthMailEventConsumerRabbitMqIT`, `AuthMailEventConsumerTest`, `AuthMailEventHandlerTest` |
 | `modules/auth/oauth2` | `CookieOAuth2AuthorizationRequestRepositoryTest`, `CustomOidcUserServiceTest`, `CustomOidcUserTest`, `OAuth2AuthenticationFailureHandlerTest` |
-| `modules/auth/service/impl` | `AuthForgotPasswordEventServiceImplTest`, `AuthMailEventServiceImplTest`, `AuthResendVerificationEventServiceImplTest`, `AuthServiceImplTest`, `ForgotPasswordTimingEqualizerTest`, `OAuth2ExchangeCodeServiceImplTest`, `RefreshTokenPurgeJobTest`, `TokenServiceImplTest`, `WebSocketTicketServiceImplTest` |
+| `modules/auth/service/impl` | `AuthForgotPasswordEventServiceImplTest`, `AuthMailEventServiceImplTest`, `AuthResendVerificationEventServiceImplTest`, `AuthServiceImplTest`, `AuthServiceTurnstileTest`, `ForgotPasswordTimingEqualizerTest`, `OAuth2ExchangeCodeServiceImplTest`, `RefreshTokenPurgeJobTest`, `TokenServiceImplTest`, `WebSocketTicketServiceImplTest` |
 | `modules/auth/validation` | `PasswordPolicyValidatorTest`, `UserStateValidatorTest` |
 | `modules/comment/config` | `CommentWebSocketConfigTest` |
 | `modules/comment/consumer` | `CommentNotificationConsumerIT`, `CommentNotificationConsumerTest` |
 | `modules/comment/controller` | `CommentControllerIT` |
 | `modules/comment/live` | `CommentLiveBlockFilterIT`, `CommentStompSendAuthIT`, `CommentWebSocketAccountStatusIT`, `CommentWebSocketHandshakeRejectionIT`, `CommentWebSocketLiveDeliveryIT` |
 | `modules/comment/repository` | `CommentEditedAtColumnIT`, `CommentKeysetRowLossIT`, `CommentSubtreeDeleteEquivalenceIT`, `CommentTopLikedQueryIT` |
-| `modules/comment/service/impl` | `CommentAuthorEmbeddingIT`, `CommentModerationServiceImplTest`, `CommentPinnedTopCommentsIT`, `CommentServiceImplTest`, `CommentViewerStateIT`, `CommentViewerStateServiceImplTest` |
+| `modules/comment/service/impl` | `CommentAuthorEmbeddingIT`, `CommentModerationServiceImplTest`, `CommentPinnedTopCommentsIT`, `CommentPreviewServiceImplTest`, `CommentServiceImplTest`, `CommentViewerStateIT`, `CommentViewerStateServiceImplTest` |
 | `modules/hashtag/consumer` | `HashtagIndexSyncConsumerIT`, `HashtagIndexSyncConsumerTest` |
 | `modules/hashtag/controller` | `HashtagControllerIT` |
-| `modules/hashtag/repository` | `HashtagRepositoryIT` |
+| `modules/hashtag/repository` | `HashtagRepositoryIT`, `TrendingPreviewIT` |
 | `modules/hashtag/service/impl` | `HashtagLifecycleServiceImplTest`, `HashtagLookupServiceImplTest`, `HashtagPinLifecycleTest`, `HashtagSearchServiceImplTest`, `HashtagServiceImplTest`, `HashtagTrendingServiceImplTest`, `HashtagTrendingSnapshotIT`, `PersonalisedTrendingServiceImplTest` |
 | `modules/mail/service/impl` | `MailRecipientAllowlistTest`, `ModerationMailThrottleImplTest`, `ResendMailSenderTest` |
 | `modules/media/controller` | `MediaControllerIT` |
@@ -284,7 +286,6 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/media/storage` | `MediaStorageKeyGeneratorTest`, `R2ObjectStoragePresignServiceTest` |
 | `modules/media/validation` | `MediaMetadataValidatorTest` |
 | `modules/message/config` | `MessagePropertiesTest` |
-| `modules/message/consumer` | `MessageNotificationConsumerIT`, `MessageNotificationConsumerTest` |
 | `modules/message/controller` | `MessageControllerIT` |
 | `modules/message/converter` | `MessageTypeConverterTest` |
 | `modules/message/live` | `MessageWebSocketAuthInterceptorTest` |
@@ -295,15 +296,16 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/notification/controller` | `NotificationControllerIT` |
 | `modules/notification/entity/converter` | `NotificationTypeConverterTest` |
 | `modules/notification/live` | `NotificationLiveDeliveryIT`, `NotificationLiveFanoutConsumerTest`, `NotificationOnlyWebSocketConfigIT`, `NotificationPushLatencyIT`, `NotificationWebSocketSubscriptionAuthIT` |
-| `modules/notification/messaging` | `SocialNotificationConsumerIT`, `SocialNotificationConsumerTest` |
-| `modules/notification/repository` | `NotificationKeysetRowLossIT` |
-| `modules/notification/service/impl` | `NotificationAuthorEmbeddingIT`, `NotificationServiceImplTest` |
-| `modules/post/consumer` | `PostIndexSyncConsumerIT`, `PostIndexSyncConsumerTest` |
+| `modules/notification/messaging` | `AdminNotificationConsumerTest`, `SocialNotificationConsumerIT`, `SocialNotificationConsumerTest` |
+| `modules/notification/migration` | `NotificationOverhaulMigrationIT` |
+| `modules/notification/repository` | `NotificationAggregationRepositoryIT`, `NotificationFeedRepositoryIT`, `NotificationSeenStateRepositoryIT` |
+| `modules/notification/service/impl` | `NotificationItemAssemblerTest`, `NotificationServiceImplTest`, `NotificationTypePolicyTest` |
+| `modules/post/consumer` | `PostIndexSyncConsumerIT`, `PostIndexSyncConsumerTest`, `PostNotificationConsumerTest` |
 | `modules/post/controller` | `PostBannedHashtagIT`, `PostControllerIT` |
 | `modules/post/dto/response` | `FeedPostResponseTest` |
 | `modules/post/live` | `PostLikeLiveDeliveryIT`, `PostOnlyWebSocketConfigIT` |
 | `modules/post/repository` | `PostKeysetRowLossIT` |
-| `modules/post/service/impl` | `PostAuthorEmbeddingIT`, `PostByHashtagSearchReaderTest`, `PostByHashtagServiceImplTest`, `PostLikeEventPublishingIT`, `PostLikeServiceImplTest`, `PostResponseAssemblerTest`, `PostSaveServiceImplTest`, `PostSearchServiceImplTest`, `PostServiceImplTest`, `PostViewServiceImplTest`, `PostViewerStateIT`, `PostViewerStateServiceImplTest`, `PostVisibilityServiceImplTest` |
+| `modules/post/service/impl` | `PostAuthorEmbeddingIT`, `PostByHashtagSearchReaderTest`, `PostByHashtagServiceImplTest`, `PostLikeEventPublishingIT`, `PostLikeServiceImplTest`, `PostPreviewServiceImplTest`, `PostResponseAssemblerTest`, `PostSaveServiceImplTest`, `PostSearchServiceImplTest`, `PostServiceImplTest`, `PostViewServiceImplTest`, `PostViewerStateIT`, `PostViewerStateServiceImplTest`, `PostVisibilityServiceImplTest` |
 | `modules/post/validation` | `PostTypeFilterTest` |
 | `modules/recommendation/client/impl` | `GorseClientImplTest` |
 | `modules/recommendation/config` | `RecommendationPropertiesTest` |
@@ -312,21 +314,21 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/recommendation/dto/request` | `ImpressionRequestValidationTest` |
 | `modules/recommendation/repository` | `AffinityProfileDepthIT`, `SuggestionReadFilterIT`, `UserEventRepositoryImplIT`, `UserHashtagAffinityRepositoryIT` |
 | `modules/recommendation/service` | `UserEventRecordingIT` |
-| `modules/recommendation/service/impl` | `RecommendationFeedServiceImplTest`, `SuggestionServiceImplTest`, `UserEventsPartitionJobTest` |
+| `modules/recommendation/service/impl` | `RecommendationFeedServiceImplTest`, `SuggestionRowMappingTest`, `SuggestionServiceImplTest`, `UserEventsPartitionJobTest` |
 | `modules/recommendation/service/impl/feed` | `RecommendationSourceTest` |
 | `modules/report/controller` | `ReportControllerIT` |
 | `modules/report/repository` | `ReportKeysetRowLossIT`, `ReportQueueIndexIT`, `ReportRepositoryIT` |
-| `modules/report/service/impl` | `ReportServiceImplTest`, `ReportedTargetServiceImplTest`, `ReportedViewerStateIT` |
+| `modules/report/service/impl` | `ReportServiceImplTest`, `ReportServiceTurnstileTest`, `ReportedTargetServiceImplTest`, `ReportedViewerStateIT` |
 | `modules/social/controller` | `SocialControllerIT` |
 | `modules/social/converter` | `FollowStatusConverterTest` |
 | `modules/social/repository` | `FollowKeysetRowLossIT`, `FollowRepositoryIT` |
 | `modules/social/service/impl` | `BlockedListIT`, `MutualFollowProvisioningIT`, `SocialEventServiceImplTest`, `SocialRelationshipIT`, `SocialServiceImplTest` |
 | `modules/story/consumer` | `StoryNotificationConsumerIT`, `StoryNotificationConsumerTest` |
 | `modules/story/controller` | `StoryControllerIT` |
-| `modules/story/repository` | `StoryViewKeysetRowLossIT` |
-| `modules/story/service/impl` | `StoryLikeServiceImplTest`, `StoryServiceImplTest`, `StoryViewServiceImplTest`, `StoryVisibilityServiceImplTest` |
+| `modules/story/repository` | `StoryDiscoveryIT`, `StoryViewKeysetRowLossIT` |
+| `modules/story/service/impl` | `StoryLikeServiceImplTest`, `StoryPreviewServiceImplTest`, `StoryServiceImplTest`, `StoryViewServiceImplTest`, `StoryVisibilityServiceImplTest` |
 | `modules/support/repository` | `SupportTicketConcurrencyIT` |
-| `modules/support/service/impl` | `SupportAuthorizationServiceImplTest`, `SupportTicketServiceImplTest`, `VerificationServiceImplTest` |
+| `modules/support/service/impl` | `AppealRecoveryServiceImplTest`, `AppealStatusMailerImplTest`, `SupportAuthorizationServiceImplTest`, `SupportTicketPreviewServiceImplTest`, `SupportTicketServiceImplTest`, `VerificationServiceImplTest` |
 | `modules/users/controller` | `UserControllerIT` |
 | `modules/users/mapper` | `UserMapperTest` |
 | `modules/users/repository` | `UserRepositorySurfaceTest` |
@@ -339,7 +341,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 ### Database
 
 - Engine: **PostgreSQL** (docker-compose builds `./docker/postgres` on the `postgres:latest` base)
-- Migration: **Flyway** (`out-of-order: false`); 114 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109 and V110 build their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those sixteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V114 all exist.
+- Migration: **Flyway** (`out-of-order: false`); 123 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109, V110, V121 and V122 build or drop their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those eighteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V123 all exist.
 
 | Migration | Description |
 |-----------|-------------|
@@ -457,6 +459,15 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | V112 | add_content_removal_notification_types |
 | V113 | add_content_removal_notification_configs |
 | V114 | remove_mail_campaigns |
+| V115 | create_notification_category_type |
+| V116 | extend_notifications_for_overhaul |
+| V117 | create_notification_actors_and_seen_states |
+| V118 | aggregate_existing_notifications |
+| V119 | soft_delete_message_notifications |
+| V120 | backfill_notification_seen_states |
+| V121 | add_notification_feed_indexes |
+| V122 | drop_superseded_notification_indexes |
+| V123 | drop_notifications_is_read |
 
 - Reference schema: `database/schema.sql` (authoritative final-state; not applied by Flyway)
 - Extensions: `pgcrypto` (UUID gen), `pg_trgm` (fuzzy username search), `btree_gin` (composite GIN indexes)
@@ -476,6 +487,7 @@ means a migration: these are domain primitives, not configuration.
 | `hashtag_status` | `active`, `banned`, `deleted` (3 values). |
 | `media_type` | `image`, `video` (2 values). |
 | `message_type` | `text`, `image`, `video`, `post_share`, `story_share` (5 values). |
+| `notification_category` | `like`, `comment`, `mention`, `follow`, `story`, `message`, `system` (7 values, V115). Derived from `notification_type` in application code; drives the feed filters. `message` is retired with the `message` type: no producer writes it since direct messages left the feed. |
 | `notification_type` | `like_post`, `like_comment`, `comment_post`, `reply_comment`, `follow`, `follow_request`, `mention_post`, `mention_comment`, `story_view`, `message`, `warning`, `post_removed`, `report_post_removed`, `post_restored`, `report_dismissed`, `support_ticket_update`, `comment_removed`, `story_removed`, `message_removed` (19 values). |
 | `oauth_provider` | `google`, `facebook`, `apple` (3 values). |
 | `post_status` | `draft`, `published`, `archived`, `removed` (4 values). |
@@ -557,7 +569,7 @@ The appeal window is thirty days because the notice arrives unannounced and is r
 | `comment.notification.queue` | `comment.notification.dlq` | `comment.notification.dead-letter` |
 | `story.notification.queue` | `story.notification.dlq` | `story.notification.dead-letter` |
 | `recommendation.feedback.queue` | `recommendation.feedback.dlq` | `recommendation.feedback.dead-letter` |
-| `message.notification.queue` | `message.notification.dlq` | `message.notification.dead-letter` |
+| `post.notification.queue` | `post.notification.dlq` | `post.notification.dead-letter` |
 | `admin.notification.queue` | `admin.notification.dlq` | `admin.notification.dead-letter` |
 
 `AUDIT_LOG_QUEUE`, `MODERATION_QUEUE` and `SEARCH_INDEX_QUEUE` are name constants only: they are
@@ -575,13 +587,16 @@ never sees them.
 | `mail.queue` | `auth.oauth-account-no-password.v1` | `AuthMailRabbitBindingConfig` |
 | `notification.queue` | `user.followed.v1` | `NotificationRabbitBindingConfig` |
 | `notification.queue` | `user.follow-requested.v1` | `NotificationRabbitBindingConfig` |
+| `notification.queue` | `user.unfollowed.v1`, `user.follow-request.approved.v1`, `user.follow-request.rejected.v1`, `user.blocked.v1` | `NotificationRabbitBindingConfig` |
+| `notification.queue` | `user.verification-changed.v1` | `NotificationRabbitBindingConfig` |
 | `hashtag.index.sync` | `hashtag.index.#` (wildcard) | `HashtagRabbitBindingConfig` |
 | `post.index.sync` | `post.index.#` (wildcard) | `PostRabbitBindingConfig` |
 | `comment.notification.queue` | `comment.created.v1` | `CommentRabbitBindingConfig` |
 | `comment.notification.queue` | `comment.liked.v1` | `CommentRabbitBindingConfig` |
+| `comment.notification.queue` | `comment.unliked.v1` | `CommentRabbitBindingConfig` |
+| `post.notification.queue` | `post.liked.v1`, `post.unliked.v1` | `PostRabbitBindingConfig` |
 | `story.notification.queue` | `story.viewed.v1` | `StoryRabbitBindingConfig` |
 | `recommendation.feedback.queue` | `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1` | `RecommendationRabbitBindingConfig` |
-| `message.notification.queue` | `message.sent.v1` | `MessageRabbitBindingConfig` |
 | `admin.notification.queue` | `user.warned.v1` | `AdminRabbitBindingConfig` |
 | `moderation.mail.queue` | `admin.moderation-notice.requested.v1` | `AdminRabbitBindingConfig` |
 | `comment.live.events` (exchange) | `comment.#` (wildcard, exchange-to-exchange) | `RabbitMqTopologyConfig` |
@@ -703,7 +718,8 @@ Implemented in `common/security/` and `modules/auth/`:
   - `posts`: `like_count`, `comment_count`, `save_count`, `view_count`
   - `comments`: `like_count`, `reply_count`
   - `hashtags`: `post_count`
-  - `stories`: `view_count`
+  - `stories`: `view_count`, `like_count`
+  - `notifications`: `actor_count`
 - **`user_events` partitioning**: partitioned by month (`PARTITION BY RANGE (created_at)`) with a `DEFAULT` catch-all. A write whose month has no partition therefore does not fail; it lands in the catch-all, and once it does that month's partition can never be created (`updated partition constraint for default partition would be violated by some row`). `UserEventsPartitionJob` keeps the current month plus two ahead declared, daily. Rows accumulating in `user_events_default` are the signal that the horizon has fallen behind.
 - **`user_events` reads**: always bounded by `created_at`. A read bounded only by `user_id` prunes nothing and touches every partition ever declared, which is why the activity log makes the time window mandatory. Measured: a window inside one month scans one partition, a window crossing a boundary scans exactly two, and a window reaching past the last declared partition scans the catch-all as well.
 - **`platform_stats`**: written only by `StatsCollectionJob` and `StatsRollupJob`, never from a Controller or Service on a request path. Gauges are absolute snapshots bounded by the bucket end; flows are direct counts over the bucket window and are never derived by subtracting consecutive gauges. The roll-up sums flows and takes the last bucket for gauges — summing gauges multiplies a total by the number of buckets in the day. There is no backfill: a bucket never collected can never be collected later, and the bucket a process starts inside is deliberately skipped. A single application instance is assumed; there is no distributed scheduler lock, and the composite primary key with `ON CONFLICT DO UPDATE` is what keeps a double run harmless rather than duplicative.

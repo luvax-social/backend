@@ -41,6 +41,8 @@ app:
   post:
     consumer:
       enabled: true
+    notification-consumer:
+      enabled: true
     live:
       enabled: true
   comment:
@@ -68,8 +70,6 @@ app:
     consumer:
       enabled: true
   message:
-    consumer:
-      enabled: true
     live:
       enabled: true
   mail:

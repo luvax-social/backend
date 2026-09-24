@@ -139,7 +139,8 @@ A change that made carousels type-homogeneous would break a client feature built
 | `hashtag` | outbound | Hashtags extracted from `caption` are written to `post_hashtags` + `hashtags`. Also read for the banned-name check on every write path and for the hashtag list on a post response |
 | `comment` | inbound | Comments reference `posts.id`; `comment_count` trigger fires on comment table |
 | `social` | inbound | Follow/block state governs post visibility; no direct FK dependency |
-| `notification` | none today | `[NOT YET IMPLEMENTED]` — the post module enqueues only `post.index.upsert.v1` / `post.index.delete.v1` (Elasticsearch sync); no publish, like, or mention event reaches the `notification` module |
+| `notification` | outbound | `post.liked.v1` and `post.unliked.v1` drive `like_post` notifications through `PostNotificationConsumer` on `post.notification.queue` (DLQ `post.notification.dlq`), enabled by `app.post.notification-consumer.enabled`; an unlike retracts the liker from the group. Caption mentions still produce nothing. |
+| `notification` | inbound | `PostPreviewService` gives the notification feed each post's availability to the viewer and its first media as a thumbnail, in one query per page |
 | `recommendation` | inbound | `post_categories` and `post_interaction_scores` reference `posts.id` |
 | `report` | inbound | Reports can target a post via polymorphic `entity_id` |
 | `message` | inbound | Messages can share a post via `shared_post_id` (SET NULL on post delete) |

@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,6 +40,7 @@ import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.comment.repository.CommentRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.notification.entity.enums.NotificationType;
+import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.repository.PostRepository;
@@ -262,13 +264,13 @@ class AdminServiceImplTest {
         verify(postService).applyModerationRemoval(postId);
         verify(notificationService)
                 .create(
-                        null,
-                        ownerId,
-                        NotificationType.POST_REMOVED,
-                        "post",
-                        postId,
-                        null,
-                        "Violation");
+                        notice(
+                                ownerId,
+                                NotificationType.POST_REMOVED,
+                                "post",
+                                postId,
+                                postId,
+                                "Violation"));
     }
 
     @Test
@@ -302,13 +304,13 @@ class AdminServiceImplTest {
         assertThat(result).isEqualTo(expected);
         verify(notificationService)
                 .create(
-                        null,
-                        reporterId,
-                        NotificationType.REPORT_POST_REMOVED,
-                        "report",
-                        reportId,
-                        postId,
-                        null);
+                        notice(
+                                reporterId,
+                                NotificationType.REPORT_POST_REMOVED,
+                                "report",
+                                reportId,
+                                postId,
+                                null));
     }
 
     @Test
@@ -427,13 +429,13 @@ class AdminServiceImplTest {
         assertThat(captor.getValue().getMetadata()).containsEntry("resultingStatus", "draft");
         verify(notificationService)
                 .create(
-                        null,
-                        ownerId,
-                        NotificationType.POST_RESTORED,
-                        "post",
-                        postId,
-                        null,
-                        "Appeal accepted");
+                        notice(
+                                ownerId,
+                                NotificationType.POST_RESTORED,
+                                "post",
+                                postId,
+                                postId,
+                                "Appeal accepted"));
     }
 
     @Test
@@ -571,13 +573,13 @@ class AdminServiceImplTest {
         assertThat(report.getStatus()).isEqualTo(ReportStatus.DISMISSED);
         verify(notificationService)
                 .create(
-                        null,
-                        reporterId,
-                        NotificationType.REPORT_DISMISSED,
-                        "report",
-                        reportId,
-                        null,
-                        "No violation found");
+                        notice(
+                                reporterId,
+                                NotificationType.REPORT_DISMISSED,
+                                "report",
+                                reportId,
+                                null,
+                                "No violation found"));
     }
 
     @Test
@@ -903,13 +905,13 @@ class AdminServiceImplTest {
         // an appeal against an admin_actions id, so this is what makes the notification actionable.
         verify(notificationService)
                 .create(
-                        null,
-                        ownerId,
-                        NotificationType.COMMENT_REMOVED,
-                        "admin_action",
-                        expected.id(),
-                        null,
-                        "Abuse");
+                        notice(
+                                ownerId,
+                                NotificationType.COMMENT_REMOVED,
+                                "admin_action",
+                                expected.id(),
+                                null,
+                                "Abuse"));
     }
 
     @Test
@@ -925,13 +927,13 @@ class AdminServiceImplTest {
 
         verify(notificationService)
                 .create(
-                        null,
-                        ownerId,
-                        NotificationType.STORY_REMOVED,
-                        "admin_action",
-                        expected.id(),
-                        null,
-                        "Nudity");
+                        notice(
+                                ownerId,
+                                NotificationType.STORY_REMOVED,
+                                "admin_action",
+                                expected.id(),
+                                null,
+                                "Nudity"));
     }
 
     @Test
@@ -949,13 +951,13 @@ class AdminServiceImplTest {
 
         verify(notificationService)
                 .create(
-                        null,
-                        senderId,
-                        NotificationType.MESSAGE_REMOVED,
-                        "admin_action",
-                        expected.id(),
-                        null,
-                        "Harassment");
+                        notice(
+                                senderId,
+                                NotificationType.MESSAGE_REMOVED,
+                                "admin_action",
+                                expected.id(),
+                                null,
+                                "Harassment"));
     }
 
     @Test
@@ -970,8 +972,7 @@ class AdminServiceImplTest {
         service.removeMessage(
                 UUID.randomUUID(), messageId, new AdminActionRequest("Harassment", null));
 
-        verify(notificationService, never())
-                .create(any(), any(), any(), anyString(), any(), any(), anyString());
+        verify(notificationService, never()).create(any(NotificationDraft.class));
     }
 
     @Test
@@ -985,8 +986,26 @@ class AdminServiceImplTest {
         service.restoreComment(
                 UUID.randomUUID(), commentId, new AdminActionRequest("Appeal accepted", null));
 
-        verify(notificationService, never())
-                .create(any(), any(), any(), anyString(), any(), any(), anyString());
+        verify(notificationService, never()).create(any(NotificationDraft.class));
+    }
+
+    private static NotificationDraft notice(
+            UUID recipientId,
+            NotificationType type,
+            String entityType,
+            UUID entityId,
+            UUID postId,
+            String message) {
+        return argThat(
+                draft ->
+                        draft.actorId() == null
+                                && recipientId.equals(draft.recipientId())
+                                && draft.type() == type
+                                && Objects.equals(entityType, draft.entityType())
+                                && Objects.equals(entityId, draft.entityId())
+                                && Objects.equals(postId, draft.postId())
+                                && Objects.equals(message, draft.message())
+                                && draft.adminActionId() != null);
     }
 
     private void stubAudit(AdminActionResponse response) {
