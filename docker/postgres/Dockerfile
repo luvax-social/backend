@@ -9,3 +9,5 @@ RUN ln -s /usr/share/zoneinfo/Asia/Ho_Chi_Minh /usr/share/zoneinfo/Asia/Saigon
 
 # First-boot init scripts (skipped when the data volume is already initialized)
 COPY init/ /docker-entrypoint-initdb.d/
+
+CMD ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=top", "-c", "pg_stat_statements.max=10000", "-c", "track_io_timing=on"]
