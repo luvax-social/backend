@@ -70,11 +70,14 @@ spring:
     publisher-returns: ${SPRING_RABBITMQ_PUBLISHER_RETURNS:true}
     template:
       mandatory: ${SPRING_RABBITMQ_TEMPLATE_MANDATORY:true}
+      observation-enabled: true
     listener:
       simple:
         acknowledge-mode: manual
+        observation-enabled: true
       direct:
         acknowledge-mode: manual
+        observation-enabled: true
   security:
     oauth2:
       client:
@@ -118,6 +121,9 @@ app:
         - ${OUTBOX_PUBLISHER_RETRY_BACKOFF_1:PT10S}
         - ${OUTBOX_PUBLISHER_RETRY_BACKOFF_2:PT30S}
         - ${OUTBOX_PUBLISHER_RETRY_BACKOFF_3:PT60S}
+    metrics:
+      enabled: ${OUTBOX_METRICS_ENABLED:true}
+      sample-interval: ${OUTBOX_METRICS_SAMPLE_INTERVAL:PT30S}
   messaging:
     consumer:
       max-attempts: ${RABBIT_CONSUMER_MAX_ATTEMPTS:3}
@@ -497,20 +503,69 @@ app:
         window-seconds: 60
 
 management:
+  server:
+    # Actuator moves off the application port entirely; ManagementSecurityConfig guards this one.
+    port: ${MANAGEMENT_SERVER_PORT:8081}
   endpoints:
     web:
       exposure:
         # micrometer-registry-prometheus is on the classpath but Spring Boot exposes only health
         # over HTTP by default, so /actuator/prometheus returned 404 and nothing could scrape the
-        # application. Widened deliberately to these three; the ADMIN gate in SecurityConfig still
-        # covers every other actuator endpoint.
+        # application. Widened deliberately to these three; ManagementSecurityConfig permits only
+        # health and prometheus on the management port, and denies everything else there.
         include: health,info,prometheus
+  tracing:
+    sampling:
+      # Every request is sampled; Phase 1 has no traffic volume that makes this expensive.
+      probability: 1.0
+    export:
+      otlp:
+        enabled: ${OTLP_EXPORT_ENABLED:false}
+  logging:
+    export:
+      otlp:
+        enabled: ${OTLP_EXPORT_ENABLED:false}
+  opentelemetry:
+    resource-attributes:
+      "[service.name]": luvax-backend
+      "[deployment.environment]": ${spring.profiles.active}
+      "[deployment.environment.name]": ${spring.profiles.active}
+    tracing:
+      export:
+        otlp:
+          # Always defined: Boot only builds the OTLP exporter when this is set, and a blank
+          # default would build one with an empty URL. Whether spans actually leave the process is
+          # decided by OTLP_EXPORT_ENABLED alone.
+          endpoint: ${OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  otlp:
+    metrics:
+      export:
+        # The starter's micrometer-registry-otlp would otherwise push metrics too;
+        # Prometheus scrapes instead.
+        enabled: false
+  observations:
+    enable:
+      spring:
+        security: false
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
   health:
     elasticsearch:
       enabled: true
   endpoint:
     health:
       show-details: when-authorized
+
+jdbc:
+  includes: CONNECTION,QUERY
+  datasource-proxy:
+    include-parameter-values: false
 
 server:
   # Forward-headers-strategy removed; IpExtractor + trusted-proxy-cidrs is the only model.
