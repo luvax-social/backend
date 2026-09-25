@@ -269,6 +269,22 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- opentelemetry-exporter-sender-okhttp needs okhttp-jvm 5.x, which itself needs
+                 okio-jvm 3.16.1; resend-java's okhttp 4.x brings an older okio 3.6.0, and Maven's
+                 nearest-wins mediation picked that older one. The OTLP exporter's HTTP client
+                 then calls an okio method that jar does not have, and every span and log export
+                 fails with NoSuchMethodError. Pinning okio to what okhttp-jvm 5.x actually
+                 declares satisfies both consumers, since okio 3.x is backward compatible. -->
+            <dependency>
+                <groupId>com.squareup.okio</groupId>
+                <artifactId>okio</artifactId>
+                <version>3.16.1</version>
+            </dependency>
+            <dependency>
+                <groupId>com.squareup.okio</groupId>
+                <artifactId>okio-jvm</artifactId>
+                <version>3.16.1</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
