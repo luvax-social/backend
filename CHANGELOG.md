@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - OpenTelemetry trace and log export over OTLP, off by default (`OTLP_EXPORT_ENABLED`), with 100 percent sampling; JDBC, Redis and the Gorse and Turnstile HTTP clients are now traced, and application logs carry the real trace and span id.
 - The behavioural-event recorder and the mail dispatch executor now carry the caller's trace context onto their own worker thread, so a decoupled write joins the request's trace instead of starting an unrelated one.
 - One trace now spans the outbox: the request that wrote an event is restored as the parent of its broker send, so the send and every consumer descend from the originating request, while the publisher's own batch trace only links to it.
+- Actuator now serves only on a private management port (8081), reachable only inside the deployment network; the health check and container healthcheck move with it.
 - `GET /api/v1/notifications` takes a `filter` (all, unread, comments, mentions, follows, system, verified) and returns hydrated feed rows with targets, previews, moderation and relationship blocks, and a `head` on the first page.
 - `GET /api/v1/notifications/state` returns the capped unseen badge, the seen and previous watermarks, and the pending follow request summary for the pinned entry; `POST /api/v1/notifications/seen` advances the watermark.
 - `PUT` and `DELETE /api/v1/notifications/{id}/read` mark one notification read or unread, and `DELETE /api/v1/notifications/{id}` removes it from the feed.
@@ -769,6 +770,7 @@ Existing group conversations are deleted by the upgrade, after being copied into
 - `MailService`, `MailServiceImpl`, and `MailSendException` from `modules/mail/` relocated into `common/mail/`
 - `ErrorResponse` record and the legacy `common/exception/` token and mail exception classes superseded by `ApiException` and the relocated domain exceptions
 - Four stray Javadoc blocks that had drifted from the method they described and no longer matched the code beneath them.
+- `app.security.public-metrics-endpoint`. Actuator no longer shares the application port at all, so the switch that once opened `/actuator/prometheus` there has nothing left to open.
 
 ### Security
 - Authenticated support ticket routes now carry a per-caller rate limit; they previously relied only on a process-wide backstop that one caller could exhaust for everybody.

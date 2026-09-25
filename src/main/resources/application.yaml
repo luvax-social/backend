@@ -141,14 +141,6 @@ app:
     # outrank it, which is why the only symptom was the IpExtractor startup warning. Empty by
     # default, which fails closed: no proxy is trusted until one is named.
     trusted-proxy-cidrs: ${APP_SECURITY_TRUSTED_PROXY_CIDRS:}
-    # Serves /actuator/prometheus to callers presenting no credentials. Defaulted fail-closed,
-    # so the endpoint falls through to the ADMIN rule that covers the rest of /actuator/**.
-    # It publishes every routed URI template, per-endpoint request counts and latencies, and JVM,
-    # pool and broker internals, so enabling it on a port reachable from outside the monitoring
-    # network hands that to anyone. A separate management port or an ingress rule is safer than
-    # this switch; it exists so a deployment whose port is already private is not forced into a
-    # topology change to keep scraping.
-    public-metrics-endpoint: ${APP_SECURITY_PUBLIC_METRICS_ENDPOINT:false}
     refresh-cookie:
       name: ${REFRESH_COOKIE_NAME:luvax_refresh}
       path: ${REFRESH_COOKIE_PATH:/api/v1/auth}
