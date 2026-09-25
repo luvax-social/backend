@@ -60,7 +60,9 @@ class NoiseObservationPredicateTest {
         assertThat(
                         predicate.test(
                                 "tasks.scheduled.execution",
-                                scheduledContext(new OutboxPublisherServiceImpl(null, null, null))))
+                                scheduledContext(
+                                        new OutboxPublisherServiceImpl(
+                                                null, null, null, null, null, null, null))))
                 .isFalse();
     }
 

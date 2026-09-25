@@ -20,7 +20,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +37,10 @@ import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.amqp.core.ReturnedMessage;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.boot.micrometer.tracing.opentelemetry.autoconfigure.OpenTelemetryTracingAutoConfiguration;
+import org.springframework.boot.micrometer.tracing.opentelemetry.autoconfigure.SdkTracerProviderBuilderCustomizer;
+import org.springframework.boot.opentelemetry.autoconfigure.OpenTelemetrySdkAutoConfiguration;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.app.common.config.rabbit.RabbitMqTopologyConfig;
@@ -41,29 +48,79 @@ import com.app.common.outbox.config.OutboxPublisherProperties;
 import com.app.common.outbox.entity.OutboxEvent;
 import com.app.common.outbox.enums.OutboxEventStatus;
 import com.app.common.outbox.model.DomainEventEnvelope;
+import com.app.common.outbox.observability.OutboxMetrics;
 import com.app.common.outbox.service.OutboxPublisherStateService;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
+import io.micrometer.tracing.Tracer;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
+import io.opentelemetry.sdk.trace.SdkTracerProviderBuilder;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 
 @ExtendWith(MockitoExtension.class)
 class OutboxPublisherServiceImplTest {
+
+    // A real, minimal OTel-backed Tracer, built the same way Boot's auto-configuration would,
+    // without a full application context. OutboxTraceRelay and the publisher both call real
+    // OpenTelemetry API (Span.current(), context propagation) that a mocked Tracer cannot fake.
+    private static AnnotationConfigApplicationContext tracingContext;
+    private static Tracer tracer;
+    private static InMemorySpanExporter spanExporter;
 
     @Mock private OutboxPublisherStateService outboxPublisherStateService;
     @Mock private RabbitTemplate rabbitTemplate;
 
     private OutboxPublisherProperties properties;
+    private OutboxTraceRelay outboxTraceRelay;
+    private SimpleMeterRegistry meterRegistry;
+    private OutboxMetrics outboxMetrics;
     private OutboxPublisherServiceImpl service;
+
+    @BeforeAll
+    static void setUpTracing() {
+        spanExporter = InMemorySpanExporter.create();
+        tracingContext = new AnnotationConfigApplicationContext();
+        tracingContext.registerBean(
+                "otelSpanProcessorCustomizer",
+                SdkTracerProviderBuilderCustomizer.class,
+                () ->
+                        (SdkTracerProviderBuilder builder) ->
+                                builder.addSpanProcessor(SimpleSpanProcessor.create(spanExporter)));
+        tracingContext.register(
+                OpenTelemetrySdkAutoConfiguration.class,
+                OpenTelemetryTracingAutoConfiguration.class);
+        tracingContext.refresh();
+        tracer = tracingContext.getBean(Tracer.class);
+    }
+
+    @AfterAll
+    static void tearDownTracing() {
+        tracingContext.close();
+    }
 
     @BeforeEach
     void setUp() {
+        spanExporter.reset();
         properties = new OutboxPublisherProperties();
         properties.setConfirmTimeout(Duration.ofMillis(20));
+        outboxTraceRelay = new OutboxTraceRelay(tracer);
+        meterRegistry = new SimpleMeterRegistry();
+        outboxMetrics = new OutboxMetrics(meterRegistry);
         service =
                 new OutboxPublisherServiceImpl(
-                        outboxPublisherStateService, rabbitTemplate, properties);
+                        outboxPublisherStateService,
+                        rabbitTemplate,
+                        properties,
+                        ObservationRegistry.create(),
+                        tracer,
+                        outboxTraceRelay,
+                        outboxMetrics);
     }
 
     @Test
@@ -330,6 +387,81 @@ class OutboxPublisherServiceImplTest {
     }
 
     @Test
+    void publishDueEvents_emptyClaim_opensNoObservation() {
+        when(outboxPublisherStateService.claimPublishableBatch(any(OffsetDateTime.class), eq(100)))
+                .thenReturn(List.of());
+
+        int attempted = service.publishDueEvents();
+
+        assertThat(attempted).isZero();
+        assertThat(spanExporter.getFinishedSpanItems()).isEmpty();
+    }
+
+    @Test
+    void publishDueEvents_publishedOutcome_recordsPublishedTag() {
+        OutboxEvent event = outboxEvent(0);
+        when(outboxPublisherStateService.claimPublishableBatch(any(OffsetDateTime.class), eq(100)))
+                .thenReturn(List.of(event));
+        when(outboxPublisherStateService.markPublished(eq(event), any(OffsetDateTime.class)))
+                .thenReturn(true);
+        completeConfirm(true, null);
+
+        service.publishDueEvents();
+
+        assertThat(
+                        meterRegistry
+                                .get("luvax.outbox.publish")
+                                .tag("outcome", "published")
+                                .timer()
+                                .count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void publishDueEvents_deadOutcome_recordsDeadTag() {
+        OutboxEvent event = outboxEvent(2);
+        when(outboxPublisherStateService.claimPublishableBatch(any(OffsetDateTime.class), eq(100)))
+                .thenReturn(List.of(event));
+        when(outboxPublisherStateService.markDead(
+                        eq(event), eq(3), any(OffsetDateTime.class), any()))
+                .thenReturn(true);
+        doThrow(new AmqpException("broker unavailable"))
+                .when(rabbitTemplate)
+                .send(anyString(), anyString(), any(Message.class), any(CorrelationData.class));
+
+        service.publishDueEvents();
+
+        assertThat(meterRegistry.get("luvax.outbox.publish").tag("outcome", "dead").timer().count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void publishDueEvents_storedContext_sendsWithOriginCurrent() {
+        String originTraceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+        OutboxEvent event = outboxEventWithTraceParent(originTraceparent);
+        when(outboxPublisherStateService.claimPublishableBatch(any(OffsetDateTime.class), eq(100)))
+                .thenReturn(List.of(event));
+        when(outboxPublisherStateService.markPublished(eq(event), any(OffsetDateTime.class)))
+                .thenReturn(true);
+        AtomicReference<Span> currentDuringSend = new AtomicReference<>();
+        doAnswer(
+                        invocation -> {
+                            currentDuringSend.set(Span.current());
+                            CorrelationData cd = invocation.getArgument(3);
+                            cd.getFuture().complete(new CorrelationData.Confirm(true, null));
+                            return null;
+                        })
+                .when(rabbitTemplate)
+                .send(anyString(), anyString(), any(Message.class), any(CorrelationData.class));
+
+        service.publishDueEvents();
+
+        assertThat(currentDuringSend.get()).isNotNull();
+        assertThat(currentDuringSend.get().getSpanContext().getTraceId())
+                .isEqualTo("0af7651916cd43dd8448eb211c80319c");
+    }
+
+    @Test
     void publishDueEvents_isNotTransactional() throws NoSuchMethodException {
         Method method = OutboxPublisherServiceImpl.class.getMethod("publishDueEvents");
 
@@ -347,6 +479,37 @@ class OutboxPublisherServiceImplTest {
                         })
                 .when(rabbitTemplate)
                 .send(anyString(), anyString(), any(Message.class), any(CorrelationData.class));
+    }
+
+    private OutboxEvent outboxEventWithTraceParent(String traceParent) {
+        UUID id = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        UUID aggregateId = UUID.randomUUID();
+        OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.UTC);
+        DomainEventEnvelope payload =
+                new DomainEventEnvelope(
+                        eventId,
+                        "user.registered.v1",
+                        occurredAt,
+                        aggregateId,
+                        "user",
+                        aggregateId,
+                        Map.of("userId", aggregateId.toString()));
+        return OutboxEvent.builder()
+                .id(id)
+                .eventId(eventId)
+                .claimId(UUID.randomUUID())
+                .aggregateType("user")
+                .aggregateId(aggregateId)
+                .eventType("user.registered.v1")
+                .routingKey("user.registered.v1")
+                .payload(payload)
+                .status(OutboxEventStatus.PENDING)
+                .attemptCount(0)
+                .nextRetryAt(occurredAt)
+                .createdAt(occurredAt)
+                .traceParent(traceParent)
+                .build();
     }
 
     private OutboxEvent outboxEvent(int attemptCount) {

@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -11,6 +12,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.Assert;
 
+import com.app.common.observability.TraceContextCapture;
+import com.app.common.observability.W3cTraceContext;
 import com.app.common.outbox.entity.OutboxEvent;
 import com.app.common.outbox.enums.OutboxEventStatus;
 import com.app.common.outbox.model.DomainEventEnvelope;
@@ -26,9 +29,12 @@ public class OutboxServiceImpl implements OutboxService {
             "Outbox event data must not contain raw tokens, passwords, secrets, credentials, or URLs carrying them";
 
     private final OutboxEventRepository outboxEventRepository;
+    private final TraceContextCapture traceContextCapture;
 
-    public OutboxServiceImpl(OutboxEventRepository outboxEventRepository) {
+    public OutboxServiceImpl(
+            OutboxEventRepository outboxEventRepository, TraceContextCapture traceContextCapture) {
         this.outboxEventRepository = outboxEventRepository;
+        this.traceContextCapture = traceContextCapture;
     }
 
     @Override
@@ -60,6 +66,7 @@ public class OutboxServiceImpl implements OutboxService {
                         aggregateId,
                         eventData);
 
+        Optional<W3cTraceContext> trace = traceContextCapture.captureCurrent();
         OutboxEvent event =
                 OutboxEvent.builder()
                         .eventId(eventId)
@@ -71,6 +78,8 @@ public class OutboxServiceImpl implements OutboxService {
                         .status(OutboxEventStatus.PENDING)
                         .attemptCount(0)
                         .nextRetryAt(occurredAt)
+                        .traceParent(trace.map(W3cTraceContext::traceParent).orElse(null))
+                        .traceState(trace.map(W3cTraceContext::traceState).orElse(null))
                         .build();
         return outboxEventRepository.insertPending(event);
     }
@@ -105,6 +114,7 @@ public class OutboxServiceImpl implements OutboxService {
                         aggregateId,
                         eventData);
 
+        Optional<W3cTraceContext> trace = traceContextCapture.captureCurrent();
         OutboxEvent event =
                 OutboxEvent.builder()
                         .eventId(eventId)
@@ -116,6 +126,8 @@ public class OutboxServiceImpl implements OutboxService {
                         .status(OutboxEventStatus.PENDING)
                         .attemptCount(0)
                         .nextRetryAt(occurredAt)
+                        .traceParent(trace.map(W3cTraceContext::traceParent).orElse(null))
+                        .traceState(trace.map(W3cTraceContext::traceState).orElse(null))
                         .build();
         return outboxEventRepository.insertPendingIgnoreDuplicate(event).isPresent();
     }
