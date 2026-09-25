@@ -46,6 +46,7 @@ import com.app.modules.mail.service.MailService;
 import com.app.modules.post.consumer.PostIndexSyncConsumer;
 import com.app.modules.post.search.PostDocument;
 import com.app.modules.recommendation.client.GorseClient;
+import com.app.testsupport.TestContainerImages;
 import com.rabbitmq.client.Channel;
 
 @SpringBootTest(
@@ -74,14 +75,12 @@ class PostControllerIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @Container
     static ElasticsearchContainer elasticsearch =
-            new ElasticsearchContainer(
-                            DockerImageName.parse(
-                                    "docker.elastic.co/elasticsearch/elasticsearch:9.0.3"))
+            new ElasticsearchContainer(DockerImageName.parse(TestContainerImages.ELASTICSEARCH))
                     .withEnv("xpack.security.enabled", "false");
 
     @DynamicPropertySource

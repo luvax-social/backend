@@ -1,4 +1,4 @@
-FROM postgres:latest
+FROM postgres:18
 
 # Some JDBC clients (e.g. DBeaver via pgjdbc) resolve the JVM's default zone to the legacy IANA
 # backward-compatibility name "Asia/Saigon" instead of its canonical replacement

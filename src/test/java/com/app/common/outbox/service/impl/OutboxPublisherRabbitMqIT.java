@@ -32,6 +32,7 @@ import com.app.common.outbox.repository.OutboxEventRepository;
 import com.app.common.outbox.service.OutboxPublisherService;
 import com.app.modules.auth.messaging.AuthEventTypes;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 @SpringBootTest(
         properties = {
@@ -57,7 +58,7 @@ class OutboxPublisherRabbitMqIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @Autowired private OutboxEventRepository outboxEventRepository;
