@@ -88,3 +88,10 @@ Deleting a user's account preserves their past messages for the remaining partic
 | `social` | inbound | Block relationships govern messaging permissions |
 | `notification` | none | Direct messages left the activity feed. `MessageNotificationConsumer`, `message.notification.queue`, its DLQ and bindings are retired, and `RetiredQueueCleaner` deletes both queues from the broker at startup. V119 soft-deleted the existing `message` notification rows. The `message` enum value and `user_settings.notify_messages` remain so historical rows and the setting stay readable. |
 | `report` | inbound | Reports can target a message via polymorphic `entity_id` |
+
+---
+
+## Section 5: Observability
+
+The Phase 3 query baseline panel reads `pg_stat_statements` for `messages`, `conversations` and `conversation_participants`, the module's three highest-write-volume tables, to track query-plan drift once real production traffic exists.
+No application code in this module reads `pg_stat_statements`; the panel queries it directly through the read-only `luvax_monitor` role.

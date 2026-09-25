@@ -24,6 +24,8 @@ The batch is bounded and an oversized batch is rejected as a validation error ra
 Each impression carries a client-generated `impressionId`, which becomes the outbox `event_id`.
 A retry after a network failure therefore resends the same ids and is absorbed by three constraints that already existed: `outbox_events.event_id` is `UNIQUE`, `processed_messages` is unique on `(consumer_name, event_id)`, and `UserEventJdbcRepository.insertIgnoreDuplicate` keys the row on the event id.
 `OutboxService.enqueueOnce` is the entry point; the ordinary `enqueue` generates a random event id and would count a resubmitted batch twice.
+This dedupe holds for as long as the retention job keeps the rows it depends on: the outbox row for 7 days (`app.retention.outbox-published`) and the inbox marker for 14 days (`app.retention.processed-messages`).
+A retry older than both windows is no longer recognised as a duplicate and is processed as a new impression.
 
 **`posts.view_count` is never touched by this path**, and neither is it touched by `POST /posts/{postId}/view`.
 Both endpoints emit `post.viewed.v1` and neither writes the counter, which a background job maintains and application code never writes.
@@ -180,6 +182,7 @@ The last row is the read the activity log's mandatory window exists to make impo
 | An analytics write must never fail the request that triggered it | `UserEventRecorder` - no retry, no outbox, no dead letter. `OutboxService` exists for events that must reach RabbitMQ; these are not those |
 | Event writes must not be able to exhaust the connection pool | `UserEventRecorder` - submission is bounded by a permit count well under the Hikari pool size, and a submission with no permit free is dropped immediately rather than queued or blocked, because backpressure onto a request thread would defeat the rule above |
 | `UserEventRecorder` writes only three event types | `session_start` on any route that issues a session, `search` on both search surfaces carrying the term, `profile_view` for another account's profile. Chosen for investigative value per unit of write volume |
+| A dropped or delayed analytics write must not lose the request's trace | `UserEventRecorder`'s task decorator restores the caller's W3C trace context on the virtual thread before the insert runs, so the write's own span still joins the request's trace even though it commits independently and on no schedule the caller can observe |
 | Engagement event writes must not drop rows and must survive redelivery | `RecommendationFeedbackConsumer` with `UserEventJdbcRepository.insertIgnoreDuplicate` - the row id is the domain event id and the insert is `ON CONFLICT DO NOTHING`, so a replay is a no-op. These rows are the canonical record Gorse is rebuilt from, which is why they take the durable path rather than the dropping one |
 | An engagement write must never fail the user action that triggered it | `PostLikeServiceImpl` / `PostSaveServiceImpl` enqueue an outbox row inside the domain transaction; the event reaches `user_events` and Gorse later, off the request thread |
 | A view of one's own profile is not recorded | `UserServiceImpl.assemblePublicProfile` - excluded at the call site rather than filtered out later, so the table does not fill with the views that answer no question |

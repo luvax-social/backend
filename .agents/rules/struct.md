@@ -32,7 +32,8 @@ app/
 ├── database/
 │   └── schema.sql                  # Reference PostgreSQL final-state schema (not applied by Flyway)
 ├── docker/
-│   └── postgres/                   # Dockerfile (postgres:latest + tz alias) and first-boot init SQL
+│   └── postgres/                   # Dockerfile (postgres:latest + tz alias, preloads pg_stat_statements)
+│                                   # and first-boot init SQL (creates the luvax_monitor role)
 ├── docs/
 │   └── modules/
 │       ├── GLOBAL_RULES.md         # Cross-module data rules (enum/config table contracts)
@@ -44,7 +45,7 @@ app/
 │   │   │   ├── modules/            # 15 domain modules (see §2)
 │   │   │   └── Application.java    # @SpringBootApplication @ConfigurationPropertiesScan
 │   │   └── resources/
-│   │       ├── db/migration/       # Flyway V01-V123 SQL migrations
+│   │       ├── db/migration/       # Flyway V01-V126 SQL migrations
 │   │       ├── elasticsearch/
 │   │       │   └── settings/       # hashtags.json, posts.json (Elasticsearch index settings)
 │   │       ├── resilience/
@@ -109,19 +110,25 @@ app/
 | `common/inbox/repository/` | `ProcessedMessageRepository`, `ProcessedMessageRepositoryCustom`, `ProcessedMessageRepositoryImpl` |
 | `common/inbox/service/` | `ProcessedMessageService` |
 | `common/inbox/service/impl/` | `ProcessedMessageServiceImpl` |
+| `common/inbox/observability/` | `InboxMetrics` |
 | `common/messaging/` | `DeadLetterPublisher`, `DomainEventMessageParser` |
 | `common/messaging/config/` | `ConsumerRetryProperties`, `MessagingConsumerConfig` |
 | `common/messaging/exception/` | `PermanentMessageException` |
+| `common/observability/` | `NoiseObservationPredicate`, `ObservabilityConfig`, `OpenTelemetryAppenderInitializer`, `W3cTraceContext`, `TraceContextCapture` |
 | `common/outbox/config/` | `OutboxPublisherConfig`, `OutboxPublisherProperties` |
 | `common/outbox/entity/` | `OutboxEvent` |
 | `common/outbox/enums/` | `OutboxEventStatus` |
 | `common/outbox/exception/` | `OutboxPublishException` |
 | `common/outbox/model/` | `DomainEventEnvelope`, `DomainEventEnvelopeJson` |
+| `common/outbox/observability/` | `OutboxMetrics`, `OutboxMetricsSampler` |
 | `common/outbox/repository/` | `OutboxEventRepository`, `OutboxEventRepositoryCustom`, `OutboxEventRepositoryImpl` |
 | `common/outbox/service/` | `OutboxService`, `OutboxPublisherService`, `OutboxPublisherStateService` |
-| `common/outbox/service/impl/` | `OutboxServiceImpl`, `OutboxPublisherServiceImpl`, `OutboxPublisherStateServiceImpl` |
+| `common/outbox/service/impl/` | `OutboxServiceImpl`, `OutboxPublisherServiceImpl`, `OutboxPublisherStateServiceImpl`, `OutboxTraceRelay` |
 | `common/response/` | `ApiResponse<T>`, `CursorPageResponse<T>`, `PageResponse<T>` |
-| `common/security/config/` | `CorsProperties`, `SecurityConfig` |
+| `common/retention/` | `RetentionProperties`, `RetentionPurgeJob`, `RetentionWindowValidator` |
+| `common/retention/service/` | `RetentionPurgeService` |
+| `common/retention/service/impl/` | `RetentionPurgeServiceImpl` |
+| `common/security/config/` | `CorsProperties`, `SecurityConfig`, `ManagementSecurityConfig`, `ManagementServerRequestMatcher` |
 | `common/security/filter/` | `AuthRateLimitFilter`, `JwtAuthenticationFilter` |
 | `common/security/jwt/` | `JwtClaims`, `JwtProperties`, `JwtTokenProvider` |
 | `common/security/service/` | `RateLimiterService`, `RefreshTokenService`, `TokenBlacklistService` |
@@ -202,13 +209,19 @@ All domain events flow through shared outbox/inbox infrastructure in `common/out
 
 **Outbox (producer side)**:
 - `OutboxService.enqueue()` (`PROPAGATION.MANDATORY`) persists a `DomainEventEnvelope` into `outbox_events` within the same transaction as the domain write.
+- `outbox_events.trace_parent` / `trace_state` (V124) capture the W3C trace context of the request that wrote the event. `OutboxTraceRelay` restores that context as the parent of the publisher's broker send, so the send and every consumer descend from the originating request; the publisher's own batch trace only carries a `Link` back to it, because a batch spans many unrelated requests. A row written outside any trace (seed replay, a job with tracing filtered out) carries neither column and publishes with no parent.
 - `OutboxPublisherServiceImpl` runs on a configurable `@Scheduled` fixed delay: claims a batch of `PENDING` rows using `FOR UPDATE SKIP LOCKED`, publishes to RabbitMQ with publisher confirms, then marks each row `PUBLISHED` or schedules retry / marks `DEAD` based on broker confirm outcome.
 - `OutboxEventStatus` lifecycle: `PENDING` → `PROCESSING` → `PUBLISHED` | `DEAD`.
 - Configuration namespace: `app.outbox.publisher.*` — batch size, max attempts, confirm timeout, processing lease, per-attempt retry backoffs.
+- `OutboxMetrics` / `OutboxMetricsSampler` expose the pending/dead row counts and publish outcomes as Prometheus meters.
+- `RetentionPurgeJob` (`common/retention/`) purges `PUBLISHED` rows older than `app.retention.outbox-published` (default 7 days) in bounded batches.
 
 **Inbox (consumer side)**:
 - `ProcessedMessageService.processOnce(consumerName, eventId, handler)` guards all consumers against duplicate delivery using `INSERT … ON CONFLICT DO NOTHING RETURNING` into `processed_messages`.
 - Returns `PROCESSED` on first execution; `DUPLICATE` (skips handler) on replay.
+- `InboxMetrics` exposes processed/duplicate counts per consumer as Prometheus meters.
+- `RetentionPurgeJob` purges `processed_messages` rows older than `app.retention.processed-messages` (default 14 days).
+- `RetentionWindowValidator` refuses application startup unless `processed-messages` exceeds the longest possible redelivery window (outbox republish attempts plus consumer retry backoffs, on the order of a few minutes with default settings) and is at least as long as `outbox-published`; a shorter window could purge a marker while a duplicate delivery is still possible, or leave a purged outbox row with no remaining duplicate guard.
 
 **Consumer retry policy**:
 - On transient failure, consumers nack without requeue and schedule a dead-letter via `DeadLetterPublisher`.
@@ -218,7 +231,7 @@ All domain events flow through shared outbox/inbox infrastructure in `common/out
 ### Test Coverage
 
 Generated by `./scripts/regenerate_struct_figures.sh tests`, which counts what `git ls-files`
-reports under `src/test/java` rather than what this table last said; 288 test classes total.
+reports under `src/test/java` rather than what this table last said; 301 test classes total.
 Re-run it and paste the output back here whenever a test class is added, moved or renamed.
 
 | Package | Test Classes |
@@ -226,22 +239,27 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `(root)` | `ApplicationTests` |
 | `common` | `ApiConstantsSocialTest`, `ApiConstantsUnroutedFieldsTest`, `UpdatedAtSingleWriterIT` |
 | `common/base` | `BaseControllerTest` |
-| `common/config` | `ActuatorEndpointAccessIT`, `ProdProfileConsumerActivationIT`, `RequiredEnvironmentGuardTest` |
+| `common/config` | `ManagementPortAccessIT`, `ProdProfileConsumerActivationIT`, `RequiredEnvironmentGuardTest` |
 | `common/config/elasticsearch` | `ElasticsearchConfigTest`, `ElasticsearchHealthIT` |
 | `common/config/openapi` | `OpenApiContractIT` |
-| `common/config/rabbit` | `RabbitMqTopologyConfigTest`, `RetiredQueueCleanerTest` |
+| `common/config/rabbit` | `LiveServerQueueExpiryTest`, `RabbitMqTopologyConfigTest`, `RetiredQueueCleanerTest` |
 | `common/config/security` | `RefreshCookiePropertiesTest`, `SecurityPropertiesValidationTest` |
 | `common/enums` | `ApiErrorCodeMessageTest` |
 | `common/exception` | `ApiExceptionTest`, `AppExceptionTest`, `GlobalExceptionHandlerTest`, `HttpNegotiationExceptionHandlersIT`, `MalformedRequestBodyIT` |
+| `common/inbox/repository` | `ProcessedMessageRepositoryIT` |
 | `common/inbox/service/impl` | `ProcessedMessageServiceImplIT` |
 | `common/mail/config` | `MailPropertiesBindingTest`, `MailTransportEnvOverrideTest`, `MailTransportSelectionTest` |
 | `common/mail/service/impl` | `MailServiceImplTest`, `NoopMailSenderTest`, `ResendMailSenderTest`, `TemplateMailSenderParityTest` |
 | `common/mail/util` | `MailTemplateRendererTest` |
 | `common/messaging` | `DeadLetterPublisherTest` |
+| `common/observability` | `NoiseObservationPredicateTest`, `TraceContextCaptureTest`, `W3cTraceContextTest` |
+| `common/outbox/observability` | `OutboxMetricsSamplerTest` |
 | `common/outbox/repository` | `OutboxEventRepositoryIT` |
-| `common/outbox/service/impl` | `OutboxPublisherRabbitMqIT`, `OutboxPublisherServiceImplTest`, `OutboxServiceImplTest` |
+| `common/outbox/service/impl` | `OutboxLogCorrelationIT`, `OutboxPublisherRabbitMqIT`, `OutboxPublisherServiceImplTest`, `OutboxServiceImplTest`, `OutboxTraceContinuityIT`, `OutboxTraceRelayTest` |
 | `common/pagination` | `CursorCodecTest`, `KeysetPageTest`, `OffsetCursorCodecTest`, `OffsetPageableTest`, `TimeCursorsTest` |
 | `common/response` | `ApiResponseTest`, `CursorPageResponseTest`, `ViewerRelationshipResponseTest` |
+| `common/retention` | `RetentionWindowValidatorTest` |
+| `common/retention/service/impl` | `RetentionPurgeServiceImplTest` |
 | `common/security/config` | `CorsPropertiesTest` |
 | `common/security/filter` | `AuthRateLimitFilterTest`, `JwtAuthenticationFilterTest` |
 | `common/security/jwt` | `JwtTokenProviderTest` |
@@ -300,7 +318,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/notification/migration` | `NotificationOverhaulMigrationIT` |
 | `modules/notification/repository` | `NotificationAggregationRepositoryIT`, `NotificationFeedRepositoryIT`, `NotificationSeenStateRepositoryIT` |
 | `modules/notification/service/impl` | `NotificationItemAssemblerTest`, `NotificationServiceImplTest`, `NotificationTypePolicyTest` |
-| `modules/post/consumer` | `PostIndexSyncConsumerIT`, `PostIndexSyncConsumerTest`, `PostNotificationConsumerTest` |
+| `modules/post/consumer` | `PostIndexSyncConsumerIT`, `PostIndexSyncConsumerTest`, `PostNotificationConsumerIT`, `PostNotificationConsumerTest` |
 | `modules/post/controller` | `PostBannedHashtagIT`, `PostControllerIT` |
 | `modules/post/dto/response` | `FeedPostResponseTest` |
 | `modules/post/live` | `PostLikeLiveDeliveryIT`, `PostOnlyWebSocketConfigIT` |
@@ -333,6 +351,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/users/mapper` | `UserMapperTest` |
 | `modules/users/repository` | `UserRepositorySurfaceTest` |
 | `modules/users/service/impl` | `UserProfileViewerStateIT`, `UserSearchIT`, `UserSearchServiceImplTest`, `UserServiceImplTest`, `UserSummaryServiceIT`, `UserSummaryServiceImplTest`, `UsernameLookupIT` |
+| `testsupport` | `TestContainerImages` |
 
 ---
 
@@ -341,7 +360,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 ### Database
 
 - Engine: **PostgreSQL** (docker-compose builds `./docker/postgres` on the `postgres:latest` base)
-- Migration: **Flyway** (`out-of-order: false`); 123 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109, V110, V121 and V122 build or drop their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those eighteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V123 all exist.
+- Migration: **Flyway** (`out-of-order: false`); 126 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109, V110, V121, V122 and V125 build or drop their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those nineteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V126 all exist.
 
 | Migration | Description |
 |-----------|-------------|
@@ -468,6 +487,9 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | V121 | add_notification_feed_indexes |
 | V122 | drop_superseded_notification_indexes |
 | V123 | drop_notifications_is_read |
+| V124 | add_outbox_trace_context |
+| V125 | add_outbox_retention_indexes |
+| V126 | create_pg_stat_statements_extension |
 
 - Reference schema: `database/schema.sql` (authoritative final-state; not applied by Flyway)
 - Extensions: `pgcrypto` (UUID gen), `pg_trgm` (fuzzy username search), `btree_gin` (composite GIN indexes)
@@ -543,8 +565,9 @@ The appeal window is thirty days because the notice arrives unannounced and is r
 
 ### Message Broker — RabbitMQ
 
-- docker-compose: `rabbitmq:4-management` (5672 broker, 15672 management UI, both bound to loopback)
+- docker-compose: `rabbitmq:4.3-management` (5672 broker, 15672 management UI, 15692 Prometheus metrics, all bound to loopback). Pinned to 4.3 because `rabbitmq_prometheus` is already enabled in that image, so 15692 only needed publishing.
 - Topology declared in `RabbitMqTopologyConfig`; publisher customized in `RabbitMqPublisherConfig`
+- `spring.rabbitmq.template.observation-enabled` and `spring.rabbitmq.listener.simple.observation-enabled` are both `true`, so every publish and every listener invocation produces a Micrometer observation and a trace span.
 
 **Exchanges:**
 
@@ -612,7 +635,7 @@ never sees them.
 
 ### Search — Elasticsearch
 
-- docker-compose: `docker.elastic.co/elasticsearch/elasticsearch:9.0.3` (port 9200, `discovery.type: single-node`, security disabled)
+- docker-compose: `docker.elastic.co/elasticsearch/elasticsearch:9.2.5` (port 9200, `discovery.type: single-node`, security disabled). Pinned to production's 9.2.5, up from 9.0.3.
 - Client wired in `ElasticsearchConfig` using `app.elasticsearch.*` properties (URIs, optional Basic Auth, connection/socket timeouts)
 - Index settings files: `src/main/resources/elasticsearch/settings/posts.json`, `hashtags.json`
 
@@ -665,7 +688,7 @@ buckets on the key that matched rather than on the concrete request path.
 | Database | PostgreSQL |
 | Cache | Redis |
 | Message broker | RabbitMQ |
-| Search | Elasticsearch 9.0.3 (`spring-boot-starter-data-elasticsearch`) |
+| Search | Elasticsearch 9.2.5 (`spring-boot-starter-data-elasticsearch`) |
 | Object storage | Cloudflare R2 via AWS SDK v2 (`software.amazon.awssdk:s3 2.25.60`) |
 | Transactional email | Resend SDK (`resend-java 3.1.0`) |
 | Build | Maven (`./mvnw`) |
@@ -674,7 +697,7 @@ buckets on the key that matched rather than on the concrete request path.
 | Security | Spring Security 6 |
 | ORM | Spring Data JPA / Hibernate |
 | Code generation | Lombok, MapStruct 1.6.3 |
-| Observability | Micrometer + Prometheus, datasource-micrometer 2.2.1, Spring Actuator |
+| Observability | Micrometer Tracing with the OpenTelemetry bridge, OTLP export of traces and logs, Prometheus scrape on the management port, datasource-micrometer 2.2.1, Spring Actuator |
 | Formatting | Spotless 2.46.1 (Google AOSP); run `./mvnw spotless:apply` |
 | Testing | JUnit 5, Testcontainers 1.21.4 (postgresql, elasticsearch), Spring Boot test starters |
 | CI/CD | GitHub Actions (`.github/workflows/pr-lint.yml`, `pr-size.yml`, `sonarcloud.yml`) |
@@ -696,6 +719,7 @@ Implemented in `common/security/` and `modules/auth/`:
 - **Rate limiting**: `AuthRateLimitFilter` uses `RateLimiterServiceImpl` (Redis Lua sliding window); per-endpoint rules in `app.rate-limit.endpoint-rules`. Login bucket keyed by IP + email.
 - **Trusted proxy**: `IpExtractor` reads `X-Forwarded-For` only when the direct peer IP matches a configured trusted-proxy CIDR list (`app.security.trusted-proxy-cidrs`).
 - **Forgot-password timing**: `ForgotPasswordTimingEqualizer` normalises response time to a configurable floor (`app.auth.forgot-password.min-response-time` + jitter) to prevent user-enumeration via timing.
+- **Management port**: `ManagementSecurityConfig` installs a second, highest-precedence `SecurityFilterChain` matched by `ManagementServerRequestMatcher` (any request served by the management server's own port, distinct from the application port). Only `/actuator/health`, `/actuator/health/**` and `/actuator/prometheus` are permitted there; everything else on that port is denied. The application's own filter chain is unaffected, because Spring Boot would otherwise apply it to the management context too. The `app.security.public-metrics-endpoint` property this superseded has been removed.
 
 ---
 
@@ -706,7 +730,7 @@ Implemented in `common/security/` and `modules/auth/`:
 - **Transactions**: `@Transactional` on Service impl methods only — never on interfaces or Controllers
 - **Responses**: wrap all responses in `ApiResponse<T>`; use `PageResponse<T>` for offset pagination, `CursorPageResponse<T>` for cursor pagination
 - **Async**: virtual threads enabled globally
-- **Logging**: `timestamp | level | thread | traceId | logger | message`; rolling file 50 MB, 10 files, 500 MB cap
+- **Logging**: `timestamp | level | thread | traceId | logger | message`; rolling file 50 MB per file, 3 days, 200 MB cap. An `OpenTelemetryAppender` carries every record to the OTLP log exporter, which is now the durable copy (14 day retention in ClickHouse); the local file only needs to bridge an export outage or serve a machine with no collector configured.
 - **Comments**: English only; see `.claude/rules/comment_style.md` (mirrored at `.agents/rules/comment_style.md`)
 
 ---
