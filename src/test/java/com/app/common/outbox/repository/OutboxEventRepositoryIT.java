@@ -212,6 +212,45 @@ class OutboxEventRepositoryIT {
     }
 
     @Test
+    void deletePublishedBefore_removesOnlyOldPublishedRows() {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        OutboxEvent oldPublished = publishedAt(now.minusDays(10));
+        OutboxEvent recentPublished = publishedAt(now.minusHours(1));
+        OutboxEvent pending = outboxEventRepository.insertPending(newEvent(now, 0));
+        OutboxEvent dead = claimedEvent(2);
+        outboxEventRepository.markDead(
+                dead.getId(), dead.getEventId(), dead.getClaimId(), 3, now, "nack");
+
+        int deleted = outboxEventRepository.deletePublishedBefore(now.minusDays(1), 100);
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(outboxEventRepository.findById(oldPublished.getId())).isEmpty();
+        assertThat(outboxEventRepository.findById(recentPublished.getId())).isPresent();
+        assertThat(outboxEventRepository.findById(pending.getId())).isPresent();
+        assertThat(outboxEventRepository.findById(dead.getId())).isPresent();
+    }
+
+    @Test
+    void deletePublishedBefore_boundedByLimit() {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        publishedAt(now.minusDays(10));
+        publishedAt(now.minusDays(9));
+        publishedAt(now.minusDays(8));
+
+        int deleted = outboxEventRepository.deletePublishedBefore(now.minusDays(1), 2);
+
+        assertThat(deleted).isEqualTo(2);
+    }
+
+    private OutboxEvent publishedAt(OffsetDateTime publishedAt) {
+        OutboxEvent event = claimedEvent(0);
+        outboxEventRepository.markPublished(
+                event.getId(), event.getEventId(), event.getClaimId(), publishedAt);
+        entityManager.clear();
+        return outboxEventRepository.findById(event.getId()).orElseThrow();
+    }
+
+    @Test
     void markPublished_returnsFalseWhenClaimIsNoLongerActive() {
         OutboxEvent event = claimedEvent(0);
 

@@ -37,6 +37,17 @@ public class ProcessedMessageRepositoryImpl implements ProcessedMessageRepositor
 				processed_at
 			""";
 
+    private static final String DELETE_PROCESSED_BEFORE_SQL =
+            """
+			DELETE FROM processed_messages
+			WHERE id IN (
+				SELECT id FROM processed_messages
+				WHERE processed_at < :cutoff
+				ORDER BY processed_at
+				LIMIT :limit
+				FOR UPDATE SKIP LOCKED)
+			""";
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public ProcessedMessageRepositoryImpl(NamedParameterJdbcTemplate jdbcTemplate) {
@@ -55,6 +66,13 @@ public class ProcessedMessageRepositoryImpl implements ProcessedMessageRepositor
         List<ProcessedMessage> messages =
                 jdbcTemplate.query(INSERT_IF_ABSENT_SQL, params, this::mapMessage);
         return messages.stream().findFirst();
+    }
+
+    @Override
+    public int deleteProcessedBefore(OffsetDateTime cutoff, int limit) {
+        MapSqlParameterSource params =
+                new MapSqlParameterSource().addValue("cutoff", cutoff).addValue("limit", limit);
+        return jdbcTemplate.update(DELETE_PROCESSED_BEFORE_SQL, params);
     }
 
     private ProcessedMessage mapMessage(ResultSet rs, int rowNum) throws SQLException {

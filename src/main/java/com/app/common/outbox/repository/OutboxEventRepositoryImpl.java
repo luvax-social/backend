@@ -203,6 +203,17 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
 				AND status = 'PROCESSING'
 			""";
 
+    private static final String DELETE_PUBLISHED_BEFORE_SQL =
+            """
+			DELETE FROM outbox_events
+			WHERE id IN (
+				SELECT id FROM outbox_events
+				WHERE status = 'PUBLISHED' AND published_at < :cutoff
+				ORDER BY published_at
+				LIMIT :limit
+				FOR UPDATE SKIP LOCKED)
+			""";
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public OutboxEventRepositoryImpl(NamedParameterJdbcTemplate jdbcTemplate) {
@@ -318,6 +329,13 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
                         .addValue("lastError", lastError);
 
         return jdbcTemplate.update(MARK_DEAD_SQL, params) == 1;
+    }
+
+    @Override
+    public int deletePublishedBefore(OffsetDateTime cutoff, int limit) {
+        MapSqlParameterSource params =
+                new MapSqlParameterSource().addValue("cutoff", cutoff).addValue("limit", limit);
+        return jdbcTemplate.update(DELETE_PUBLISHED_BEFORE_SQL, params);
     }
 
     private OutboxEvent mapEvent(ResultSet rs, int rowNum) throws SQLException {

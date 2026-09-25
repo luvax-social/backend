@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - One trace now spans the outbox: the request that wrote an event is restored as the parent of its broker send, so the send and every consumer descend from the originating request, while the publisher's own batch trace only links to it.
 - Actuator now serves only on a private management port (8081), reachable only inside the deployment network; the health check and container healthcheck move with it.
 - Inbox processed and duplicate counts per consumer, and dead-lettered message counts per queue, are now Prometheus metrics.
+- Published outbox rows and processed-message markers older than their retention window are now purged in bounded batches on a schedule, and the application refuses to start if the inbox window is too short to outlive the longest possible redelivery.
 - `GET /api/v1/notifications` takes a `filter` (all, unread, comments, mentions, follows, system, verified) and returns hydrated feed rows with targets, previews, moderation and relationship blocks, and a `head` on the first page.
 - `GET /api/v1/notifications/state` returns the capped unseen badge, the seen and previous watermarks, and the pending follow request summary for the pinned entry; `POST /api/v1/notifications/seen` advances the watermark.
 - `PUT` and `DELETE /api/v1/notifications/{id}/read` mark one notification read or unread, and `DELETE /api/v1/notifications/{id}` removes it from the feed.

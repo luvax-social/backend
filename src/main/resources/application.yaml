@@ -108,6 +108,14 @@ app:
     # SeedRunner's own @ConditionalOnProperty(name = "SEED_DATA") is what decides whether the seed
     # pipeline runs at all; this only guards what it does once running.
     require-local-datasource: ${SEED_REQUIRE_LOCAL_DATASOURCE:true}
+  retention:
+    enabled: ${RETENTION_ENABLED:true}
+    initial-delay: ${RETENTION_INITIAL_DELAY:PT10M}
+    fixed-delay: ${RETENTION_FIXED_DELAY:PT1H}
+    batch-size: ${RETENTION_BATCH_SIZE:5000}
+    max-batches-per-run: ${RETENTION_MAX_BATCHES_PER_RUN:100}
+    outbox-published: ${RETENTION_OUTBOX_PUBLISHED:P7D}
+    processed-messages: ${RETENTION_PROCESSED_MESSAGES:P14D}
   outbox:
     publisher:
       enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
