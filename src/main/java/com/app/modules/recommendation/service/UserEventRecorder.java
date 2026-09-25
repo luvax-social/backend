@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit;
 import jakarta.annotation.PreDestroy;
 
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.core.task.support.ContextPropagatingTaskDecorator;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -78,6 +79,9 @@ public class UserEventRecorder {
         // Virtual threads are enabled globally, so no pool is needed: the task blocks on a database
         // round trip and nothing else, which is exactly what a virtual thread is for.
         this.executor.setVirtualThreads(true);
+        // Carries the caller's observation into the insert so the row write stays in the request's
+        // trace; it still commits on its own.
+        this.executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
     }
 
     /** Records that an account started a session, called once a login has issued one. */

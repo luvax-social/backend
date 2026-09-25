@@ -10,10 +10,13 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.micrometer.tracing.opentelemetry.autoconfigure.SdkTracerProviderBuilderCustomizer;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -32,6 +35,11 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
+
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
+import io.opentelemetry.sdk.trace.data.SpanData;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 
 /**
  * Proves the three write paths produce exactly the events they claim to, and that an analytics
@@ -93,12 +101,28 @@ class UserEventRecordingIT {
         registry.add("app.post.seed.enabled", () -> false);
     }
 
+    @TestConfiguration
+    static class TracingTestConfig {
+
+        @Bean
+        InMemorySpanExporter inMemorySpanExporter() {
+            return InMemorySpanExporter.create();
+        }
+
+        @Bean
+        SdkTracerProviderBuilderCustomizer inMemorySpanExporterCustomizer(
+                InMemorySpanExporter exporter) {
+            return builder -> builder.addSpanProcessor(SimpleSpanProcessor.create(exporter));
+        }
+    }
+
     @MockitoBean private MailService mailService;
 
     @Autowired private TestRestTemplate rest;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private UserEventRecorder userEventRecorder;
+    @Autowired private InMemorySpanExporter spanExporter;
 
     private record TestUser(UUID id, String username, String token) {}
 
@@ -109,6 +133,7 @@ class UserEventRecordingIT {
         jdbcTemplate.update("DELETE FROM refresh_tokens");
         jdbcTemplate.update("DELETE FROM user_credentials");
         jdbcTemplate.update("DELETE FROM users");
+        spanExporter.reset();
     }
 
     @Test
@@ -180,6 +205,47 @@ class UserEventRecordingIT {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         settle();
         assertThat(eventTypesFor(viewer.id())).isEmpty();
+    }
+
+    @Test
+    void recordSearch_insideObservation_insertSpanSharesCallerTrace() {
+        TestUser viewer = createUser("evt_trace_viewer", "user");
+        createUser("evt_trace_target", "user");
+
+        ResponseEntity<Map> response = getWithAuth("/api/v1/users/search?q=evt_trace", viewer);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        settle();
+
+        List<SpanData> spans = spanExporter.getFinishedSpanItems();
+        SpanData serverSpan =
+                spans.stream()
+                        .filter(span -> span.getKind() == SpanKind.SERVER)
+                        .filter(span -> span.getName().toLowerCase().contains("search"))
+                        .findFirst()
+                        .orElseThrow(
+                                () -> new AssertionError("no server span for the search request"));
+        // The JDBC span's own name is just "query"; the SQL text lives in its jdbc.query[0]
+        // attribute (net.ttddyy.observation.tracing.JdbcObservation), so the insert is found by
+        // attribute value rather than by span name.
+        boolean insertSharesTrace =
+                spans.stream()
+                        .anyMatch(
+                                span ->
+                                        span.getAttributes().asMap().entrySet().stream()
+                                                        .anyMatch(
+                                                                entry ->
+                                                                        String.valueOf(
+                                                                                        entry
+                                                                                                .getValue())
+                                                                                .contains(
+                                                                                        "INSERT INTO user_events"))
+                                                && span.getTraceId()
+                                                        .equals(serverSpan.getTraceId()));
+
+        assertThat(insertSharesTrace)
+                .as("the user_events insert span should share the search request's trace id")
+                .isTrue();
     }
 
     @Test
