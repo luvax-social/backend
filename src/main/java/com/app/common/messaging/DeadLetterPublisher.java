@@ -16,6 +16,9 @@ import org.springframework.stereotype.Component;
 
 import com.app.common.config.rabbit.RabbitMqTopologyConfig;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+
 /** Publishes failed messages to RabbitMQ DLX and waits for broker acceptance. */
 @Component
 public class DeadLetterPublisher {
@@ -24,9 +27,12 @@ public class DeadLetterPublisher {
     private static final int MAX_REASON_LENGTH = 500;
 
     private final ObjectProvider<RabbitTemplate> rabbitTemplateProvider;
+    private final MeterRegistry meterRegistry;
 
-    public DeadLetterPublisher(ObjectProvider<RabbitTemplate> rabbitTemplateProvider) {
+    public DeadLetterPublisher(
+            ObjectProvider<RabbitTemplate> rabbitTemplateProvider, MeterRegistry meterRegistry) {
         this.rabbitTemplateProvider = rabbitTemplateProvider;
+        this.meterRegistry = meterRegistry;
     }
 
     public void publish(Message original, String deadLetterRoutingKey, String reason) {
@@ -46,6 +52,12 @@ public class DeadLetterPublisher {
         if (correlationData.getReturned() != null) {
             throw new IllegalStateException("Dead-letter message was returned by RabbitMQ");
         }
+        String queue = original.getMessageProperties().getConsumerQueue();
+        Counter.builder("luvax.messaging.dead.lettered")
+                .tag("queue", queue == null ? "unknown" : queue)
+                .tag("dead_letter_routing_key", deadLetterRoutingKey)
+                .register(meterRegistry)
+                .increment();
     }
 
     private Message buildDeadLetterMessage(Message original, String reason) {
