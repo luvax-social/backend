@@ -534,6 +534,8 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The local Postgres monitoring role and `pg_stat_statements` extension are now provisioned on every `docker compose up`, including against a Postgres volume that predates this change, instead of only on a fresh volume's first boot.
+- The local Docker Compose project name is now pinned, so `docker compose up -d` works from any invocation directory instead of depending on the caller happening to run it from a directory named `backend`.
 - Trace and log export over OTLP now actually reaches the collector; a dependency conflict between the exporter's HTTP client and the mail transport's HTTP client silently discarded every export attempt.
 - The seeded unavailable-target showcase now likes a post its owner cannot open, instead of an archived post the owner still opens from the archive.
 - Seeded content moderation audit rows now name the content's owner, as production does, so seeded removal and restoration notices show their snippet, date and appeal route to that account.

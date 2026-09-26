@@ -1,3 +1,8 @@
+# Named so every container gets a stable `backend-<service>-1` name regardless of the directory
+# or `-p` flag `docker compose` is invoked with; the observability stack's local Prometheus targets
+# and container-log labels hardcode that name.
+name: backend
+
 # Every published port is bound to the loopback interface. These services carry real credentials
 # and hold real data, and publishing them on all interfaces exposes a developer's database, cache,
 # broker, and search cluster to anyone on the same network.
@@ -26,6 +31,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # The monitoring role and pg_stat_statements only get created by postgres/init on a first-boot,
+  # empty volume; a developer with a Postgres volume that predates the observability stack never
+  # gets them, and the postgresql dashboard reads pg_up=0. This runs the same idempotent script
+  # over the network on every `up`, against a volume of any age, and exits.
+  postgres-monitoring-role:
+    build: ./docker/postgres
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_MONITOR_PASSWORD: ${POSTGRES_MONITOR_PASSWORD}
+      PGHOST: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint: ['/docker-entrypoint-initdb.d/02-create-monitoring-role.sh']
 
   rabbitmq:
     # The -management tag is what serves the UI published below; the plain tag omits the plugin.
