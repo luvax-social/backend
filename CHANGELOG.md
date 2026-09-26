@@ -338,6 +338,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- Repository links now point at the `luvax-social` GitHub organization, following this repository's transfer from `zentech-graduation`.
 - The local RabbitMQ and Elasticsearch images are pinned to production's versions (RabbitMQ 4.3, Elasticsearch 9.2.5), and PostgreSQL to production's major version, closing the gap between what runs locally and in production.
 - The WebSocket guide describes the typed notification live events in place of the retired `notification.created.v1` frame.
 - The notification data rules, the dependency sections of the post, comment, story, admin, support, message, social and users modules, the global counter and soft-delete tables, the structure document and the reference schema now describe the aggregated activity feed through V123.

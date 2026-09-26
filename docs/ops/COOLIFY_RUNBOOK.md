@@ -26,7 +26,7 @@ commands here show the pattern to follow, not values to paste blindly.
 
 ## 1. Git repository connection
 
-Coolify's GitHub App source is named `zentech-coolify`, installed under the `zentech-graduation`
+Coolify's GitHub App source is named `zentech-coolify`, installed under the `luvax-social`
 organization, scoped to specific repositories rather than the whole org, with `Content: read`,
 `Metadata: read`, and `Pull Request: write` permissions.
 
