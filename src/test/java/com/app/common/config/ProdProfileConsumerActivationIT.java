@@ -19,6 +19,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.modules.comment.consumer.CommentNotificationConsumer;
 import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.story.consumer.StoryNotificationConsumer;
+import com.app.testsupport.TestContainerImages;
 
 @SpringBootTest(
         properties = {
@@ -52,11 +53,20 @@ class ProdProfileConsumerActivationIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry r) {
+        // RequiredEnvironmentGuard is @Profile("prod") and this is the only prod-profile test, so
+        // it is the only place that bean runs. @ServiceConnection wires the real DataSource
+        // through a JdbcConnectionDetails bean, but leaves spring.datasource.url/username/password
+        // bound to application.yaml's own ${POSTGRES_URL}/${POSTGRES_USER}/${POSTGRES_PASSWORD}
+        // placeholders, which is exactly what the guard scans for. These three satisfy the scan;
+        // they do not change which DataSource the context actually builds.
+        r.add("POSTGRES_URL", () -> postgres.getJdbcUrl());
+        r.add("POSTGRES_USER", postgres::getUsername);
+        r.add("POSTGRES_PASSWORD", postgres::getPassword);
         r.add("spring.data.redis.host", redis::getHost);
         r.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         r.add("spring.data.redis.password", () -> "");

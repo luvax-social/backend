@@ -42,4 +42,13 @@ public interface OutboxEventRepositoryCustom {
             int attemptCount,
             OffsetDateTime deadAt,
             String lastError);
+
+    /**
+     * Deletes PUBLISHED rows older than {@code cutoff}, oldest first, up to {@code limit} rows.
+     *
+     * @param cutoff the exclusive age boundary; a row's {@code published_at} must be before it
+     * @param limit the maximum number of rows one call may delete
+     * @return how many rows were deleted
+     */
+    int deletePublishedBefore(OffsetDateTime cutoff, int limit);
 }

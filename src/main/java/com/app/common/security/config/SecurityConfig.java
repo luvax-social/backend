@@ -9,10 +9,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -54,10 +51,11 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Stateless Spring Security wiring for the modular monolith.
  *
- * <p>Declares exactly one {@link SecurityFilterChain} bean: the JWT-based REST chain that disables
- * sessions, registers {@link JwtAuthenticationFilter}, and routes authentication and authorization
- * failures back through the {@link ApiResponse} envelope. Authorization rules are organized by
- * semantic category via private helper methods invoked from {@link #securityFilterChain}.
+ * <p>Declares the JWT-based REST chain that disables sessions, registers {@link
+ * JwtAuthenticationFilter}, and routes authentication and authorization failures back through the
+ * {@link ApiResponse} envelope. Authorization rules are organized by semantic category via private
+ * helper methods invoked from {@link #securityFilterChain}. The actuator management port has its
+ * own chain in {@link ManagementSecurityConfig}, matched separately so it never reaches this one.
  */
 @Configuration
 @EnableWebSecurity
@@ -78,24 +76,6 @@ public class SecurityConfig {
         ApiConstants.Auth.ROOT + ApiConstants.Auth.LOGOUT,
     };
 
-    /**
-     * The metrics endpoint, opened to anonymous callers only when {@code
-     * app.security.public-metrics-endpoint} is set.
-     *
-     * <p>It publishes every routed URI template, per-endpoint request counts and latencies, and
-     * JVM, pool and broker internals - tens of kilobytes of reconnaissance material, though no
-     * secret or token. It was previously anonymous unconditionally, on the reasoning that a
-     * Prometheus scraper cannot present an admin JWT. That reasoning is sound but incomplete: it
-     * opened the endpoint to everyone rather than to the scraper, and unlike {@code
-     * trusted-proxy-cidrs} nothing said so at startup, so a deployment that never added the ingress
-     * rule had no signal at all.
-     *
-     * <p>It now defaults closed and falls through to the ADMIN rule below. Set the property only
-     * where the port this application listens on is unreachable from outside the monitoring network
-     * - a separate management port or an ingress rule is the safer arrangement.
-     */
-    private static final String METRICS_PATH = "/actuator/prometheus";
-
     private static final String[] PUBLIC_INFRA_PATHS = {
         "/actuator/health",
         "/api-docs/**",
@@ -104,13 +84,6 @@ public class SecurityConfig {
         "/ws/messages/**",
         "/error",
     };
-
-    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
-
-    // Read here rather than through SecurityProperties because it is consumed once, while the
-    // filter chain is being built, and nothing outside this class has any use for it.
-    @Value("${app.security.public-metrics-endpoint:false}")
-    private boolean publicMetricsEndpoint;
 
     private final JwtProperties jwtProperties;
     private final CorsProperties corsProperties;
@@ -299,19 +272,6 @@ public class SecurityConfig {
                 .permitAll();
 
         auth.requestMatchers(PUBLIC_INFRA_PATHS).permitAll();
-        // First matching rule wins, so this has to precede the ADMIN rule to have any effect.
-        // Absent the opt-in, the metrics endpoint falls through to that rule like every other
-        // actuator endpoint.
-        if (publicMetricsEndpoint) {
-            log.warn(
-                    "app.security.public-metrics-endpoint is set: {} is served to any caller that"
-                            + " can reach this port, with no authentication. It publishes the full"
-                            + " routed endpoint surface, request counts and JVM internals. Leave"
-                            + " this unset unless the port is reachable only from the monitoring"
-                            + " network.",
-                    METRICS_PATH);
-            auth.requestMatchers(METRICS_PATH).permitAll();
-        }
         auth.requestMatchers("/actuator/**").hasRole("ADMIN");
     }
 

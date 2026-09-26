@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- OpenTelemetry trace and log export over OTLP, off by default (`OTLP_EXPORT_ENABLED`), with 100 percent sampling; JDBC, Redis and the Gorse and Turnstile HTTP clients are now traced, and application logs carry the real trace and span id.
+- The behavioural-event recorder and the mail dispatch executor now carry the caller's trace context onto their own worker thread, so a decoupled write joins the request's trace instead of starting an unrelated one.
+- One trace now spans the outbox: the request that wrote an event is restored as the parent of its broker send, so the send and every consumer descend from the originating request, while the publisher's own batch trace only links to it.
+- Actuator now serves only on a private management port (8081), reachable only inside the deployment network; the health check and container healthcheck move with it.
+- Inbox processed and duplicate counts per consumer, and dead-lettered message counts per queue, are now Prometheus metrics.
+- Published outbox rows and processed-message markers older than their retention window are now purged in bounded batches on a schedule, and the application refuses to start if the inbox window is too short to outlive the longest possible redelivery.
+- `pg_stat_statements`, and a read-only `luvax_monitor` role for the monitoring stack to read it and every other database statistic with.
 - `GET /api/v1/notifications` takes a `filter` (all, unread, comments, mentions, follows, system, verified) and returns hydrated feed rows with targets, previews, moderation and relationship blocks, and a `head` on the first page.
 - `GET /api/v1/notifications/state` returns the capped unseen badge, the seen and previous watermarks, and the pending follow request summary for the pinned entry; `POST /api/v1/notifications/seen` advances the watermark.
 - `PUT` and `DELETE /api/v1/notifications/{id}/read` mark one notification read or unread, and `DELETE /api/v1/notifications/{id}` removes it from the feed.
@@ -331,6 +338,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- The local RabbitMQ and Elasticsearch images are pinned to production's versions (RabbitMQ 4.3, Elasticsearch 9.2.5), and PostgreSQL to production's major version, closing the gap between what runs locally and in production.
 - The WebSocket guide describes the typed notification live events in place of the retired `notification.created.v1` frame.
 - The notification data rules, the dependency sections of the post, comment, story, admin, support, message, social and users modules, the global counter and soft-delete tables, the structure document and the reference schema now describe the aggregated activity feed through V123.
 - The seed pipeline writes the activity feed through the production aggregation path, with like, follow and story-view groups, platform notices linked to their audit rows, seen watermarks for every account, and showcase accounts covering every feed state including a 99+ badge.
@@ -526,6 +534,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Trace and log export over OTLP now actually reaches the collector; a dependency conflict between the exporter's HTTP client and the mail transport's HTTP client silently discarded every export attempt.
 - The seeded unavailable-target showcase now likes a post its owner cannot open, instead of an archived post the owner still opens from the archive.
 - Seeded content moderation audit rows now name the content's owner, as production does, so seeded removal and restoration notices show their snippet, date and appeal route to that account.
 - Per-instance live fanout queues for comments, messages, notifications and posts now expire after a minute without a consumer, so an instance that dies before its listener attaches no longer leaves a queue collecting every live event indefinitely.
@@ -742,6 +751,7 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Removed `ObjectMapper` from `SecurityConfig` constructor; injected via `@Autowired` field to break the circular dependency that prevented context startup
 - Fixed `ApplicationTests.contextLoads` failure by adding `src/test/resources/application-test.yml` with placeholder env-var values and excluding infrastructure auto-configurations (DataSource, JPA, Flyway, Redis, RabbitMQ) that require live services
 - `CustomOidcUserService.resolveUniqueUsername` random-suffix branch now re-checks uniqueness via `ThreadLocalRandom` and a bounded retry loop, preventing the rare unique-constraint violation that previously surfaced as a 500.
+- Two integration tests that exercise the production profile or the seed reset path failed to start their context because their Postgres credentials were never supplied to the beans that read them directly, unrelated to and pre-existing before this change.
 
 ### Removed
 - `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/{id}/read`, and the `actor`, `entityType`, `entityId`, `postId` and `message` fields of notification list items; this is a breaking change that ships together with the matching frontend.
@@ -764,6 +774,7 @@ Existing group conversations are deleted by the upgrade, after being copied into
 - `MailService`, `MailServiceImpl`, and `MailSendException` from `modules/mail/` relocated into `common/mail/`
 - `ErrorResponse` record and the legacy `common/exception/` token and mail exception classes superseded by `ApiException` and the relocated domain exceptions
 - Four stray Javadoc blocks that had drifted from the method they described and no longer matched the code beneath them.
+- `app.security.public-metrics-endpoint`. Actuator no longer shares the application port at all, so the switch that once opened `/actuator/prometheus` there has nothing left to open.
 
 ### Security
 - Authenticated support ticket routes now carry a per-caller rate limit; they previously relied only on a process-wide backstop that one caller could exhaust for everybody.

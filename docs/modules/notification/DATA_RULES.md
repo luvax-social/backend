@@ -147,7 +147,7 @@ The window is commit latency; it is accepted rather than closed with a lock on e
 
 ### F. Failure Mode
 
-- Producers write through the transactional outbox; consumers deduplicate through `processed_messages`, retry on the ladder in `app.messaging.consumer.*`, and dead-letter to their DLQ: `notification.dlq`, `comment.notification.dlq`, `story.notification.dlq`, `post.notification.dlq`, `admin.notification.dlq`.
+- Producers write through the transactional outbox; consumers deduplicate through `processed_messages`, retry on the ladder in `app.messaging.consumer.*`, and dead-letter to their DLQ: `notification.dlq`, `comment.notification.dlq`, `story.notification.dlq`, `post.notification.dlq`, `admin.notification.dlq`. Inbox markers are retained 14 days (`app.retention.processed-messages`) before a scheduled job purges them.
 - The synchronous admin and support producers write in the caller's transaction, so a notice exists exactly when the decision does.
 - A live push that fails is logged and dropped; the REST feed is authoritative.
 

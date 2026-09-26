@@ -29,7 +29,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
 				payload,
 				status,
 				attempt_count,
-				next_retry_at
+				next_retry_at,
+				trace_parent,
+				trace_state
 			)
 			VALUES (
 				:eventId,
@@ -40,7 +42,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
 				CAST(:payload AS jsonb),
 				:status,
 				:attemptCount,
-				:nextRetryAt
+				:nextRetryAt,
+				:traceParent,
+				:traceState
 			)
 			RETURNING
 				id,
@@ -58,7 +62,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
 				claimed_until,
 				last_error,
 				created_at,
-				published_at
+				published_at,
+				trace_parent,
+				trace_state
 			""";
 
     private static final String INSERT_PENDING_IGNORE_DUPLICATE_SQL =
@@ -72,7 +78,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
 				payload,
 				status,
 				attempt_count,
-				next_retry_at
+				next_retry_at,
+				trace_parent,
+				trace_state
 			)
 			VALUES (
 				:eventId,
@@ -83,7 +91,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
 				CAST(:payload AS jsonb),
 				:status,
 				:attemptCount,
-				:nextRetryAt
+				:nextRetryAt,
+				:traceParent,
+				:traceState
 			)
 			ON CONFLICT (event_id) DO NOTHING
 			RETURNING
@@ -102,7 +112,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
 				claimed_until,
 				last_error,
 				created_at,
-				published_at
+				published_at,
+				trace_parent,
+				trace_state
 			""";
 
     private static final String CLAIM_PUBLISHABLE_BATCH_SQL =
@@ -140,7 +152,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
 				event.claimed_until,
 				event.last_error,
 				event.created_at,
-				event.published_at
+				event.published_at,
+				event.trace_parent,
+				event.trace_state
 			""";
 
     private static final String MARK_PUBLISHED_SQL =
@@ -189,6 +203,17 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
 				AND status = 'PROCESSING'
 			""";
 
+    private static final String DELETE_PUBLISHED_BEFORE_SQL =
+            """
+			DELETE FROM outbox_events
+			WHERE id IN (
+				SELECT id FROM outbox_events
+				WHERE status = 'PUBLISHED' AND published_at < :cutoff
+				ORDER BY published_at
+				LIMIT :limit
+				FOR UPDATE SKIP LOCKED)
+			""";
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public OutboxEventRepositoryImpl(NamedParameterJdbcTemplate jdbcTemplate) {
@@ -207,7 +232,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
                         .addValue("payload", DomainEventEnvelopeJson.write(event.getPayload()))
                         .addValue("status", event.getStatus().name())
                         .addValue("attemptCount", event.getAttemptCount())
-                        .addValue("nextRetryAt", event.getNextRetryAt());
+                        .addValue("nextRetryAt", event.getNextRetryAt())
+                        .addValue("traceParent", event.getTraceParent())
+                        .addValue("traceState", event.getTraceState());
 
         return jdbcTemplate.queryForObject(INSERT_PENDING_SQL, params, this::mapEvent);
     }
@@ -224,7 +251,9 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
                         .addValue("payload", DomainEventEnvelopeJson.write(event.getPayload()))
                         .addValue("status", event.getStatus().name())
                         .addValue("attemptCount", event.getAttemptCount())
-                        .addValue("nextRetryAt", event.getNextRetryAt());
+                        .addValue("nextRetryAt", event.getNextRetryAt())
+                        .addValue("traceParent", event.getTraceParent())
+                        .addValue("traceState", event.getTraceState());
 
         // DO NOTHING returns no row for a duplicate event_id, which is the signal the caller
         // already enqueued this exact event and the resubmission must not be counted again.
@@ -302,6 +331,13 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
         return jdbcTemplate.update(MARK_DEAD_SQL, params) == 1;
     }
 
+    @Override
+    public int deletePublishedBefore(OffsetDateTime cutoff, int limit) {
+        MapSqlParameterSource params =
+                new MapSqlParameterSource().addValue("cutoff", cutoff).addValue("limit", limit);
+        return jdbcTemplate.update(DELETE_PUBLISHED_BEFORE_SQL, params);
+    }
+
     private OutboxEvent mapEvent(ResultSet rs, int rowNum) throws SQLException {
         return OutboxEvent.builder()
                 .id(rs.getObject("id", UUID.class))
@@ -320,6 +356,8 @@ public class OutboxEventRepositoryImpl implements OutboxEventRepositoryCustom {
                 .lastError(rs.getString("last_error"))
                 .createdAt(rs.getObject("created_at", OffsetDateTime.class))
                 .publishedAt(rs.getObject("published_at", OffsetDateTime.class))
+                .traceParent(rs.getString("trace_parent"))
+                .traceState(rs.getString("trace_state"))
                 .build();
     }
 }

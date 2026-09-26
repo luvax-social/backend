@@ -70,11 +70,14 @@ spring:
     publisher-returns: ${SPRING_RABBITMQ_PUBLISHER_RETURNS:true}
     template:
       mandatory: ${SPRING_RABBITMQ_TEMPLATE_MANDATORY:true}
+      observation-enabled: true
     listener:
       simple:
         acknowledge-mode: manual
+        observation-enabled: true
       direct:
         acknowledge-mode: manual
+        observation-enabled: true
   security:
     oauth2:
       client:
@@ -105,6 +108,14 @@ app:
     # SeedRunner's own @ConditionalOnProperty(name = "SEED_DATA") is what decides whether the seed
     # pipeline runs at all; this only guards what it does once running.
     require-local-datasource: ${SEED_REQUIRE_LOCAL_DATASOURCE:true}
+  retention:
+    enabled: ${RETENTION_ENABLED:true}
+    initial-delay: ${RETENTION_INITIAL_DELAY:PT10M}
+    fixed-delay: ${RETENTION_FIXED_DELAY:PT1H}
+    batch-size: ${RETENTION_BATCH_SIZE:5000}
+    max-batches-per-run: ${RETENTION_MAX_BATCHES_PER_RUN:100}
+    outbox-published: ${RETENTION_OUTBOX_PUBLISHED:P7D}
+    processed-messages: ${RETENTION_PROCESSED_MESSAGES:P14D}
   outbox:
     publisher:
       enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
@@ -118,6 +129,9 @@ app:
         - ${OUTBOX_PUBLISHER_RETRY_BACKOFF_1:PT10S}
         - ${OUTBOX_PUBLISHER_RETRY_BACKOFF_2:PT30S}
         - ${OUTBOX_PUBLISHER_RETRY_BACKOFF_3:PT60S}
+    metrics:
+      enabled: ${OUTBOX_METRICS_ENABLED:true}
+      sample-interval: ${OUTBOX_METRICS_SAMPLE_INTERVAL:PT30S}
   messaging:
     consumer:
       max-attempts: ${RABBIT_CONSUMER_MAX_ATTEMPTS:3}
@@ -135,14 +149,6 @@ app:
     # outrank it, which is why the only symptom was the IpExtractor startup warning. Empty by
     # default, which fails closed: no proxy is trusted until one is named.
     trusted-proxy-cidrs: ${APP_SECURITY_TRUSTED_PROXY_CIDRS:}
-    # Serves /actuator/prometheus to callers presenting no credentials. Defaulted fail-closed,
-    # so the endpoint falls through to the ADMIN rule that covers the rest of /actuator/**.
-    # It publishes every routed URI template, per-endpoint request counts and latencies, and JVM,
-    # pool and broker internals, so enabling it on a port reachable from outside the monitoring
-    # network hands that to anyone. A separate management port or an ingress rule is safer than
-    # this switch; it exists so a deployment whose port is already private is not forced into a
-    # topology change to keep scraping.
-    public-metrics-endpoint: ${APP_SECURITY_PUBLIC_METRICS_ENDPOINT:false}
     refresh-cookie:
       name: ${REFRESH_COOKIE_NAME:luvax_refresh}
       path: ${REFRESH_COOKIE_PATH:/api/v1/auth}
@@ -497,20 +503,69 @@ app:
         window-seconds: 60
 
 management:
+  server:
+    # Actuator moves off the application port entirely; ManagementSecurityConfig guards this one.
+    port: ${MANAGEMENT_SERVER_PORT:8081}
   endpoints:
     web:
       exposure:
         # micrometer-registry-prometheus is on the classpath but Spring Boot exposes only health
         # over HTTP by default, so /actuator/prometheus returned 404 and nothing could scrape the
-        # application. Widened deliberately to these three; the ADMIN gate in SecurityConfig still
-        # covers every other actuator endpoint.
+        # application. Widened deliberately to these three; ManagementSecurityConfig permits only
+        # health and prometheus on the management port, and denies everything else there.
         include: health,info,prometheus
+  tracing:
+    sampling:
+      # Every request is sampled; Phase 1 has no traffic volume that makes this expensive.
+      probability: 1.0
+    export:
+      otlp:
+        enabled: ${OTLP_EXPORT_ENABLED:false}
+  logging:
+    export:
+      otlp:
+        enabled: ${OTLP_EXPORT_ENABLED:false}
+  opentelemetry:
+    resource-attributes:
+      "[service.name]": luvax-backend
+      "[deployment.environment]": ${spring.profiles.active}
+      "[deployment.environment.name]": ${spring.profiles.active}
+    tracing:
+      export:
+        otlp:
+          # Always defined: Boot only builds the OTLP exporter when this is set, and a blank
+          # default would build one with an empty URL. Whether spans actually leave the process is
+          # decided by OTLP_EXPORT_ENABLED alone.
+          endpoint: ${OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  otlp:
+    metrics:
+      export:
+        # The starter's micrometer-registry-otlp would otherwise push metrics too;
+        # Prometheus scrapes instead.
+        enabled: false
+  observations:
+    enable:
+      spring:
+        security: false
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
   health:
     elasticsearch:
       enabled: true
   endpoint:
     health:
       show-details: when-authorized
+
+jdbc:
+  includes: CONNECTION,QUERY
+  datasource-proxy:
+    include-parameter-values: false
 
 server:
   # Forward-headers-strategy removed; IpExtractor + trusted-proxy-cidrs is the only model.

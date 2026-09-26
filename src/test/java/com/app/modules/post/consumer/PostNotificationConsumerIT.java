@@ -33,6 +33,7 @@ import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.common.outbox.model.DomainEventEnvelopeJson;
 import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.post.messaging.PostEventTypes;
+import com.app.testsupport.TestContainerImages;
 import com.rabbitmq.client.Channel;
 
 /**
@@ -63,7 +64,7 @@ class PostNotificationConsumerIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @DynamicPropertySource

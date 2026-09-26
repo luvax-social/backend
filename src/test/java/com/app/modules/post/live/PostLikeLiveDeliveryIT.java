@@ -41,6 +41,7 @@ import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.auth.service.WebSocketTicketService;
 import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.post.messaging.PostEventTypes;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Confirms a post like reaches a subscribed browser-equivalent client end to end through the
@@ -78,7 +79,7 @@ class PostLikeLiveDeliveryIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @DynamicPropertySource

@@ -111,6 +111,11 @@ This is the consistent rule across the topology, not an exception to it.
 Every queue whose consumer rejects with `requeue=false` carries the argument; every queue whose consumer publishes to the dead-letter exchange itself omits it.
 The single queue that breaks the rule is `admin.notification.queue`, which carries an argument its consumer never triggers; it is left in place because changing the arguments of a live durable queue fails redeclaration.
 
+### Async dispatch and trace context
+
+`@Async` mail dispatch runs on `mailTaskExecutor` (`MailAsyncConfig`), a dedicated thread pool isolating blocking transport I/O from the request-serving virtual thread carrier pool.
+The executor's `ContextPropagatingTaskDecorator` restores the calling thread's W3C trace context on the pool thread before the dispatch task runs, so a send's own span still descends from the consumer's trace even though it executes on a different thread and on the pool's own schedule.
+
 ---
 
 ## Section 5: The Moderation Mail Path

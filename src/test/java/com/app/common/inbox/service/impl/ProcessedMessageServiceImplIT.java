@@ -6,10 +6,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -20,8 +23,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.common.inbox.enums.ProcessedMessageResult;
+import com.app.common.inbox.observability.InboxMetrics;
 import com.app.common.inbox.repository.ProcessedMessageRepository;
 import com.app.common.inbox.service.ProcessedMessageService;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @DataJpaTest(
         properties = {
@@ -29,7 +36,7 @@ import com.app.common.inbox.service.ProcessedMessageService;
             "spring.datasource.hikari.data-source-properties.stringtype=unspecified"
         })
 @Testcontainers
-@Import(ProcessedMessageServiceImpl.class)
+@Import({ProcessedMessageServiceImpl.class, InboxMetrics.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ProcessedMessageServiceImplIT {
 
@@ -39,8 +46,23 @@ class ProcessedMessageServiceImplIT {
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
 
+    @TestConfiguration
+    static class MetricsTestConfig {
+        @Bean
+        MeterRegistry meterRegistry() {
+            return new SimpleMeterRegistry();
+        }
+    }
+
     @Autowired private ProcessedMessageService processedMessageService;
     @Autowired private ProcessedMessageRepository processedMessageRepository;
+    @Autowired private MeterRegistry meterRegistry;
+
+    @BeforeEach
+    void resetMetrics() {
+        // The MeterRegistry bean is shared across every test method in this cached context.
+        meterRegistry.clear();
+    }
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry registry) {
@@ -67,6 +89,14 @@ class ProcessedMessageServiceImplIT {
                             assertThat(message.getEventType()).isEqualTo(EVENT_TYPE);
                             assertThat(message.getProcessedAt()).isNotNull();
                         });
+        assertThat(
+                        meterRegistry
+                                .get("luvax.inbox.messages")
+                                .tag("consumer", CONSUMER_NAME)
+                                .tag("outcome", "processed")
+                                .counter()
+                                .count())
+                .isEqualTo(1.0);
     }
 
     @Test
@@ -82,6 +112,14 @@ class ProcessedMessageServiceImplIT {
 
         assertThat(result).isEqualTo(ProcessedMessageResult.DUPLICATE);
         assertThat(handlerRuns).hasValue(1);
+        assertThat(
+                        meterRegistry
+                                .get("luvax.inbox.messages")
+                                .tag("consumer", CONSUMER_NAME)
+                                .tag("outcome", "duplicate")
+                                .counter()
+                                .count())
+                .isEqualTo(1.0);
     }
 
     @Test
@@ -102,5 +140,7 @@ class ProcessedMessageServiceImplIT {
 
         assertThat(processedMessageRepository.findByConsumerNameAndEventId(CONSUMER_NAME, eventId))
                 .isEmpty();
+        assertThat(meterRegistry.find("luvax.inbox.messages").tag("outcome", "processed").counter())
+                .isNull();
     }
 }

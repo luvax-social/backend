@@ -9,6 +9,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_MONITOR_PASSWORD: ${POSTGRES_MONITOR_PASSWORD}
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
     ports:
       - '127.0.0.1:5432:5432'
@@ -28,7 +29,9 @@ services:
 
   rabbitmq:
     # The -management tag is what serves the UI published below; the plain tag omits the plugin.
-    image: 'rabbitmq:4-management'
+    # Pinned to 4.3 (from 4): rabbitmq_prometheus is already enabled in this image, so 15692 only
+    # needed publishing.
+    image: 'rabbitmq:4.3-management'
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
@@ -36,6 +39,7 @@ services:
     ports:
       - '127.0.0.1:5672:5672'
       - '127.0.0.1:15672:15672'
+      - '127.0.0.1:15692:15692'
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -59,7 +63,8 @@ services:
       retries: 5
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.0.3
+    # Pinned to production's 9.2.5 (from 9.0.3).
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.5
     restart: unless-stopped
     environment:
       discovery.type: single-node
@@ -133,3 +138,8 @@ volumes:
   rabbitmq_data:
   elasticsearch_data:
   gorse_data:
+
+# Named so the root observability profile can join it as an external network.
+networks:
+  default:
+    name: luvax-local

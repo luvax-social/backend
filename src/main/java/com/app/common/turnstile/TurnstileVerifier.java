@@ -61,11 +61,16 @@ public class TurnstileVerifier {
     // Explicit, because the package-private test seam below makes this class
     // multi-constructor and Spring will not pick one on its own.
     @Autowired
-    public TurnstileVerifier(TurnstileProperties properties, TurnstileMetrics metrics) {
+    public TurnstileVerifier(
+            TurnstileProperties properties,
+            TurnstileMetrics metrics,
+            RestClient.Builder restClientBuilder) {
         this(
                 properties,
                 metrics,
-                RestClient.builder().requestFactory(requestFactory(properties)).build());
+                // Boot's auto-configured builder carries ObservationRestClientCustomizer, so this
+                // call gets a CLIENT span; the static RestClient.builder() this replaced did not.
+                restClientBuilder.clone().requestFactory(requestFactory(properties)).build());
     }
 
     // Seam for the outcome-mapping tests, which bind a MockRestServiceServer to the builder rather

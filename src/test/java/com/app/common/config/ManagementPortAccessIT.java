@@ -7,7 +7,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -19,12 +21,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Pins which actuator endpoints answer a caller presenting no credentials.
- *
- * <p>{@code /actuator/prometheus} was anonymous unconditionally and served the full routed endpoint
- * surface, request counts and JVM internals to anyone who could reach the port. It now falls
- * through to the ADMIN rule unless {@code app.security.public-metrics-endpoint} is set, and this
- * class exists so that default cannot be reopened without a test turning red.
+ * Pins which port serves which actuator endpoint, and to whom, now that actuator moved off the
+ * application port entirely (D5). Replaces {@code ActuatorEndpointAccessIT}: the switch this class
+ * guarded against reopening no longer exists, and the two ports now carry independent rules.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -33,18 +32,19 @@ import org.testcontainers.utility.DockerImageName;
             "spring.docker.compose.enabled=false",
             "spring.autoconfigure.exclude="
                     + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration",
-            // This class declares PostgreSQL and Redis and nothing else, but application.yaml
-            // enables the Elasticsearch health indicator, which then probes whatever
-            // ELASTICSEARCH_URIS resolves to on the developer's machine. With no broker there the
-            // aggregate health is DOWN and the anonymous probe below answers 503, so whether this
-            // class passed depended on which containers the developer happened to have running.
-            // The subject here is who may reach each actuator endpoint, not whether the search
-            // tier is up; ElasticsearchHealthIT covers that against a container it declares.
+            "management.server.port=0",
+            // @SpringBootTest disables every metrics-export registry by default
+            // (DisableMetricsExportContextCustomizer); this test needs the real Prometheus
+            // registry bean so the scrape endpoint has something to serve.
+            "management.prometheus.metrics.export.enabled=true",
+            // See ActuatorEndpointAccessIT's original comment: this class declares only Postgres
+            // and Redis, and the Elasticsearch health indicator would otherwise probe whatever
+            // ELASTICSEARCH_URIS resolves to on the developer's machine.
             "management.health.elasticsearch.enabled=false"
         })
 @Testcontainers
 @AutoConfigureTestRestTemplate
-class ActuatorEndpointAccessIT {
+class ManagementPortAccessIT {
 
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -58,8 +58,8 @@ class ActuatorEndpointAccessIT {
         r.add("spring.data.redis.host", redis::getHost);
         r.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         r.add("spring.data.redis.password", () -> "");
-        r.add("JWT_SECRET", () -> "actuator-access-it-secret-32-chars-minimum!!");
-        r.add("JWT_ISSUER", () -> "https://actuator.access.it.local");
+        r.add("JWT_SECRET", () -> "management-port-access-it-secret-32-min!!");
+        r.add("JWT_ISSUER", () -> "https://management-port-access.it.local");
         r.add("JWT_AUDIENCE", () -> "App");
         r.add("ACCESS_TOKEN_TTL", () -> 900L);
         r.add("REFRESH_TOKEN_TTL", () -> 3600L);
@@ -77,26 +77,64 @@ class ActuatorEndpointAccessIT {
     }
 
     @Autowired private TestRestTemplate rest;
+    @LocalManagementPort private int managementPort;
+
+    private String managementUrl(String path) {
+        return "http://localhost:" + managementPort + path;
+    }
 
     @Test
-    void getPrometheus_noCredentialsAndMetricsNotPublished_isUnauthorized() {
+    void managementPrometheus_noCredentials_isOkAndContainsOutboxGauge() {
+        ResponseEntity<String> response =
+                new TestRestTemplate()
+                        .getForEntity(managementUrl("/actuator/prometheus"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).contains("luvax_outbox_events");
+    }
+
+    @Test
+    void managementHealth_noCredentials_isOk() {
+        ResponseEntity<String> response =
+                new TestRestTemplate()
+                        .getForEntity(managementUrl("/actuator/health"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void managementInfo_noCredentials_isForbidden() {
+        ResponseEntity<String> response =
+                new TestRestTemplate().getForEntity(managementUrl("/actuator/info"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void applicationPrometheus_noCredentials_isUnauthorized() {
         ResponseEntity<String> response = rest.getForEntity("/actuator/prometheus", String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
-    void getHealth_noCredentials_isOk() {
-        // The liveness and readiness probe has to stay anonymous; closing the metrics endpoint
-        // must not close this one with it.
-        ResponseEntity<String> response = rest.getForEntity("/actuator/health", String.class);
+    void applicationInfo_noCredentials_isUnauthorized() {
+        ResponseEntity<String> response = rest.getForEntity("/actuator/info", String.class);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
-    void getInfo_noCredentials_isUnauthorized() {
-        ResponseEntity<String> response = rest.getForEntity("/actuator/info", String.class);
+    void applicationHealth_noLongerMounted_isNotFound() {
+        ResponseEntity<String> response = rest.getForEntity("/actuator/health", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void applicationSearch_noCredentials_isUnauthorized() {
+        ResponseEntity<String> response =
+                rest.exchange("/api/v1/users/search?q=ab", HttpMethod.GET, null, String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }

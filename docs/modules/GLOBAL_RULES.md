@@ -12,6 +12,7 @@ Cross-cutting conventions that apply to all modules. Do not duplicate these in p
 | Cache | Redis | Fast reads, session tokens, rate-limit state | Yes — rebuild from PostgreSQL |
 | Search Index | Elasticsearch (`posts`, `hashtags` only) | Full-text search | Yes — rebuild from PostgreSQL |
 | Event Stream | RabbitMQ | Async event delivery | No persistence guarantee |
+| Telemetry | ClickHouse (logs, traces), Prometheus (metrics) | Observability data | Yes — disposable, never a source of truth |
 
 **Conflict resolution rule**: If a data conflict exists between tiers, PostgreSQL is always correct.
 

@@ -14,6 +14,7 @@ import org.springframework.util.StringUtils;
 
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.protocol.ProtocolVersion;
+import io.lettuce.core.resource.ClientResources;
 
 /**
  * Redis client wiring. Exposes a single {@link StringRedisTemplate} for string-only operations such
@@ -32,13 +33,15 @@ public class RedisConfig {
     public LettuceConnectionFactory redisConnectionFactory(
             @Value("${spring.data.redis.host:localhost}") String host,
             @Value("${spring.data.redis.port:6379}") int port,
-            @Value("${spring.data.redis.password:}") String password) {
+            @Value("${spring.data.redis.password:}") String password,
+            ClientResources clientResources) {
         RedisStandaloneConfiguration config = new RedisStandaloneConfiguration(host, port);
         if (StringUtils.hasText(password)) {
             config.setPassword(RedisPassword.of(password));
         }
         LettuceClientConfiguration clientConfig =
                 LettuceClientConfiguration.builder()
+                        .clientResources(clientResources)
                         .clientOptions(
                                 ClientOptions.builder()
                                         .protocolVersion(ProtocolVersion.RESP2)

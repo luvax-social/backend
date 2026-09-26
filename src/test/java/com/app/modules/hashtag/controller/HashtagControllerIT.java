@@ -37,6 +37,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.modules.hashtag.search.HashtagDocument;
 import com.app.modules.hashtag.search.HashtagSearchRepository;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -60,9 +61,7 @@ class HashtagControllerIT {
 
     @Container
     static ElasticsearchContainer elasticsearch =
-            new ElasticsearchContainer(
-                            DockerImageName.parse(
-                                    "docker.elastic.co/elasticsearch/elasticsearch:9.0.3"))
+            new ElasticsearchContainer(DockerImageName.parse(TestContainerImages.ELASTICSEARCH))
                     .withEnv("xpack.security.enabled", "false");
 
     @DynamicPropertySource

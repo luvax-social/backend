@@ -34,7 +34,7 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+@Builder(toBuilder = true)
 public class OutboxEvent {
 
     @Id
@@ -87,4 +87,10 @@ public class OutboxEvent {
 
     @Column(name = "published_at")
     private OffsetDateTime publishedAt;
+
+    @Column(name = "trace_parent", length = 55, updatable = false)
+    private String traceParent;
+
+    @Column(name = "trace_state", length = 512, updatable = false)
+    private String traceState;
 }
