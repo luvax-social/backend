@@ -24,6 +24,18 @@ fix/auth/refresh-token-expiry
 chore/db/add-story-indexes
 ```
 
+### Naming must be meaningful to a reviewer
+
+The `short-description` segment, every commit subject, and every PR title describe the change
+itself in terms a reviewer who has never seen the internal task tracker can follow.
+Never derive one from an internal task-tracker label, a plan or report file name, a round or
+attempt number, or any other identifier that is meaningful only inside `.workspace/`.
+`fix/common/close-pr3-gaps` and `close p3 gaps` fail this: neither says what the gaps were.
+`fix/common/harden-observability-for-production` and a commit subject naming the actual defect
+pass: a reviewer who has never read the internal plan still knows what changed and why.
+This applies to code identifiers and comments too: name a class, method, or variable for what it
+does, never for the ticket or task that introduced it.
+
 ## Commit message format
 
 Format: `<type>(<scope>): <subject>`

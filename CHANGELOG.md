@@ -338,6 +338,7 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- Repository links now point at the `luvax-social` GitHub organization, following this repository's transfer from `zentech-graduation`.
 - The local RabbitMQ and Elasticsearch images are pinned to production's versions (RabbitMQ 4.3, Elasticsearch 9.2.5), and PostgreSQL to production's major version, closing the gap between what runs locally and in production.
 - The WebSocket guide describes the typed notification live events in place of the retired `notification.created.v1` frame.
 - The notification data rules, the dependency sections of the post, comment, story, admin, support, message, social and users modules, the global counter and soft-delete tables, the structure document and the reference schema now describe the aggregated activity feed through V123.
@@ -534,6 +535,8 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The local Postgres monitoring role and `pg_stat_statements` extension are now provisioned on every `docker compose up`, including against a Postgres volume that predates this change, instead of only on a fresh volume's first boot.
+- The local Docker Compose project name is now pinned, so `docker compose up -d` works from any invocation directory instead of depending on the caller happening to run it from a directory named `backend`.
 - Trace and log export over OTLP now actually reaches the collector; a dependency conflict between the exporter's HTTP client and the mail transport's HTTP client silently discarded every export attempt.
 - The seeded unavailable-target showcase now likes a post its owner cannot open, instead of an archived post the owner still opens from the archive.
 - Seeded content moderation audit rows now name the content's owner, as production does, so seeded removal and restoration notices show their snippet, date and appeal route to that account.

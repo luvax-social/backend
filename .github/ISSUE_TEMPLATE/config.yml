@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/zentech-graduation/luvax/security/advisories/new
+    url: https://github.com/luvax-social/luvax/security/advisories/new
     about: Report a security vulnerability privately via GitHub Security Advisories.
