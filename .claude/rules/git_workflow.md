@@ -8,6 +8,13 @@ description: Load when creating branches, writing commit messages, or opening pu
 develop: Development branch (The main programming activities will be pushed here. Changes, updates, additions, and modifications will all be pushed here.)
 main: Production branch (This is the terminal branch, accessible only by the owner.)
 
+## Git worktrees
+
+Never create, use or keep a git worktree for implementation work in this repository.
+All work happens in the main checkout.
+`.worktrees/` is git-ignored for this reason; a directory found there is leftover state from a
+prior session, not a place to work from, and must be verified clean and pushed before removal.
+
 ## Branch naming
 
 Format: `<type>/<scope>/<short-description>`

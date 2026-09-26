@@ -39,3 +39,6 @@ build/
 
 ### env ###
 *.env
+
+### Agent worktrees ###
+.worktrees/

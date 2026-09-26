@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
+
 ### Added
 - OpenTelemetry trace and log export over OTLP, off by default (`OTLP_EXPORT_ENABLED`), with 100 percent sampling; JDBC, Redis and the Gorse and Turnstile HTTP clients are now traced, and application logs carry the real trace and span id.
 - The behavioural-event recorder and the mail dispatch executor now carry the caller's trace context onto their own worker thread, so a decoupled write joins the request's trace instead of starting an unrelated one.
