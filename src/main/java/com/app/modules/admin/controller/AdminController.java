@@ -263,7 +263,9 @@ public class AdminController extends BaseController implements AdminApi {
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<EscalatedReportCountResponse>> countEscalatedReports() {
         return ResponseEntity.ok(
-                ApiResponse.success(ApiSuccessCode.OK, adminService.countEscalatedReports()));
+                ApiResponse.success(
+                        ApiSuccessCode.OK,
+                        adminService.countEscalatedReports(SecurityUtils.getCurrentUserId())));
     }
 
     /** Returns the reported entity for moderation review, uncacheable by design. */

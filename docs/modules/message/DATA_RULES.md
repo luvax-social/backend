@@ -1,7 +1,9 @@
 # Message Module - Data Rules
 
 **Implementation status**: Fully implemented.
-Conversation lifecycle, message send/history/delete/read, notification fan-out, and real-time WebSocket delivery are all in place. Group conversations were removed by V50; messaging is 1-1 only.
+Conversation lifecycle, message send/history/delete/read and real-time WebSocket delivery are all in place.
+Direct messages no longer produce activity-feed notifications.
+Group conversations were removed by V50; messaging is 1-1 only.
 
 ---
 
@@ -57,7 +59,6 @@ These tables cannot be rebuilt from any other source if lost.
 | `last_read_at` on `conversation_participants` is updated when the user reads the conversation | `MessageServiceImpl.markRead` |
 | A message of type `'post_share'` must have `shared_post_id` set; `'story_share'` must have `shared_story_id` set | `MessageServiceImpl.sendMessage` payload validation |
 | A message of type `'image'` or `'video'` must have `media_asset_id` set | `MessageServiceImpl.sendMessage` payload validation |
-| Sending a message generates a `message` notification for every other active participant | `MessageNotificationConsumer` |
 | `user_settings.allow_message_requests` governs whether non-followers can initiate a conversation | `ConversationServiceImpl.assertMessageRequestAllowed`, called from `createDirectConversation` |
 | A live WebSocket SUBSCRIBE to a conversation's topic is rejected unless the subscriber is an active participant | `MessageWebSocketAuthInterceptor` |
 
@@ -85,5 +86,12 @@ Deleting a user's account preserves their past messages for the remaining partic
 | `post` | outbound | `messages.shared_post_id` references `posts` for shared-post messages |
 | `story` | outbound | `messages.shared_story_id` references `stories` for shared-story messages |
 | `social` | inbound | Block relationships govern messaging permissions |
-| `notification` | outbound | Sending a message triggers a `message` notification for every other active participant, via `MessageNotificationConsumer`; `notification_type_configs.MESSAGE` and `user_settings.notify_messages` govern its display metadata and per-user opt-out. |
+| `notification` | none | Direct messages left the activity feed. `MessageNotificationConsumer`, `message.notification.queue`, its DLQ and bindings are retired, and `RetiredQueueCleaner` deletes both queues from the broker at startup. V119 soft-deleted the existing `message` notification rows. The `message` enum value and `user_settings.notify_messages` remain so historical rows and the setting stay readable. |
 | `report` | inbound | Reports can target a message via polymorphic `entity_id` |
+
+---
+
+## Section 5: Observability
+
+The Phase 3 query baseline panel reads `pg_stat_statements` for `messages`, `conversations` and `conversation_participants`, the module's three highest-write-volume tables, to track query-plan drift once real production traffic exists.
+No application code in this module reads `pg_stat_statements`; the panel queries it directly through the read-only `luvax_monitor` role.

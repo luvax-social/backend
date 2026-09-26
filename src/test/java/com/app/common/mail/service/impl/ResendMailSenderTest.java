@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory;
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
 import com.app.modules.mail.config.MailProperties;
+import com.app.modules.mail.config.resend.ResendProperties;
 import com.app.modules.mail.enums.MailTemplate;
 import com.app.modules.mail.service.impl.ResendMailSender;
 import com.app.modules.mail.util.MailTemplateRenderer;
@@ -60,7 +61,8 @@ class ResendMailSenderTest {
         properties.setFromName(FROM_NAME);
         properties.setAppName(APP_NAME);
         properties.setFrontendBaseUrl("http://localhost:3000");
-        service = new ResendMailSender(resend, properties, mailTemplateRenderer);
+        service =
+                new ResendMailSender(resend, resendProperties(), properties, mailTemplateRenderer);
         when(resend.emails()).thenReturn(emails);
         when(mailTemplateRenderer.render(any(MailTemplate.class), any())).thenReturn(RENDERED_HTML);
     }
@@ -226,5 +228,11 @@ class ResendMailSenderTest {
                 .containsEntry("appName", APP_NAME)
                 .containsEntry("resetUrl", "https://app.local/reset?t=abc")
                 .containsKey("expiryMinutes");
+    }
+
+    private static ResendProperties resendProperties() {
+        ResendProperties resendProperties = new ResendProperties();
+        resendProperties.setApiKey("test-key");
+        return resendProperties;
     }
 }

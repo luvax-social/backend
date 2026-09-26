@@ -1,0 +1,19 @@
+{
+  "posts": [
+    {
+      "id": "post_0001",
+      "author_username": "alice",
+      "caption": "test caption",
+      "post_type": "image",
+      "media_refs": ["img_001"],
+      "hashtag_names": ["test"],
+      "created_at_offset_minutes": -100,
+      "status": "published",
+      "engagement_band": "low",
+      "topic_tags": ["software-engineering"],
+      "is_moderation_case": false,
+      "narrative_id": null,
+      "time_hint": null
+    }
+  ]
+}

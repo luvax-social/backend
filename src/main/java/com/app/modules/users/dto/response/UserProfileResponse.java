@@ -40,6 +40,11 @@ public record UserProfileResponse(
                                         + " (see emailVerified in the auth response).",
                         example = "false")
                 boolean isVerified,
+        @Schema(
+                        description = "Category of the verified badge; null when not verified",
+                        example = "music",
+                        nullable = true)
+                String verifiedCategory,
         @Schema(description = "Number of followers", example = "120") int followerCount,
         @Schema(description = "Number of accounts followed", example = "80") int followingCount,
         @Schema(description = "Number of published posts", example = "15") int postCount,

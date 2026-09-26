@@ -5,6 +5,7 @@ import java.util.UUID;
 import com.app.common.response.CursorPageResponse;
 import com.app.modules.comment.dto.request.CreateCommentRequest;
 import com.app.modules.comment.dto.request.EditCommentRequest;
+import com.app.modules.comment.dto.response.CommentContextResponse;
 import com.app.modules.comment.dto.response.CommentDeletionScopeResponse;
 import com.app.modules.comment.dto.response.CommentResponse;
 
@@ -120,4 +121,20 @@ public interface CommentService {
      */
     CursorPageResponse<CommentResponse> listReplies(
             UUID viewerId, UUID commentId, String cursor, int limit);
+
+    /**
+     * Returns a comment with its ancestors, top-level first, so a notification can open a reply in
+     * its thread wherever it sits.
+     *
+     * <p>Applies the list endpoints' rules to every comment in the chain: each must be approved,
+     * not deleted, not removed by moderation, and not written by an account in a block with the
+     * viewer, and the post must be visible to the viewer. Anything short of that answers {@code
+     * COMMENT_NOT_FOUND}, the same as a comment that never existed, so the endpoint reveals nothing
+     * the lists would not.
+     *
+     * @param viewerId the authenticated viewer
+     * @param commentId the comment to show
+     * @return the post id and the thread
+     */
+    CommentContextResponse getContext(UUID viewerId, UUID commentId);
 }

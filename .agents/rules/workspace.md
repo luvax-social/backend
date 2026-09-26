@@ -25,10 +25,12 @@ Do not write plans, reports, scripts, or intermediate files to the project root 
 | `plans/` | Upcoming work not yet started |
 | `progress/` | Active session state — progress tracking files |
 | `reports/` | Completed outputs — scans, summaries, PR text |
-| `scripts/` | Reusable bash or Python scripts |
+| `scripts/` | One-off scripts for the current task only; see the note below |
 | `tmp/` | Scratch work; do not rely on these persisting |
 
 Agents may create additional subfolders within any of the above as needed.
+
+`.workspace/` is untracked by rule: `.workspace/.gitignore` lets only `.gitignore`, `.gitkeep` and `README.md` through. A script a future session must be able to run therefore does not belong in `.workspace/scripts/` - it is gone for the next session and for every other machine. `STRUCT.md` once cited `.workspace/scripts/regenerate_struct_md.sh` as the source of its test table while no such file existed, which is what that arrangement produces. A script meant to last goes in the tracked `scripts/` directory at the repository root, alongside `regenerate_struct_figures.sh` and `regenerate_schema_sql.sh`.
 
 ## Skill reference
 

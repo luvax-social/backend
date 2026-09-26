@@ -1,0 +1,7 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{mail/moderation/layout :: page('Your account suspension has ended', ~{::statement})}">
+<body>
+<p th:fragment="statement" style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0 0 16px;">Your suspension has ended and you can sign in again.</p>
+</body>
+</html>

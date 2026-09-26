@@ -125,4 +125,33 @@ public interface HashtagRepository extends JpaRepository<Hashtag, UUID>, Hashtag
             "SELECT h.id AS id, h.name AS name, h.postCount AS postCount, h.status AS status,"
                     + " h.createdAt AS createdAt FROM Hashtag h WHERE h.id IN :ids")
     List<HashtagIndexProjection> findIndexProjectionsByIdIn(@Param("ids") Collection<UUID> ids);
+
+    /**
+     * How many currently listable posts carry this hashtag.
+     *
+     * <p>Deliberately not {@code hashtags.post_count}. That column is trigger-maintained from
+     * {@code post_hashtags} alone, and removing or soft-deleting a post does not remove its
+     * association rows, so it counts associations ever made rather than posts anybody can open. It
+     * is the right number for the administrative registry and for search ranking, and the wrong one
+     * to print above a grid that lists only published, non-deleted posts.
+     *
+     * <p>The predicate is character-for-character the one {@code
+     * PostRepository.findPublishedByHashtagId} lists by, so the header and the grid answer the same
+     * question. It is not viewer-scoped: a post hidden from one reader by the visibility chain
+     * still counts here, so a private or blocked author can still leave the header one ahead of
+     * what that particular reader sees. Making it exact per viewer would mean running the whole
+     * visibility chain as a count on every page load, which costs far more than the discrepancy.
+     *
+     * <p>Served by {@code idx_post_hashtags_tag (hashtag_id, post_id)} on the join side.
+     *
+     * @param hashtagId the hashtag whose posts are counted
+     * @return number of published, non-deleted posts carrying the hashtag
+     */
+    @Query(
+            value =
+                    "SELECT count(*) FROM post_hashtags ph JOIN posts p ON p.id = ph.post_id"
+                            + " WHERE ph.hashtag_id = :hashtagId AND p.status = 'published'"
+                            + " AND p.deleted_at IS NULL",
+            nativeQuery = true)
+    int countListablePosts(@Param("hashtagId") UUID hashtagId);
 }

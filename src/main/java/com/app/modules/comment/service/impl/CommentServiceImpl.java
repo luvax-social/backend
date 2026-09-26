@@ -35,6 +35,7 @@ import com.app.common.security.util.SecurityUtils;
 import com.app.modules.comment.config.CommentProperties;
 import com.app.modules.comment.dto.request.CreateCommentRequest;
 import com.app.modules.comment.dto.request.EditCommentRequest;
+import com.app.modules.comment.dto.response.CommentContextResponse;
 import com.app.modules.comment.dto.response.CommentDeletionScopeResponse;
 import com.app.modules.comment.dto.response.CommentResponse;
 import com.app.modules.comment.entity.Comment;
@@ -507,6 +508,45 @@ public class CommentServiceImpl implements CommentService {
                                 decoded.id(),
                                 page);
         return toPage(viewerId, replies, pageSize, cursor, CursorScope.COMMENT_REPLIES);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CommentContextResponse getContext(UUID viewerId, UUID commentId) {
+        List<Comment> chain = commentRepository.findAncestryIncludingHidden(commentId);
+        boolean reachable =
+                !chain.isEmpty()
+                        && chain.get(chain.size() - 1).getId().equals(commentId)
+                        && chain.get(0).getParentId() == null
+                        && chain.stream().allMatch(c -> isListable(viewerId, c));
+        if (!reachable) {
+            throw new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
+        }
+        UUID postId = chain.get(0).getPostId();
+        Post post =
+                postRepository
+                        .findById(postId)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
+        if (viewerId == null || !postVisibilityService.isVisibleTo(viewerId, post)) {
+            throw new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
+        }
+        Map<UUID, UserSummaryResponse> authors =
+                userSummaryService.loadSummaries(chain.stream().map(Comment::getUserId).toList());
+        List<UUID> ids = chain.stream().map(Comment::getId).toList();
+        Set<UUID> liked = commentViewerStateService.loadLikedCommentIds(viewerId, ids);
+        Set<UUID> reported = commentViewerStateService.loadReportedCommentIds(viewerId, ids);
+        return new CommentContextResponse(
+                postId, chain.stream().map(c -> toResponse(c, authors, liked, reported)).toList());
+    }
+
+    // The same predicate the reply and top-level list queries apply, so the context endpoint shows
+    // exactly what paging through the lists would have shown.
+    private boolean isListable(UUID viewerId, Comment comment) {
+        return comment.getDeletedAt() == null
+                && comment.getAdminRemovedAt() == null
+                && "approved".equals(comment.getModerationStatus())
+                && (viewerId == null
+                        || !blockRepository.existsBetween(viewerId, comment.getUserId()));
     }
 
     // Visibility gate shared by the read, like, and unlike paths, consistent with the create path

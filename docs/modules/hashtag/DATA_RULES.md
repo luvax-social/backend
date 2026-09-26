@@ -72,7 +72,6 @@ These tables cannot be rebuilt from any other source if lost.
 - `hashtag_trending` is populated by a periodic batch job; trending data may be minutes or hours stale.
 - No real-time trending calculation.
 - No hashtag following (users cannot subscribe to a hashtag).
-- There is no hashtag detail endpoint and no posts-by-hashtag endpoint. `GET /hashtags/search` and `GET /hashtags/trending` are the whole public surface, so the status filter has two public readers rather than four.
 - The administrative listing with no status filter has no index. It orders by `created_at` alone, which `idx_hashtags_status_created` cannot serve because that index leads with `status`. Measured at 14 ms against 200,000 rows: a parallel sequential scan plus a top-N heapsort. `users` has the same gap for the same reason, so closing it here alone would be inconsistent.
 
 ---
@@ -101,6 +100,126 @@ An implementation that adds a status predicate to a post query is wrong however 
 The two are different decisions.
 Banning a term says the term should stop being a way to find things.
 It does not say every post that ever used it is in breach, and a moderator that wants a particular post gone has `remove_post` for exactly that.
+
+### E. The Detail Surface: Name Resolution and Posts by Hashtag
+
+Two reads back the hashtag detail page.
+`GET /api/v1/hashtags/name/{name}` resolves a name to its record, and `GET /api/v1/hashtags/{hashtagId}/posts` lists the published posts carrying it.
+
+**Read-side normalization must be the write-side function.**
+`HashtagLookupServiceImpl.getByName` calls `HashtagService.normalize`, the same function `PostServiceImpl`'s caption extraction runs before insert.
+It is delegated, never reimplemented: a second normalizer drifts from the first silently, and the failure it produces is a hashtag that is reachable on write and unreachable on read.
+`HashtagSearchServiceImpl.normalizeQuery` is a pre-existing private duplicate of that logic, differing in that it applies no length cap; it is left alone here because changing the search surface was out of scope, but it should be collapsed into `HashtagService.normalize`.
+
+**An out-of-circulation hashtag is refused, never answered empty.**
+Both reads raise `HASHTAG_UNAVAILABLE` (404) for a `banned` or `deleted` row, distinct from `HASHTAG_NOT_FOUND` (404) for a name or id that matches nothing.
+Returning `200` with an empty page would make "this hashtag is not available" indistinguishable from "this hashtag has no posts yet", and those two states have to read differently to a user.
+The second state is real and reachable: a zero-post `active` hashtag exists in the seeded dataset and is absent from the Elasticsearch index by the rule in `HashtagIndexSyncConsumer`, which indexes only hashtags carrying live posts.
+
+**The posts read carries no hashtag status predicate.**
+The lifecycle gate is applied once, to the hashtag, before the post query runs.
+It never becomes a filter on the post query itself, per section D: banning a term hides the term, not the posts that used it.
+
+**Degradation.**
+Elasticsearch is the primary path, a `post_hashtags` join the fallback, gated by the same `elasticsearchSearch` circuit breaker the search surfaces use.
+Unlike post caption search, this read does not set `degraded`: `post_hashtags` is the source of truth for hashtag membership, so the PostgreSQL answer is complete rather than empty, and only its ranking source differs.
+Both tiers order by `(created_at, id)` descending and page on the same `OffsetCursorCodec` cursor, so a cursor issued by one tier stays valid when the next request is served by the other.
+A keyset cursor was rejected for that reason: Elasticsearch cannot resume from a `(created_at, id)` tuple the way the PostgreSQL query can, so the two tiers would need incompatible cursor formats and a mid-pagination degradation would break the client's paging.
+
+**Pagination depth is bounded at a window of 10,000.**
+`offset + limit + 1` (the over-fetch included) may not exceed 10,000, and a request that would is refused with `PAGINATION_DEPTH_EXCEEDED` (400), distinct from `INVALID_CURSOR` (400), which means the cursor itself is malformed.
+The number is Elasticsearch's own default `index.max_result_window`, which neither settings file under `src/main/resources/elasticsearch/settings/` overrides.
+A lower bound would refuse pages Elasticsearch can serve; a higher one would hand it a window it rejects.
+The PostgreSQL fallback wants the same bound for an unrelated reason: `OFFSET 10000` on the join is a linear skip of ten thousand rows.
+
+The guard is not cosmetic.
+Left to fail naturally, an over-deep request surfaces as `UncategorizedElasticsearchException: search_phase_execution_exception`, whose class name begins with `org.springframework.data.elasticsearch.`, which is exactly what the availability classifier treats as an outage.
+The request would therefore degrade silently to a linear PostgreSQL skip **and** record a failure against the `elasticsearchSearch` circuit breaker, which is shared with `HashtagSearchServiceImpl.search` and `PostSearchServiceImpl.searchPosts` and configures no `ignoreExceptions`.
+A client paging deep could open a breaker that degrades two unrelated search surfaces.
+For the same reason the hashtag lifecycle refusal is raised **before** the breaker-wrapped call, not inside it: a banned hashtag is a caller error, not an Elasticsearch outage, and must not be charged to the breaker.
+Everything that can fail for a reason other than Elasticsearch being unwell therefore lives in `PostByHashtagServiceImpl`, and `PostByHashtagSearchReader` holds the breaker and nothing else.
+
+In practice the bound is far out of reach: the largest hashtag in the seeded dataset carries 40 posts, and at the default page size of 20 the cap is page 500.
+
+**A zero-post hashtag cannot be offered by a surface that cannot then serve it.**
+Three surfaces can name a hashtag, and none of them can name one the detail page then fails on:
+
+| Surface | Backed by | Excludes zero-post tags because |
+|---|---|---|
+| Hashtag search | Elasticsearch `hashtags` index | `HashtagIndexSyncConsumer` indexes only `active` tags carrying live posts |
+| Trending | `hashtag_trending` in PostgreSQL | the job aggregates `FROM post_hashtags ... GROUP BY hashtag_id`, so a tag with no rows produces no group; it additionally filters `h.status = 'active'` |
+| Composer suggestions and personalised trending | platform trending plus `user_hashtag_affinity` | affinity derives from `user_events` joined to `post_hashtags`, so it too requires at least one association, and banned or deleted tags are excluded at write time |
+
+Trending is **not** subject to the Elasticsearch rule at all - it reads PostgreSQL - so its exclusion is independent and structural rather than inherited.
+Verified against the seeded dataset: zero `hashtag_trending` rows reference a non-active or zero-post hashtag.
+
+The one reachable gap is benign and is a staleness window, not an unreachable tag.
+A hashtag can be trending and have its posts removed before the next job cycle, leaving a snapshot row whose tag now has `post_count = 0`.
+Clicking it resolves normally and renders the "no posts yet" state rather than failing, because `GET /hashtags/name/{name}` reads live PostgreSQL rows and answers for any `active` tag regardless of post count.
+A tag that is *banned* while trending is purged from `hashtag_trending` in the same transaction, so that case cannot produce a dead link either.
+
+**Transaction boundary.**
+The PostgreSQL fallback lives in its own bean, `PostByHashtagPostgresReader`.
+A Resilience4j fallback runs outside the `@Transactional` boundary of the method it covers, so assembling a post response there hits the lazy `Post.media` collection with no Hibernate session.
+Self-invocation would not restore the boundary either. Crossing a bean boundary is what puts the transaction interceptor back in the path.
+
+### F. Trending: Platform and Personalised
+
+Two surfaces, one response shape, so the client renders both with one component.
+
+`GET /api/v1/hashtags/trending` is the platform snapshot, unchanged except that it now carries `pinned` and `source`, and orders pinned hashtags first.
+`GET /api/v1/hashtags/trending/for-you` is the personalised list.
+
+**A pin leads the whole list, not the page it lands on.**
+The ordering is applied in the database (`ORDER BY (h.pinned_at IS NULL), t.rank ASC, t.hashtag_id DESC`), because sorting an already-paged result would only float a pinned hashtag to the top of whichever page it already fell on.
+
+**The blend is on rank, never on the two scores directly.**
+This is the load-bearing rule of the personalised surface.
+An affinity score is a share of one user's own decayed total, so a user with three hashtags scores about 0.33 on each while a user with 134 scores about 0.007 on each.
+A trending score is a post count over a window.
+Those are not the same unit, and combining them numerically would rank by how broad a user's interests happen to be rather than by what those interests are.
+
+Reciprocal rank fusion is used instead: each hashtag scores `w / (60 + rank)` in each list it appears in, summed across lists.
+The constant 60 flattens the gap between adjacent top positions; without it rank 1 would score twice rank 2 and whichever list ranked a hashtag first would dominate outright.
+Platform weight is 1.0 and affinity weight 1.5, so the caller's own interests lead without erasing the platform signal.
+Ties break on hashtag id, giving a total order, so the list cannot reshuffle between two calls.
+
+**Novelty is reserved, not incidental.**
+Three slots in ten are held for hashtags adjacent to the caller's interests but not among them.
+Adjacency is co-occurrence: hashtags appearing on the same posts as hashtags the caller engages with, excluding any the caller already has an affinity row for.
+Co-occurrence rather than raw popularity, because popularity would surface the same handful of platform-wide hashtags to every caller, which is exactly what the platform tab already shows.
+Reserved slots are backfilled from the blend when the adjacency pool is thin, so reserving them can never shorten a page.
+
+**The personalised tab is never empty.**
+A caller with no affinity rows silently receives the platform list.
+That is the normal cold-start state, not an error.
+
+**Caching.**
+Redis, key `hashtag:trending:personalised:{userId}:{page}:{size}`, TTL 10 minutes.
+Both inputs move on scheduled job cycles rather than on requests, so a shorter TTL would re-run the fusion over data that cannot have changed.
+Cache failure is swallowed and the list is computed from PostgreSQL: Redis is a cache tier here, and failing the request would turn an optional accelerator into a hard dependency.
+
+**Caller errors never reach a circuit breaker.**
+Neither trending surface is behind one, and neither introduces one.
+Where a breaker does gate a hashtag read - the posts-by-hashtag Elasticsearch path - the lifecycle refusal and the depth guard are applied before the breaker-wrapped call, for the reason given in section 3E.
+
+### G. Administrative Pin
+
+`pinned_at` and `pinned_by` on `hashtags`, added by V92; `pinned_at` doubles as the flag, matching the tombstone columns elsewhere in this schema, so there is no way to hold one without the other.
+
+| Rule | Where |
+|---|---|
+| Pinning a `banned` or `deleted` hashtag is refused with `HASHTAG_UNAVAILABLE` | `HashtagLifecycleServiceImpl.pin` |
+| Pinning an already-pinned hashtag is refused with `ADMIN_INVALID_TRANSITION` | `HashtagLifecycleServiceImpl.pin` |
+| Unpinning a hashtag that is not pinned is refused with `ADMIN_INVALID_TRANSITION` | `HashtagLifecycleServiceImpl.unpin` |
+| Taking a hashtag out of circulation clears any pin | `HashtagLifecycleServiceImpl.changeStatus` |
+
+The pin is cleared inside `changeStatus` rather than in the admin layer, so no future caller of that method can forget it.
+Leaving a pin on a banned hashtag would keep promoting the exact term an administrator acted to suppress.
+
+`admin_action_type` gains `pin_hashtag` and `unpin_hashtag` (V93) with their `moderation_action_configs` rows (V94), added as a pair because an enum value without a config row breaks the vocabulary surface.
+Two values rather than one reversible action, matching `ban_hashtag`/`unban_hashtag`: an audit row has to say which direction the state moved.
+Neither requires a reason - pinning grants prominence rather than taking a capability away, which is the line V18 drew - and both are reversible.
 
 ## Section 4: Inter-Module Dependencies
 

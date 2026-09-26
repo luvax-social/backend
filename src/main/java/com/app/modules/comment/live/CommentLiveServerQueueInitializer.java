@@ -11,6 +11,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import com.app.common.config.rabbit.RabbitMqTopologyConfig;
+
 /**
  * Declares this instance's ephemeral fanout queue for live comment events.
  *
@@ -36,7 +38,12 @@ public class CommentLiveServerQueueInitializer {
 
     @Bean
     Queue commentLiveServerQueue() {
-        return QueueBuilder.durable(queueName).autoDelete().build();
+        // autoDelete removes the queue once its consumer leaves, but never fires for a queue whose
+        // instance died before its listener attached; the idle expiry removes that one too.
+        return QueueBuilder.durable(queueName)
+                .autoDelete()
+                .expires(RabbitMqTopologyConfig.LIVE_SERVER_QUEUE_EXPIRES_MILLIS)
+                .build();
     }
 
     @Bean

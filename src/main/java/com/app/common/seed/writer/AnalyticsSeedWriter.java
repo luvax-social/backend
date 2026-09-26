@@ -161,8 +161,10 @@ public class AnalyticsSeedWriter {
                 new FinalCounts(
                         countRows("users"),
                         countRows("posts"),
-                        countRows("comments WHERE deleted_at IS NULL"),
-                        countRows("stories WHERE deleted_at IS NULL AND expires_at > NOW()"),
+                        countRows("comments WHERE deleted_at IS NULL AND admin_removed_at IS NULL"),
+                        countRows(
+                                "stories WHERE deleted_at IS NULL AND admin_removed_at IS NULL"
+                                        + " AND expires_at > NOW()"),
                         countsByColumn("users", "status", "deleted_at IS NULL"),
                         countsByColumn("users", "role", "deleted_at IS NULL"),
                         countsByColumn("reports", "status", null),

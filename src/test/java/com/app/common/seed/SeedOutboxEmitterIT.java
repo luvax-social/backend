@@ -180,6 +180,29 @@ class SeedOutboxEmitterIT {
                         "SELECT COUNT(*) FROM outbox_events WHERE status = 'PENDING'",
                         Integer.class);
         assertThat(pendingCount).isEqualTo(total);
+
+        // The replay must reach search indexing and recommendation feedback but never notify a
+        // second time: every replayed like and comment is already in the inbox of the consumer
+        // that would turn it into a notification, and nothing else is.
+        assertThat(unhandledReplays("post.liked.v1", "post-notification-consumer")).isZero();
+        assertThat(unhandledReplays("comment.created.v1", "comment-notification-consumer"))
+                .isZero();
+        Integer inboxRows =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM processed_messages", Integer.class);
+        assertThat(inboxRows).isEqualTo(likeCount + commentCount);
+    }
+
+    private int unhandledReplays(String eventType, String consumerName) {
+        Integer count =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM outbox_events o WHERE o.event_type = ?"
+                                + " AND NOT EXISTS (SELECT 1 FROM processed_messages pm"
+                                + " WHERE pm.consumer_name = ? AND pm.event_id = o.event_id)",
+                        Integer.class,
+                        eventType,
+                        consumerName);
+        return count == null ? 0 : count;
     }
 
     @Test

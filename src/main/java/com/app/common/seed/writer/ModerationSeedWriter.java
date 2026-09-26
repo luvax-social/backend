@@ -121,6 +121,8 @@ public class ModerationSeedWriter {
     private static final String BAN_HASHTAG_ACTION = "ban_hashtag";
     private static final String UNBAN_HASHTAG_ACTION = "unban_hashtag";
     private static final String DELETE_HASHTAG_ACTION = "delete_hashtag";
+    private static final String PIN_HASHTAG_ACTION = "pin_hashtag";
+    private static final String UNPIN_HASHTAG_ACTION = "unpin_hashtag";
     private static final String DEFAULT_REASON_KEY = "other";
     private static final String PLACEHOLDER_COMMENT_TEXT =
             "[seed] comment content withheld from the moderation-case fixture";
@@ -192,14 +194,20 @@ public class ModerationSeedWriter {
     private static final String UPDATE_POST_RESTORE_SQL =
             "UPDATE posts SET status = COALESCE(status_before_moderation, 'published'::post_status),"
                     + " status_before_moderation = NULL, deleted_at = NULL WHERE id = ?";
-    private static final String UPDATE_COMMENT_DELETED_AT_SQL =
-            "UPDATE comments SET deleted_at = ? WHERE id = ?";
-    private static final String UPDATE_STORY_DELETED_AT_SQL =
-            "UPDATE stories SET deleted_at = ? WHERE id = ?";
+    private static final String UPDATE_COMMENT_ADMIN_REMOVED_AT_SQL =
+            "UPDATE comments SET admin_removed_at = ? WHERE id = ?";
+    private static final String UPDATE_STORY_ADMIN_REMOVED_AT_SQL =
+            "UPDATE stories SET admin_removed_at = ? WHERE id = ?";
     private static final String UPDATE_MESSAGE_ADMIN_REMOVED_AT_SQL =
             "UPDATE messages SET admin_removed_at = ? WHERE id = ?";
     private static final String UPDATE_HASHTAG_STATUS_SQL =
             "UPDATE hashtags SET status = ?::hashtag_status WHERE id = ?";
+    // pinned_at and pinned_by are written and cleared together because the hashtags_pin_pair
+    // CHECK (V92) refuses a row holding one without the other.
+    private static final String PIN_HASHTAG_SQL =
+            "UPDATE hashtags SET pinned_at = ?, pinned_by = ? WHERE id = ?";
+    private static final String UNPIN_HASHTAG_SQL =
+            "UPDATE hashtags SET pinned_at = NULL, pinned_by = NULL WHERE id = ?";
     private static final String INSERT_COMMENT_SQL =
             "INSERT INTO comments (id, post_id, user_id, parent_id, root_id, depth, content,"
                     + " created_at) VALUES (?, ?, ?, NULL, ?, 0, ?, ?)";
@@ -569,7 +577,7 @@ public class ModerationSeedWriter {
                 adminActionId,
                 actorId,
                 actionType,
-                targetUserId,
+                auditTargetUser(targetUserId, target),
                 target == null ? null : target.entityType(),
                 target == null ? null : target.entityId(),
                 caseReportId,
@@ -633,7 +641,7 @@ public class ModerationSeedWriter {
                 adminActionId,
                 actorId,
                 action.actionType(),
-                targetUserId,
+                auditTargetUser(targetUserId, target),
                 target == null ? null : target.entityType(),
                 target == null ? null : target.entityId(),
                 reportId,
@@ -665,6 +673,7 @@ public class ModerationSeedWriter {
         view.put("target_conversation_id", action.targetConversationId());
         view.put("target_message_index", action.targetMessageIndex());
         view.put("hashtag_name", action.hashtagName());
+        view.put("actor", action.actor());
         view.put("to_role", action.toRole());
         // Read by applySideEffect's WARN_USER_ACTION case (user_warnings.reason_key/note) - missing
         // here silently fell back to the generic default for every supplementary warn_user action.
@@ -838,7 +847,8 @@ public class ModerationSeedWriter {
     private List<BackgroundTarget> loadBackgroundComments() {
         List<BackgroundTarget> pool = new ArrayList<>();
         jdbc.query(
-                "SELECT id, user_id, created_at FROM comments WHERE deleted_at IS NULL AND"
+                "SELECT id, user_id, created_at FROM comments WHERE deleted_at IS NULL"
+                        + " AND admin_removed_at IS NULL AND"
                         + " moderation_status = 'approved'",
                 rs -> {
                     pool.add(
@@ -910,6 +920,29 @@ public class ModerationSeedWriter {
 
     private record TargetEntity(String entityType, UUID entityId) {}
 
+    // AdminServiceImpl records the content's owner as target_user_id on every content action, and
+    // the moderation notice shows its snippet, date and appeal only to that account. A case entry
+    // that names only the content therefore takes its owner from the content row.
+    private UUID auditTargetUser(UUID targetUserId, TargetEntity target) {
+        if (targetUserId != null || target == null) {
+            return targetUserId;
+        }
+        String sql =
+                switch (target.entityType()) {
+                    case "post" -> "SELECT user_id FROM posts WHERE id = ?";
+                    case "comment" -> "SELECT user_id FROM comments WHERE id = ?";
+                    case "story" -> "SELECT user_id FROM stories WHERE id = ?";
+                    case "message" -> "SELECT sender_id FROM messages WHERE id = ?";
+                    default -> null;
+                };
+        if (sql == null) {
+            return null;
+        }
+        return jdbc.queryForList(sql, UUID.class, target.entityId()).stream()
+                .findFirst()
+                .orElse(null);
+    }
+
     private TargetEntity resolveActionTarget(
             String actionType,
             Map<String, Object> event,
@@ -953,6 +986,8 @@ public class ModerationSeedWriter {
                     BAN_HASHTAG_ACTION,
                     UNBAN_HASHTAG_ACTION,
                     DELETE_HASHTAG_ACTION,
+                    PIN_HASHTAG_ACTION,
+                    UNPIN_HASHTAG_ACTION,
                     "edit_hashtag" -> {
                 String hashtagName = (String) event.get("hashtag_name");
                 UUID hashtagId =
@@ -1052,22 +1087,24 @@ public class ModerationSeedWriter {
             }
             case REMOVE_COMMENT_ACTION -> {
                 if (target != null) {
-                    jdbc.update(UPDATE_COMMENT_DELETED_AT_SQL, at, target.entityId());
+                    jdbc.update(UPDATE_COMMENT_ADMIN_REMOVED_AT_SQL, at, target.entityId());
                 }
             }
             case RESTORE_COMMENT_ACTION -> {
                 if (target != null) {
-                    jdbc.update(UPDATE_COMMENT_DELETED_AT_SQL, (Object) null, target.entityId());
+                    jdbc.update(
+                            UPDATE_COMMENT_ADMIN_REMOVED_AT_SQL, (Object) null, target.entityId());
                 }
             }
             case REMOVE_STORY_ACTION -> {
                 if (target != null) {
-                    jdbc.update(UPDATE_STORY_DELETED_AT_SQL, at, target.entityId());
+                    jdbc.update(UPDATE_STORY_ADMIN_REMOVED_AT_SQL, at, target.entityId());
                 }
             }
             case RESTORE_STORY_ACTION -> {
                 if (target != null) {
-                    jdbc.update(UPDATE_STORY_DELETED_AT_SQL, (Object) null, target.entityId());
+                    jdbc.update(
+                            UPDATE_STORY_ADMIN_REMOVED_AT_SQL, (Object) null, target.entityId());
                 }
             }
             case REMOVE_MESSAGE_ACTION -> {
@@ -1084,6 +1121,8 @@ public class ModerationSeedWriter {
             case BAN_HASHTAG_ACTION -> updateHashtagStatus(target, "banned");
             case UNBAN_HASHTAG_ACTION -> updateHashtagStatus(target, "active");
             case DELETE_HASHTAG_ACTION -> updateHashtagStatus(target, "deleted");
+            case PIN_HASHTAG_ACTION -> pinHashtag(target, at, resolveActor(event, usersByUsername));
+            case UNPIN_HASHTAG_ACTION -> unpinHashtag(target);
             default -> {
                 // resolve_report / dismiss_report / escalate_report / force_logout /
                 // create_hashtag / edit_hashtag: the admin_actions audit row is the whole
@@ -1096,6 +1135,23 @@ public class ModerationSeedWriter {
         if (target != null && target.entityId() != null) {
             jdbc.update(UPDATE_HASHTAG_STATUS_SQL, status, target.entityId());
         }
+    }
+
+    private void pinHashtag(TargetEntity target, java.sql.Timestamp at, UUID actorId) {
+        if (target != null && target.entityId() != null) {
+            jdbc.update(PIN_HASHTAG_SQL, at, actorId, target.entityId());
+        }
+    }
+
+    private void unpinHashtag(TargetEntity target) {
+        if (target != null && target.entityId() != null) {
+            jdbc.update(UNPIN_HASHTAG_SQL, target.entityId());
+        }
+    }
+
+    private UUID resolveActor(Map<String, Object> event, Map<String, UUID> usersByUsername) {
+        String actorUsername = (String) event.get("actor");
+        return actorUsername == null ? null : usersByUsername.get(actorUsername);
     }
 
     private UUID resolveEntity(

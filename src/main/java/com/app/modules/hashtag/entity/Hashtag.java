@@ -70,6 +70,13 @@ public class Hashtag {
     @Column(name = "status_by")
     private UUID statusBy;
 
+    /** When an administrator pinned this hashtag platform-wide; null means not pinned. */
+    @Column(name = "pinned_at")
+    private OffsetDateTime pinnedAt;
+
+    @Column(name = "pinned_by")
+    private UUID pinnedBy;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 }

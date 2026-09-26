@@ -87,6 +87,30 @@ public interface StoryApi {
     ResponseEntity<ApiResponse<List<StoryFeedItemResponse>>> getStoryFeed();
 
     @Operation(
+            summary = "Discover stories",
+            description =
+                    "Returns active stories from suggested accounts the caller does not follow, for"
+                            + " the in-feed story card, grouped by author and ordered by suggestion"
+                            + " rank. Private accounts never appear. Blocked accounts in either"
+                            + " direction, dismissed suggestions, accounts that opted out of being"
+                            + " suggested and already-followed accounts are all excluded, the last"
+                            + " because the caller's own tray already carries them. Requires"
+                            + " authentication.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Discoverable stories; empty when nothing qualifies")
+    })
+    @AuthenticationRequiredResponse
+    @GetMapping(ApiConstants.Stories.ROOT + ApiConstants.Stories.DISCOVERY)
+    ResponseEntity<ApiResponse<List<StoryFeedItemResponse>>> discoverStories(
+            @Parameter(description = "How many authors to return; maximum 20")
+                    @RequestParam(defaultValue = "8")
+                    @Min(1)
+                    @Max(20)
+                    int limit);
+
+    @Operation(
             summary = "List a user's active stories",
             description =
                     "Returns the target user's active stories in playback order (oldest first)."

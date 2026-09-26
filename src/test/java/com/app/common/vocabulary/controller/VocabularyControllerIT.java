@@ -45,6 +45,7 @@ import com.app.modules.mail.service.MailService;
         properties = {
             "spring.profiles.active=dev",
             "spring.docker.compose.enabled=false",
+            "app.vocabulary.public-categories-cache-ttl=0s",
             "spring.autoconfigure.exclude="
                     + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration"
         })
@@ -53,6 +54,7 @@ import com.app.modules.mail.service.MailService;
 class VocabularyControllerIT {
 
     private static final String PATH = "/api/v1/config/vocabularies";
+    private static final String PUBLIC_CATEGORIES_PATH = "/api/v1/support/public/categories";
 
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -98,6 +100,7 @@ class VocabularyControllerIT {
     @AfterEach
     void cleanup() {
         jdbcTemplate.update("UPDATE report_reason_configs SET is_enabled = TRUE");
+        jdbcTemplate.update("UPDATE support_category_configs SET is_enabled = TRUE");
         jdbcTemplate.update("DELETE FROM user_warnings");
         jdbcTemplate.update("DELETE FROM admin_actions");
         jdbcTemplate.update("DELETE FROM users");
@@ -134,6 +137,53 @@ class VocabularyControllerIT {
     void getVocabularies_unauthenticated_isRejected() {
         assertThat(rest.getForEntity(PATH, Map.class).getStatusCode())
                 .isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    // P7-BE-004 and the section 4.9 gap. This route is the one vocabulary read that must work with
+    // no session at all: the submitter using the public support form has none, and that is the
+    // premise of the whole path. Asserted rather than assumed, because the route sitting outside
+    // the authenticated tree is a security decision that a later change to the filter chain could
+    // silently reverse.
+    @Test
+    void getPublicSupportCategories_withNoSession_isServed() {
+        ResponseEntity<Map> response = rest.getForEntity(PUBLIC_CATEGORIES_PATH, Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(publicCategories(response)).isNotEmpty();
+    }
+
+    // The filter predicate itself, which had no test. It is the rule that decides what an anonymous
+    // form may offer, and since this branch it is also the rule that decides what the submit path
+    // accepts, so both halves now move together.
+    @Test
+    void getPublicSupportCategories_returnsOnlyEnabledPublicFormRows() {
+        List<Map<String, Object>> rows =
+                publicCategories(rest.getForEntity(PUBLIC_CATEGORIES_PATH, Map.class));
+
+        assertThat(rows).isNotEmpty();
+        assertThat(rows)
+                .allSatisfy(
+                        row -> {
+                            assertThat(row.get("isEnabled")).isEqualTo(true);
+                            assertThat(row.get("allowsPublicForm")).isEqualTo(true);
+                        });
+        // Appeal categories are excluded by that flag, which is the point: an appeal needs an audit
+        // row to appeal against, and only a signed link supplies one.
+        assertThat(rows).noneSatisfy(row -> assertThat(row.get("isAppeal")).isEqualTo(true));
+    }
+
+    @Test
+    void getPublicSupportCategories_disablingARow_removesItFromTheList() {
+        List<Map<String, Object>> before =
+                publicCategories(rest.getForEntity(PUBLIC_CATEGORIES_PATH, Map.class));
+        assertThat(keysOf(before)).contains("bug_report");
+
+        jdbcTemplate.update(
+                "UPDATE support_category_configs SET is_enabled = FALSE WHERE category_key ="
+                        + " 'bug_report'");
+
+        assertThat(keysOf(publicCategories(rest.getForEntity(PUBLIC_CATEGORIES_PATH, Map.class))))
+                .doesNotContain("bug_report");
     }
 
     @Test
@@ -261,5 +311,14 @@ class VocabularyControllerIT {
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> listOf(Map<String, Object> data, String key) {
         return (List<Map<String, Object>>) data.get(key);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> publicCategories(ResponseEntity<Map> response) {
+        return (List<Map<String, Object>>) response.getBody().get("data");
+    }
+
+    private static List<String> keysOf(List<Map<String, Object>> rows) {
+        return rows.stream().map(row -> (String) row.get("categoryKey")).toList();
     }
 }

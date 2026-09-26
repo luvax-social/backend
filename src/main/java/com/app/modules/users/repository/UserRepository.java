@@ -27,7 +27,8 @@ public interface UserRepository extends Repository<User, UUID> {
      */
     @Query(
             "SELECT new com.app.common.response.UserSummaryResponse("
-                    + "u.id, u.username, u.displayName, u.avatarUrl, u.isVerified) "
+                    + "u.id, u.username, u.displayName, u.avatarUrl, u.isVerified,"
+                    + " u.verifiedCategory) "
                     + "FROM User u WHERE u.id IN :ids AND u.deletedAt IS NULL")
     List<UserSummaryResponse> findSummariesByIdIn(@Param("ids") Collection<UUID> ids);
 
@@ -61,7 +62,8 @@ public interface UserRepository extends Repository<User, UUID> {
      */
     @Query(
             value =
-                    "SELECT id, username, display_name, avatar_url, is_verified FROM users"
+                    "SELECT id, username, display_name, avatar_url, is_verified,"
+                            + " verified_category FROM users"
                             + " WHERE deleted_at IS NULL"
                             + " AND status = 'active'"
                             + " AND username ILIKE '%' || :query || '%'"

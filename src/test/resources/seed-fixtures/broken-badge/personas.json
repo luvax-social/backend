@@ -1,0 +1,18 @@
+{
+  "personas": [
+    {
+      "id": "p01",
+      "label": "Test persona",
+      "occupation": "Tester",
+      "age_band": "25-29",
+      "city": "Ho Chi Minh City",
+      "language": "vi",
+      "voice": "Plain test voice.",
+      "topics": ["software-engineering"],
+      "posting_frequency": "regular",
+      "media_preference": "text_heavy",
+      "engagement_style": "debater",
+      "account_type": "personal"
+    }
+  ]
+}

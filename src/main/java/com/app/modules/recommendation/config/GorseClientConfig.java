@@ -15,14 +15,17 @@ import org.springframework.web.client.RestClient;
 public class GorseClientConfig {
 
     @Bean
-    RestClient gorseRestClient(GorseProperties properties) {
+    RestClient gorseRestClient(GorseProperties properties, RestClient.Builder restClientBuilder) {
         JdkClientHttpRequestFactory requestFactory =
                 new JdkClientHttpRequestFactory(
                         HttpClient.newBuilder()
                                 .connectTimeout(properties.getConnectTimeout())
                                 .build());
         requestFactory.setReadTimeout(properties.getReadTimeout());
-        return RestClient.builder()
+        // Boot's auto-configured builder carries ObservationRestClientCustomizer, so calls through
+        // this client get a CLIENT span; the static RestClient.builder() this replaced did not.
+        return restClientBuilder
+                .clone()
                 .baseUrl(properties.getBaseUrl())
                 .defaultHeader("X-API-Key", properties.getApiKey())
                 // Version 2 returns [{Id, Score}] instead of bare id arrays (verified v0.5.11)

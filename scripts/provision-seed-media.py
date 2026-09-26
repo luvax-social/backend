@@ -91,6 +91,13 @@ IMAGE_TOPICS = [
     ("studying-abroad", "university campus student", None),
     ("tech-general", "technology", None),
     ("travel-work", "digital nomad laptop", "abstract remote-work-while-travelling concept; substituted concrete digital-nomad imagery"),
+    # Added with the --append expansion. These three exist because the verification
+    # categories music, screen and gaming had no plausible subject among the original
+    # accounts, so the seed gained one creator account per category and those accounts
+    # need content of their own.
+    ("music", "live music performance", None),
+    ("film-screen", "film production set", None),
+    ("gaming", "video game setup", None),
 ]
 
 # Video-friendly subset of the same topic vocabulary (15 of the 22): excludes
@@ -111,6 +118,16 @@ VIDEO_TOPICS = [
     "tech-general",
     "studying-abroad",
     "job-market",
+    "music",
+    "film-screen",
+    "gaming",
+    # Carry video posts in posts.json. VIDEO_TOPICS originally excluded them as having no
+    # natural motion footage, which left those posts borrowing a video from an unrelated
+    # topic - the thing topic matching exists to avoid.
+    "cost-of-living",
+    "freelance-work",
+    "parenting",
+    "personal-finance",
 ]
 
 # Banner sourcing: wide-aspect imagery for the creator/business account types
@@ -400,15 +417,19 @@ def video_entry(manifest_id, role, topic_tags, video, file, s3, bucket):
 
 
 def image_quota():
-    """Splits 120 image slots across the 22 topics (base 5 each + 10 extra), then
-    marks every 8th slot as role=story (15 total) and the rest role=post (105)."""
+    """Splits image slots across IMAGE_TOPICS (base 5 each + 1 more for the first 10),
+    then marks every 8th slot as role=story and the rest role=post.
+
+    The total is derived from the topic list rather than asserted against a constant,
+    because --append added three topics and a hardcoded 120 would have made a fresh
+    provision run fail rather than simply produce a larger quota."""
     base, extra = 5, 10
     flat = []
     for idx, (topic, query, note) in enumerate(IMAGE_TOPICS):
         count = base + (1 if idx < extra else 0)
         for _ in range(count):
             flat.append((topic, query))
-    assert len(flat) == 120, len(flat)
+    assert len(flat) == base * len(IMAGE_TOPICS) + extra, len(flat)
     result = []
     for i, (topic, query) in enumerate(flat):
         role = "story" if i % 8 == 0 else "post"
@@ -420,7 +441,7 @@ def image_quota():
 
 
 def video_quota():
-    """One video per topic in VIDEO_TOPICS (15), first 5 tagged role=story, rest role=post."""
+    """One video per topic in VIDEO_TOPICS, first 5 tagged role=story, rest role=post."""
     result = []
     for i, topic in enumerate(VIDEO_TOPICS):
         role = "story" if i < 5 else "post"
@@ -569,6 +590,193 @@ def provision(s3, bucket):
     print(f"wrote {MANIFEST_PATH}")
 
 
+APPEND_PER_PAGE = 80
+APPEND_MAX_PAGES = 4
+
+
+def load_manifest():
+    with open(MANIFEST_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_manifest(manifest):
+    with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def used_pexels_ids(manifest):
+    """Every Pexels id the manifest already references, across all three pools.
+
+    Append selection skips these, so a re-run never picks a photo the manifest
+    already holds and never mints a second manifest id for one source asset."""
+    ids = set()
+    for pool in ("images", "videos", "banners"):
+        for entry in manifest.get(pool, []):
+            if entry.get("pexels_id") is not None:
+                ids.add(entry["pexels_id"])
+    return ids
+
+
+def next_sequence(entries, prefix):
+    highest = 0
+    for entry in entries:
+        ident = entry.get("id", "")
+        if ident.startswith(prefix):
+            suffix = ident[len(prefix):]
+            if suffix.isdigit():
+                highest = max(highest, int(suffix))
+    return highest + 1
+
+
+def spread(total, buckets):
+    """Splits total across buckets as evenly as possible, remainder to the front."""
+    base, remainder = divmod(total, buckets)
+    return [base + (1 if i < remainder else 0) for i in range(buckets)]
+
+
+def append_images(s3, bucket, manifest, count, seen_ids, checkpoint, per_topic=None):
+    seq = next_sequence(manifest["images"], "pexels_img_")
+    if per_topic:
+        quota = [per_topic.get(topic, 0) for topic, _q, _n in IMAGE_TOPICS]
+    else:
+        quota = spread(count, len(IMAGE_TOPICS))
+    added = 0
+    uploaded = 0
+    for (topic, query, _note), needed in zip(IMAGE_TOPICS, quota):
+        if needed == 0:
+            continue
+        got = 0
+        page = 1
+        while got < needed and page <= APPEND_MAX_PAGES:
+            candidates = search_photos(query, per_page=APPEND_PER_PAGE, page=page)
+            if not candidates:
+                break
+            for photo in candidates:
+                if got >= needed:
+                    break
+                if photo["id"] in seen_ids:
+                    continue
+                seen_ids.add(photo["id"])
+                # Same 1-in-8 story ratio the original quota uses, counted across the
+                # whole appended run rather than restarting per topic.
+                role = "story" if added % 8 == 0 else "post"
+                entry, was_uploaded = image_entry(
+                    "pexels_img_%03d" % seq, role, [topic], photo, s3, bucket
+                )
+                manifest["images"].append(entry)
+                uploaded += 1 if was_uploaded else 0
+                seq += 1
+                got += 1
+                added += 1
+            page += 1
+        if got < needed:
+            print(
+                "WARNING: image topic %r yielded %d/%d unused photos" % (topic, got, needed),
+                file=sys.stderr,
+            )
+        checkpoint()
+    return added, uploaded
+
+
+def append_videos(s3, bucket, manifest, count, seen_ids, checkpoint, per_topic=None):
+    seq = next_sequence(manifest["videos"], "pexels_vid_")
+    if per_topic:
+        quota = [per_topic.get(topic, 0) for topic in VIDEO_TOPICS]
+    else:
+        quota = spread(count, len(VIDEO_TOPICS))
+    added = 0
+    uploaded = 0
+    for topic, needed in zip(VIDEO_TOPICS, quota):
+        if needed == 0:
+            continue
+        query = next(q for t, q, _ in IMAGE_TOPICS if t == topic)
+        got = 0
+        page = 1
+        while got < needed and page <= APPEND_MAX_PAGES:
+            candidates = search_videos(query, per_page=APPEND_PER_PAGE, page=page)
+            if not candidates:
+                break
+            for video in candidates:
+                if got >= needed:
+                    break
+                if video["id"] in seen_ids:
+                    continue
+                picked = pick_video_file(video)
+                if picked is None:
+                    continue
+                seen_ids.add(video["id"])
+                role = "story" if added % 5 == 0 else "post"
+                entry, was_uploaded = video_entry(
+                    "pexels_vid_%03d" % seq, role, [topic], video, picked, s3, bucket
+                )
+                manifest["videos"].append(entry)
+                uploaded += 1 if was_uploaded else 0
+                seq += 1
+                got += 1
+                added += 1
+            page += 1
+        if got < needed:
+            print(
+                "WARNING: video topic %r yielded %d/%d usable results" % (topic, got, needed),
+                file=sys.stderr,
+            )
+        checkpoint()
+    return added, uploaded
+
+
+def append(s3, bucket, image_count, video_count, image_topics=None, video_topics=None):
+    """Grows the existing manifest without disturbing a single entry already in it.
+
+    `provision` renumbers from pexels_img_001 every time it runs, so re-running it
+    would rewrite every manifest id and break every media_refs reference in
+    content/posts.json. This mode continues the numbering instead.
+
+    The manifest is rewritten after every topic rather than once at the end, so a run
+    interrupted partway keeps what it already uploaded. Re-running then resumes:
+    already-referenced Pexels ids are skipped by selection, and upload_asset HEADs
+    before it PUTs, so nothing is fetched or stored twice."""
+    manifest = load_manifest()
+    before_images = len(manifest["images"])
+    before_videos = len(manifest["videos"])
+    seen_ids = used_pexels_ids(manifest)
+    print(
+        "append starting: %d images, %d videos, %d pexels ids already referenced"
+        % (before_images, before_videos, len(seen_ids))
+    )
+
+    def checkpoint():
+        write_manifest(manifest)
+
+    added_images = uploaded_images = 0
+    added_videos = uploaded_videos = 0
+    try:
+        if image_count or image_topics:
+            added_images, uploaded_images = append_images(
+                s3, bucket, manifest, image_count, seen_ids, checkpoint, image_topics
+            )
+        if video_count or video_topics:
+            added_videos, uploaded_videos = append_videos(
+                s3, bucket, manifest, video_count, seen_ids, checkpoint, video_topics
+            )
+    finally:
+        write_manifest(manifest)
+
+    print(
+        "append complete: +%d images (now %d), +%d videos (now %d), "
+        "newly uploaded this run=%d, pexels api calls this run=%d"
+        % (
+            added_images,
+            len(manifest["images"]),
+            added_videos,
+            len(manifest["videos"]),
+            uploaded_images + uploaded_videos,
+            getattr(pexels_call_count, "n", 0),
+        )
+    )
+    print("wrote %s" % MANIFEST_PATH)
+
+
 def verify_manifest(s3, bucket):
     """For every manifest entry, HEAD the real R2 key and compare ContentLength/ContentType
     against the manifest's recorded file_size_bytes/mime_type. Prints mismatches only;
@@ -608,14 +816,59 @@ def verify_manifest(s3, bucket):
         sys.exit(1)
 
 
+def parse_topic_counts(parser, raw_values, known_topics):
+    """Parses repeated TOPIC=N arguments into {topic: count}, refusing an unknown topic."""
+    counts = {}
+    for raw in raw_values:
+        topic, sep, value = raw.partition("=")
+        if not sep or not value.isdigit():
+            parser.error("expected TOPIC=N, got %r" % raw)
+        if topic not in known_topics:
+            parser.error("unknown topic %r; known topics: %s"
+                         % (topic, ", ".join(sorted(known_topics))))
+        counts[topic] = counts.get(topic, 0) + int(value)
+    return counts
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="grow the existing manifest instead of rebuilding it from scratch",
+    )
+    parser.add_argument("--images", type=int, default=0, help="images to append")
+    parser.add_argument("--videos", type=int, default=0, help="videos to append")
+    parser.add_argument(
+        "--image-topic",
+        action="append",
+        default=[],
+        metavar="TOPIC=N",
+        help="append N images for one topic; repeatable, and overrides --images",
+    )
+    parser.add_argument(
+        "--video-topic",
+        action="append",
+        default=[],
+        metavar="TOPIC=N",
+        help="append N videos for one topic; repeatable, and overrides --videos",
+    )
     args = parser.parse_args()
     bucket = guard_bucket()
     s3 = r2_client()
     if args.verify:
         verify_manifest(s3, bucket)
+        return
+    if args.append:
+        image_topics = parse_topic_counts(parser, args.image_topic,
+                                          [t for t, _q, _n in IMAGE_TOPICS])
+        video_topics = parse_topic_counts(parser, args.video_topic, VIDEO_TOPICS)
+        if args.images <= 0 and args.videos <= 0 and not image_topics and not video_topics:
+            parser.error(
+                "--append needs --images/--videos or --image-topic/--video-topic"
+            )
+        append(s3, bucket, args.images, args.videos, image_topics, video_topics)
         return
     provision(s3, bucket)
 

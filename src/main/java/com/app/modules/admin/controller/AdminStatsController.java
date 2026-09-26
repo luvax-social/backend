@@ -13,6 +13,7 @@ import com.app.common.ApiConstants;
 import com.app.common.base.BaseController;
 import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
+import com.app.common.security.util.SecurityUtils;
 import com.app.common.web.StrictQueryParameters;
 import com.app.modules.admin.api.AdminStatsApi;
 import com.app.modules.admin.dto.response.AdminStatsCurrentResponse;
@@ -26,10 +27,15 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 /**
  * REST endpoints for the administrative statistics surface.
  *
- * <p>The class-level {@code @PreAuthorize} is the role gate. These paths sit under {@code
- * /api/v1/admin/} but outside the {@code /api/v1/admin/users/**} sub-tree, so the matcher that
- * applies in {@code SecurityConfig} is the broader {@code /api/v1/admin/**} rule, which admits a
- * moderator. Platform-wide figures are an administrator's view, so the narrowing happens here.
+ * <p>The class-level {@code @PreAuthorize} is the first of two independent role gates. These paths
+ * sit under {@code /api/v1/admin/} but outside the {@code /api/v1/admin/users/**} sub-tree, so the
+ * matcher that applies in {@code SecurityConfig} is the broader {@code /api/v1/admin/**} rule,
+ * which admits a moderator. Platform-wide figures are an administrator's view, so the narrowing
+ * happens here.
+ *
+ * <p>The second gate is {@code AdminAuthorizationService.assertActorIsAdministrator}, called by
+ * every method of {@code AdminStatsServiceImpl}. Deleting this annotation no longer opens the
+ * endpoint, which is why the read takes an actor id.
  */
 @RestController
 @PreAuthorize("hasRole('ADMIN')")
@@ -48,7 +54,9 @@ public class AdminStatsController extends BaseController implements AdminStatsAp
     @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<AdminStatsCurrentResponse>> getCurrentStats() {
         return ResponseEntity.ok(
-                ApiResponse.success(ApiSuccessCode.OK, adminStatsService.getCurrent()));
+                ApiResponse.success(
+                        ApiSuccessCode.OK,
+                        adminStatsService.getCurrent(SecurityUtils.getCurrentUserId())));
     }
 
     /** Returns one metric's stored series over a window. */
@@ -66,6 +74,7 @@ public class AdminStatsController extends BaseController implements AdminStatsAp
         return ResponseEntity.ok(
                 ApiResponse.success(
                         ApiSuccessCode.OK,
-                        adminStatsService.getTimeseries(metric, granularity, from, to)));
+                        adminStatsService.getTimeseries(
+                                SecurityUtils.getCurrentUserId(), metric, granularity, from, to)));
     }
 }

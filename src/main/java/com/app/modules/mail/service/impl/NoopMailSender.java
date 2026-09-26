@@ -30,7 +30,10 @@ public class NoopMailSender extends AbstractTemplateMailSender {
     }
 
     @Override
-    protected void deliver(String toEmail, String subject, String htmlBody) {
+    protected String deliver(String toEmail, String subject, String htmlBody) {
         sentMailRecorder.record(new SentMail(toEmail, subject, htmlBody));
+        // No provider, so no provider identifier. The send log records the row as sent with a null
+        // provider_message_id rather than inventing one.
+        return null;
     }
 }

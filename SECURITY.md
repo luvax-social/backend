@@ -4,7 +4,7 @@
 
 Report security vulnerabilities **privately** using GitHub Security Advisories:
 
-**[Open a private advisory](https://github.com/zentech-graduation/luvax/security/advisories/new)**
+**[Open a private advisory](https://github.com/luvax-social/luvax/security/advisories/new)**
 
 Do not open a public issue. Do not send vulnerability details by email. GitHub Security Advisories keep the report confidential until a fix is released and allow coordinated disclosure.
 

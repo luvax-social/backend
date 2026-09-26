@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -22,20 +23,23 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
+import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.recommendation.repository.UserEventRepository;
 
 @ExtendWith(MockitoExtension.class)
 class AdminUserEventServiceImplTest {
 
     private static final OffsetDateTime NOW = OffsetDateTime.now(ZoneOffset.UTC);
+    private static final UUID ACTOR = UUID.randomUUID();
 
     @Mock private UserEventRepository userEventRepository;
+    @Mock private AdminAuthorizationService adminAuthorizationService;
 
     private AdminUserEventServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new AdminUserEventServiceImpl(userEventRepository);
+        service = new AdminUserEventServiceImpl(userEventRepository, adminAuthorizationService);
     }
 
     @Test
@@ -68,7 +72,7 @@ class AdminUserEventServiceImplTest {
         when(userEventRepository.findPage(any(), any(), any(), any(), any(), any(), anyInt()))
                 .thenReturn(List.of());
 
-        service.listUserEvents(null, NOW.minusDays(30), NOW, null, null, 20);
+        service.listUserEvents(ACTOR, null, NOW.minusDays(30), NOW, null, null, 20);
 
         verify(userEventRepository)
                 .findPage(
@@ -86,13 +90,35 @@ class AdminUserEventServiceImplTest {
         when(userEventRepository.findPage(any(), any(), any(), any(), any(), any(), anyInt()))
                 .thenReturn(List.of());
 
-        service.listUserEvents(UUID.randomUUID(), NOW.minusDays(1), NOW, null, null, 5000);
+        service.listUserEvents(ACTOR, UUID.randomUUID(), NOW.minusDays(1), NOW, null, null, 5000);
 
         verify(userEventRepository).findPage(any(), any(), any(), any(), any(), any(), eq(101));
     }
 
+    // The role gate runs ahead of the window validation, so a non-administrator is refused without
+    // the service reaching a read at all.
+    @Test
+    void listUserEvents_actorNotAdministrator_refusedBeforeAnyRead() {
+        doThrow(new AppException(ApiErrorCode.FORBIDDEN))
+                .when(adminAuthorizationService)
+                .assertActorIsAdministrator(ACTOR);
+
+        assertThatThrownBy(
+                        () ->
+                                service.listUserEvents(
+                                        ACTOR, null, NOW.minusDays(1), NOW, null, null, 20))
+                .isInstanceOf(AppException.class)
+                .satisfies(
+                        e ->
+                                assertThat(((AppException) e).getErrorCode())
+                                        .isEqualTo(ApiErrorCode.FORBIDDEN));
+
+        verify(userEventRepository, never())
+                .findPage(any(), any(), any(), any(), any(), any(), anyInt());
+    }
+
     private void assertRejected(OffsetDateTime from, OffsetDateTime to) {
-        assertThatThrownBy(() -> service.listUserEvents(null, from, to, null, null, 20))
+        assertThatThrownBy(() -> service.listUserEvents(ACTOR, null, from, to, null, null, 20))
                 .isInstanceOf(AppException.class)
                 .satisfies(
                         e ->

@@ -149,6 +149,14 @@ public class HashtagLifecycleServiceImpl implements HashtagLifecycleService {
         hashtag.setStatusNote(note);
         hashtag.setStatusAt(OffsetDateTime.now());
         hashtag.setStatusBy(actorId);
+        // A pin holds a hashtag at the top of the trending list, so leaving one on a tag that has
+        // just been taken out of circulation would keep promoting the exact term an administrator
+        // acted to suppress. Cleared here rather than in the admin layer so no future caller of
+        // changeStatus can forget it.
+        if (target != HashtagStatus.ACTIVE) {
+            hashtag.setPinnedAt(null);
+            hashtag.setPinnedBy(null);
+        }
         hashtagRepository.save(hashtag);
 
         // Purged in the same transaction as the status change rather than left to the next job
@@ -173,6 +181,57 @@ public class HashtagLifecycleServiceImpl implements HashtagLifecycleService {
                 purged);
         return new HashtagLifecycleResult(
                 hashtagId, hashtag.getName(), previous, target, purged, toResponse(hashtag));
+    }
+
+    @Override
+    @Transactional
+    public HashtagLifecycleResult pin(UUID actorId, UUID hashtagId) {
+        Hashtag hashtag = requireHashtag(hashtagId);
+        // Refused rather than silently accepted: a pin promotes a term platform-wide, and a term
+        // out of circulation must not be promoted. This is a caller error, so it surfaces as one.
+        if (hashtag.getStatus() != HashtagStatus.ACTIVE) {
+            throw new AppException(ApiErrorCode.HASHTAG_UNAVAILABLE);
+        }
+        if (hashtag.getPinnedAt() != null) {
+            throw new AppException(ApiErrorCode.ADMIN_INVALID_TRANSITION);
+        }
+        hashtag.setPinnedAt(OffsetDateTime.now());
+        hashtag.setPinnedBy(actorId);
+        hashtagRepository.save(hashtag);
+        log.info("Hashtag pinned: hashtagId={}, actorId={}", hashtagId, actorId);
+        return new HashtagLifecycleResult(
+                hashtagId,
+                hashtag.getName(),
+                hashtag.getStatus(),
+                hashtag.getStatus(),
+                0,
+                toResponse(hashtag));
+    }
+
+    @Override
+    @Transactional
+    public HashtagLifecycleResult unpin(UUID actorId, UUID hashtagId) {
+        Hashtag hashtag = requireHashtag(hashtagId);
+        if (hashtag.getPinnedAt() == null) {
+            throw new AppException(ApiErrorCode.ADMIN_INVALID_TRANSITION);
+        }
+        hashtag.setPinnedAt(null);
+        hashtag.setPinnedBy(null);
+        hashtagRepository.save(hashtag);
+        log.info("Hashtag unpinned: hashtagId={}, actorId={}", hashtagId, actorId);
+        return new HashtagLifecycleResult(
+                hashtagId,
+                hashtag.getName(),
+                hashtag.getStatus(),
+                hashtag.getStatus(),
+                0,
+                toResponse(hashtag));
+    }
+
+    private Hashtag requireHashtag(UUID hashtagId) {
+        return hashtagRepository
+                .findById(hashtagId)
+                .orElseThrow(() -> new AppException(ApiErrorCode.HASHTAG_NOT_FOUND));
     }
 
     private CursorPageResponse<HashtagAdminResponse> toPage(
@@ -200,7 +259,9 @@ public class HashtagLifecycleServiceImpl implements HashtagLifecycleService {
                 hashtag.getStatusNote(),
                 hashtag.getStatusAt(),
                 hashtag.getStatusBy(),
-                hashtag.getCreatedAt());
+                hashtag.getCreatedAt(),
+                hashtag.getPinnedAt(),
+                hashtag.getPinnedBy());
     }
 
     private static String normalizeQuery(String raw) {

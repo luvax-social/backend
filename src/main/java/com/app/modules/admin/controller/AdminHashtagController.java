@@ -28,6 +28,7 @@ import com.app.common.web.StrictQueryParameters;
 import com.app.modules.admin.api.AdminHashtagApi;
 import com.app.modules.admin.dto.request.AdminCreateHashtagRequest;
 import com.app.modules.admin.dto.request.AdminDeleteHashtagRequest;
+import com.app.modules.admin.dto.request.AdminHashtagPinRequest;
 import com.app.modules.admin.dto.request.AdminUpdateHashtagRequest;
 import com.app.modules.admin.dto.response.AdminActionResponse;
 import com.app.modules.admin.service.AdminHashtagService;
@@ -39,12 +40,15 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 /**
  * REST endpoints for the administrative hashtag registry.
  *
- * <p>The class-level {@code @PreAuthorize} is the only role gate here, not a second one. These
- * paths sit under {@code /api/v1/admin/} but outside the {@code /api/v1/admin/users/**} sub-tree,
- * so the matcher that applies in {@code SecurityConfig} is the broader {@code /api/v1/admin/**}
- * rule, which admits a moderator. Managing the hashtag registry is an administrator's decision, so
- * the narrowing happens here, the same way the administrator-only warning and strike revocations do
- * it.
+ * <p>The class-level {@code @PreAuthorize} is the first of two independent role gates. These paths
+ * sit under {@code /api/v1/admin/} but outside the {@code /api/v1/admin/users/**} sub-tree, so the
+ * matcher that applies in {@code SecurityConfig} is the broader {@code /api/v1/admin/**} rule,
+ * which admits a moderator. Managing the hashtag registry is an administrator's decision, so the
+ * narrowing happens here.
+ *
+ * <p>The second gate is {@code AdminAuthorizationService.assertActorIsAdministrator}, called by
+ * every method of {@code AdminHashtagServiceImpl}. Deleting this annotation no longer opens the
+ * endpoint, which is why every read here takes an actor id rather than only the writes.
  */
 @RestController
 @PreAuthorize("hasRole('ADMIN')")
@@ -65,7 +69,9 @@ public class AdminHashtagController extends BaseController implements AdminHasht
             @RequestParam(required = false) HashtagStatus status,
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int limit) {
-        return page(adminHashtagService.listHashtags(status, cursor, limit));
+        return page(
+                adminHashtagService.listHashtags(
+                        SecurityUtils.getCurrentUserId(), status, cursor, limit));
     }
 
     /** Returns a cursor page of matching hashtags spanning every lifecycle status. */
@@ -78,7 +84,9 @@ public class AdminHashtagController extends BaseController implements AdminHasht
             @RequestParam(required = false) HashtagStatus status,
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int limit) {
-        return page(adminHashtagService.searchHashtags(query, status, cursor, limit));
+        return page(
+                adminHashtagService.searchHashtags(
+                        SecurityUtils.getCurrentUserId(), query, status, cursor, limit));
     }
 
     /** Creates a hashtag directly in the requested lifecycle state. */
@@ -115,6 +123,30 @@ public class AdminHashtagController extends BaseController implements AdminHasht
         return action(
                 adminHashtagService.deleteHashtag(
                         SecurityUtils.getCurrentUserId(), hashtagId, request));
+    }
+
+    /** Pins a hashtag platform-wide so it leads the trending list. */
+    @Override
+    @PostMapping(ApiConstants.Admin.HASHTAG_PIN)
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<AdminActionResponse>> pinHashtag(
+            @PathVariable("hashtagId") UUID hashtagId,
+            @Valid @RequestBody AdminHashtagPinRequest request) {
+        return action(
+                adminHashtagService.pinHashtag(
+                        SecurityUtils.getCurrentUserId(), hashtagId, request.note()));
+    }
+
+    /** Removes a hashtag's platform-wide pin. */
+    @Override
+    @DeleteMapping(ApiConstants.Admin.HASHTAG_PIN)
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<AdminActionResponse>> unpinHashtag(
+            @PathVariable("hashtagId") UUID hashtagId,
+            @Valid @RequestBody AdminHashtagPinRequest request) {
+        return action(
+                adminHashtagService.unpinHashtag(
+                        SecurityUtils.getCurrentUserId(), hashtagId, request.note()));
     }
 
     private ResponseEntity<ApiResponse<AdminActionResponse>> action(AdminActionResponse response) {

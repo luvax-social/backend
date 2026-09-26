@@ -34,6 +34,7 @@ public interface AdminUserEventService {
      *     #MAX_WINDOW_DAYS} days; {@code INVALID_CURSOR} for a cursor this endpoint did not issue
      */
     CursorPageResponse<UserEventResponse> listUserEvents(
+            UUID actorId,
             UUID userId,
             OffsetDateTime from,
             OffsetDateTime to,

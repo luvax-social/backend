@@ -11,8 +11,10 @@ import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -20,6 +22,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.rabbit.core.RabbitOperations;
 
+import com.app.common.observability.TraceContextCapture;
+import com.app.common.observability.W3cTraceContext;
 import com.app.common.outbox.entity.OutboxEvent;
 import com.app.common.outbox.enums.OutboxEventStatus;
 import com.app.common.outbox.repository.OutboxEventRepository;
@@ -28,12 +32,19 @@ import com.app.common.outbox.repository.OutboxEventRepository;
 class OutboxServiceImplTest {
 
     @Mock private OutboxEventRepository outboxEventRepository;
+    @Mock private TraceContextCapture traceContextCapture;
+
+    private OutboxServiceImpl service;
+
+    @BeforeEach
+    void setUp() {
+        service = new OutboxServiceImpl(outboxEventRepository, traceContextCapture);
+    }
 
     @Test
     void enqueueStoresRoutingKeyEventTypeAggregateIdsAndPayload() {
         when(outboxEventRepository.insertPending(any(OutboxEvent.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-        OutboxServiceImpl service = new OutboxServiceImpl(outboxEventRepository);
         UUID aggregateId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();
         Map<String, Object> data = Map.of("postId", UUID.randomUUID().toString());
@@ -71,8 +82,6 @@ class OutboxServiceImplTest {
     void enqueueUsesEmptyPayloadWhenDataIsNull() {
         when(outboxEventRepository.insertPending(any(OutboxEvent.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-        OutboxServiceImpl service = new OutboxServiceImpl(outboxEventRepository);
-
         OutboxEvent event =
                 service.enqueue(
                         "post.created.v1",
@@ -87,8 +96,6 @@ class OutboxServiceImplTest {
 
     @Test
     void enqueueRejectsMissingRequiredFields() {
-        OutboxServiceImpl service = new OutboxServiceImpl(outboxEventRepository);
-
         assertThatThrownBy(
                         () ->
                                 service.enqueue(
@@ -104,8 +111,6 @@ class OutboxServiceImplTest {
 
     @Test
     void enqueueRejectsSensitiveDataKeys() {
-        OutboxServiceImpl service = new OutboxServiceImpl(outboxEventRepository);
-
         assertThatThrownBy(
                         () ->
                                 service.enqueue(
@@ -121,8 +126,6 @@ class OutboxServiceImplTest {
 
     @Test
     void enqueueRejectsSensitiveDataKeysInsideCollections() {
-        OutboxServiceImpl service = new OutboxServiceImpl(outboxEventRepository);
-
         assertThatThrownBy(
                         () ->
                                 service.enqueue(
@@ -140,8 +143,6 @@ class OutboxServiceImplTest {
 
     @Test
     void enqueueRejectsSensitiveValuesInsideNeutralKeys() {
-        OutboxServiceImpl service = new OutboxServiceImpl(outboxEventRepository);
-
         assertThatThrownBy(
                         () ->
                                 service.enqueue(
@@ -155,6 +156,90 @@ class OutboxServiceImplTest {
                                                 "https://app.example/verify?token=raw-token")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must not contain raw tokens");
+    }
+
+    @Test
+    void enqueue_withCurrentSpan_storesTraceContext() {
+        when(outboxEventRepository.insertPending(any(OutboxEvent.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        W3cTraceContext trace =
+                new W3cTraceContext(
+                        "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", "congo=t61");
+        when(traceContextCapture.captureCurrent()).thenReturn(Optional.of(trace));
+
+        OutboxEvent event =
+                service.enqueue(
+                        "post.created.v1",
+                        "post.created.v1",
+                        "post",
+                        UUID.randomUUID(),
+                        null,
+                        null);
+
+        assertThat(event.getTraceParent()).isEqualTo(trace.traceParent());
+        assertThat(event.getTraceState()).isEqualTo(trace.traceState());
+    }
+
+    @Test
+    void enqueue_withoutSpan_storesNoTraceContext() {
+        when(outboxEventRepository.insertPending(any(OutboxEvent.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        when(traceContextCapture.captureCurrent()).thenReturn(Optional.empty());
+
+        OutboxEvent event =
+                service.enqueue(
+                        "post.created.v1",
+                        "post.created.v1",
+                        "post",
+                        UUID.randomUUID(),
+                        null,
+                        null);
+
+        assertThat(event.getTraceParent()).isNull();
+        assertThat(event.getTraceState()).isNull();
+    }
+
+    @Test
+    void enqueueOnce_withCurrentSpan_storesTraceContext() {
+        when(outboxEventRepository.insertPendingIgnoreDuplicate(any(OutboxEvent.class)))
+                .thenAnswer(inv -> Optional.of(inv.getArgument(0)));
+        W3cTraceContext trace =
+                new W3cTraceContext(
+                        "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", null);
+        when(traceContextCapture.captureCurrent()).thenReturn(Optional.of(trace));
+        ArgumentCaptor<OutboxEvent> eventCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
+
+        service.enqueueOnce(
+                UUID.randomUUID(),
+                "post.created.v1",
+                "post.created.v1",
+                "post",
+                UUID.randomUUID(),
+                null,
+                null);
+
+        verify(outboxEventRepository).insertPendingIgnoreDuplicate(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getTraceParent()).isEqualTo(trace.traceParent());
+    }
+
+    @Test
+    void enqueueOnce_withoutSpan_storesNoTraceContext() {
+        when(outboxEventRepository.insertPendingIgnoreDuplicate(any(OutboxEvent.class)))
+                .thenAnswer(inv -> Optional.of(inv.getArgument(0)));
+        when(traceContextCapture.captureCurrent()).thenReturn(Optional.empty());
+        ArgumentCaptor<OutboxEvent> eventCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
+
+        service.enqueueOnce(
+                UUID.randomUUID(),
+                "post.created.v1",
+                "post.created.v1",
+                "post",
+                UUID.randomUUID(),
+                null,
+                null);
+
+        verify(outboxEventRepository).insertPendingIgnoreDuplicate(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getTraceParent()).isNull();
     }
 
     @Test

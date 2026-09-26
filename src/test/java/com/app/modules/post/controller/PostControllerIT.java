@@ -45,6 +45,8 @@ import com.app.common.outbox.service.OutboxPublisherService;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.post.consumer.PostIndexSyncConsumer;
 import com.app.modules.post.search.PostDocument;
+import com.app.modules.recommendation.client.GorseClient;
+import com.app.testsupport.TestContainerImages;
 import com.rabbitmq.client.Channel;
 
 @SpringBootTest(
@@ -73,18 +75,21 @@ class PostControllerIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @Container
     static ElasticsearchContainer elasticsearch =
-            new ElasticsearchContainer(
-                            DockerImageName.parse(
-                                    "docker.elastic.co/elasticsearch/elasticsearch:9.0.3"))
+            new ElasticsearchContainer(DockerImageName.parse(TestContainerImages.ELASTICSEARCH))
                     .withEnv("xpack.security.enabled", "false");
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry r) {
+        // These tests drive login, register and report submission as setup, not as the
+        // subject under test. The kill switch keeps them off the network: the dev profile
+        // defaults the secret to Cloudflare's test key, and a real siteverify call would
+        // make the suite depend on an external service being reachable.
+        r.add("TURNSTILE_AUTH_ENABLED", () -> false);
         r.add("spring.data.redis.host", redis::getHost);
         r.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         // Override any developer .env REDIS_PASSWORD — the test container runs without auth.
@@ -119,6 +124,11 @@ class PostControllerIT {
         r.add("app.hashtag.seed.enabled", () -> false);
         r.add("app.post.seed.enabled", () -> false);
     }
+
+    // Gorse is an external HTTP service with no container in this test, and the post index-sync
+    // path calls it before writing to Elasticsearch. Left real, every upsert fails on connection
+    // refused, the message is dead-lettered, and nothing is ever indexed.
+    @MockitoBean private GorseClient gorseClient;
 
     @MockitoBean private MailService mailService;
 

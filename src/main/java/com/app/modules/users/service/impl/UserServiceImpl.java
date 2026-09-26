@@ -229,6 +229,9 @@ public class UserServiceImpl implements UserService {
         if (request.allowStoryReplies() != null) {
             settings.setAllowStoryReplies(request.allowStoryReplies());
         }
+        if (request.suggestible() != null) {
+            settings.setSuggestible(request.suggestible());
+        }
         if (request.allowMessageRequests() != null) {
             settings.setAllowMessageRequests(request.allowMessageRequests());
         }

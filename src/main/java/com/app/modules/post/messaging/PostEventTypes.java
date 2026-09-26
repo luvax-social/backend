@@ -13,6 +13,13 @@ public final class PostEventTypes {
     public static final String POST_INDEX_UPSERT_V1 = "post.index.upsert.v1";
     public static final String POST_INDEX_DELETE_V1 = "post.index.delete.v1";
     public static final String POST_LIKED_V1 = "post.liked.v1";
+
+    /**
+     * A like was withdrawn. Consumed by the notification tier to retract the liker from the
+     * like-group; deliberately outside {@code post.index.*} and {@code post.live.*}.
+     */
+    public static final String POST_UNLIKED_V1 = "post.unliked.v1";
+
     public static final String POST_SAVED_V1 = "post.saved.v1";
     public static final String POST_VIEWED_V1 = "post.viewed.v1";
 

@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,6 +41,9 @@ import com.app.modules.users.entity.User;
 
 @Service
 public class StoryServiceImpl implements StoryService {
+
+    /** Upper bound on one discovery page, mirroring the endpoint's own cap. */
+    private static final int MAX_DISCOVERY_LIMIT = 20;
 
     private static final Logger log = LoggerFactory.getLogger(StoryServiceImpl.class);
 
@@ -170,6 +174,50 @@ public class StoryServiceImpl implements StoryService {
         if (stories.isEmpty()) {
             return List.of();
         }
+        List<StoryFeedItemResponse> items = buildTrayEntries(viewerId, stories);
+        items.sort(
+                Comparator.comparing((StoryFeedItemResponse i) -> !i.userId().equals(viewerId))
+                        .thenComparing(i -> !i.hasUnseen())
+                        .thenComparing(
+                                StoryFeedItemResponse::latestStoryAt, Comparator.reverseOrder()));
+        return items;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StoryFeedItemResponse> discoverStories(UUID viewerId, int limit) {
+        int bounded = Math.max(1, Math.min(limit, MAX_DISCOVERY_LIMIT));
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        List<UUID> authorIds = storyRepository.findDiscoverableAuthors(viewerId, now, bounded);
+        if (authorIds.isEmpty()) {
+            return List.of();
+        }
+        List<Story> stories = storyRepository.findActiveByAuthors(authorIds, now);
+        if (stories.isEmpty()) {
+            return List.of();
+        }
+        // Suggestion rank order, not recency. The reason an account is here at all is that it was
+        // suggested, so the ranking that produced it is the one that should survive to the rail;
+        // sorting by newest story instead would discard it.
+        Map<UUID, Integer> rank = new HashMap<>();
+        for (int i = 0; i < authorIds.size(); i++) {
+            rank.put(authorIds.get(i), i);
+        }
+        List<StoryFeedItemResponse> items = buildTrayEntries(viewerId, stories);
+        items.sort(
+                Comparator.comparingInt(
+                        item -> rank.getOrDefault(item.userId(), Integer.MAX_VALUE)));
+        return items;
+    }
+
+    /**
+     * Groups stories by author into tray entries, unsorted.
+     *
+     * <p>Shared by the follow-based tray and discovery, which differ only in which authors they
+     * choose and how the result is ordered. The viewer's own entry can never appear in a discovery
+     * result, so the self-entry branch below is reached only from the tray.
+     */
+    private List<StoryFeedItemResponse> buildTrayEntries(UUID viewerId, List<Story> stories) {
         Set<UUID> seenIds = seenStoryIds(viewerId, stories);
         Set<UUID> likedIds = likedStoryIds(viewerId, stories);
         // The query orders by (userId, createdAt), so insertion order keeps playback order intact.
@@ -204,17 +252,14 @@ public class StoryServiceImpl implements StoryService {
                     new StoryFeedItemResponse(
                             author.getId(),
                             author.getUsername(),
+                            author.isVerified(),
+                            author.getVerifiedCategory(),
                             author.getDisplayName(),
                             author.getAvatarUrl(),
                             hasUnseen,
                             latestStoryAt,
                             group.stream().map(s -> responsesById.get(s.getId())).toList()));
         }
-        items.sort(
-                Comparator.comparing((StoryFeedItemResponse i) -> !i.userId().equals(viewerId))
-                        .thenComparing(i -> !i.hasUnseen())
-                        .thenComparing(
-                                StoryFeedItemResponse::latestStoryAt, Comparator.reverseOrder()));
         return items;
     }
 

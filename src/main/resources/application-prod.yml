@@ -14,6 +14,16 @@ logging:
   file:
     path: /var/log/luvax
 
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: ${OTLP_EXPORT_ENABLED:true}
+  logging:
+    export:
+      otlp:
+        enabled: ${OTLP_EXPORT_ENABLED:true}
+
 springdoc:
   api-docs:
     enabled: false
@@ -29,8 +39,18 @@ app:
   hashtag:
     consumer:
       enabled: true
+  # PostLiveFanoutConsumer and the /ws/posts endpoint registered by PostWebSocketConfig are both
+  # gated on app.post.live.enabled, which defaults to false in application.yaml. Absent here, the
+  # endpoint was permitted by SecurityConfig and reachable while nothing fanned out to it. This is
+  # the third time this profile has silently disabled a live tier - see the comment and message
+  # blocks below. All three live tiers are now stated explicitly in this file so the next one
+  # added is added here too rather than inheriting the fail-closed default by accident.
   post:
     consumer:
+      enabled: true
+    notification-consumer:
+      enabled: true
+    live:
       enabled: true
   comment:
     consumer:
@@ -44,6 +64,9 @@ app:
   admin:
     consumer:
       enabled: true
+    moderation-mail:
+      consumer:
+        enabled: true
   story:
     consumer:
       enabled: true
@@ -54,28 +77,92 @@ app:
   # messaging had no real-time delivery in production. This tier has not carried production traffic
   # before, so its behaviour under load is unproven.
   message:
-    consumer:
-      enabled: true
     live:
       enabled: true
   mail:
     consumer:
       enabled: true
-    transport: resend
+    # transport is intentionally not set here. It is bound from APP_MAIL_TRANSPORT in
+    # application.yaml, which defaults to resend, and MailTransportGuard refuses the non-network
+    # noop transport outside dev. The literal that stood here shadowed that variable, so the
+    # guard's documented refusal was unreachable under this profile and the safe outcome was an
+    # accident of the literal rather than something enforced.
     app-name: ${MAIL_APP_NAME}
     frontend-base-url: ${FRONTEND_BASE_URL}
   security:
-    # Populate with your ingress proxy CIDR(s) before deploying behind a reverse proxy.
-    # IpExtractor only trusts XFF when the direct peer matches a configured CIDR.
-    # Example: ["10.0.0.0/8", "172.16.0.0/12"]
-    trusted-proxy-cidrs: []
-    max-login-body-bytes: 2048
+    # trusted-proxy-cidrs is intentionally not set here. It is the operator's deployment-time knob,
+    # bound from APP_SECURITY_TRUSTED_PROXY_CIDRS in application.yaml, which already defaults it
+    # fail-closed to empty. The bare [] that stood here outranked the .env file and made the
+    # variable inert, exactly as a restated refresh-cookie literal would. Populate the variable
+    # with your ingress proxy CIDR(s) before deploying behind a reverse proxy; IpExtractor trusts
+    # X-Forwarded-For only when the direct peer matches one. Example: 10.0.0.0/8,172.16.0.0/12
+    # Raised from 2048 when the auth surfaces took a turnstileToken field. The cap bounds how much
+    # AuthRateLimitFilter buffers to extract the rate-limit identifier; a Turnstile token runs to
+    # about 2048 characters, which does not fit alongside the existing login payload inside 2048
+    # bytes. 4096 remains a bound well under Tomcat's 1 MB limit.
+    max-login-body-bytes: 4096
     # refresh-cookie secure and same-site are intentionally not set here. They are the operator's
     # deployment-time knobs, bound from REFRESH_COOKIE_SECURE and REFRESH_COOKIE_SAME_SITE in
     # application.yaml, which already defaults them fail-closed to true and Lax. Restating them
     # at profile level would silently outrank the environment and make both variables inert.
   rate-limit:
     endpoint-rules:
+      # Authenticated ticket creation and the caller's own ticket reads. Every other support
+      # path already carried a per-caller Redis rule; this sub-tree carried only the JVM-wide
+      # Resilience4j backstop, which is a global circuit rather than a per-caller bound, so one
+      # abusive caller could exhaust it for everybody. The literal collection route takes the
+      # exact-match fast path and gets its own bucket; the sub-tree pattern covers
+      # /tickets/{ticketId}. An hour-long window, matching the other support rules rather than
+      # the minute-long auth convention, because opening a ticket is a human action already
+      # bounded upstream by the one-open-ticket guard.
+      "[/api/v1/support/tickets]":
+        max-attempts: 10
+        window-seconds: 3600
+      "[/api/v1/support/tickets/**]":
+        max-attempts: 10
+        window-seconds: 3600
+      # The public support form. Three per hour keyed on the caller's IP, which is the hourly half
+      # of the bound; the daily half of ten is enforced in SupportTicketServiceImpl on the same
+      # Redis primitive, keyed on the submitted address, because a rule here carries one window.
+      #
+      # Deployment prerequisite: IpExtractor trusts X-Forwarded-For only when the direct peer
+      # matches app.security.trusted-proxy-cidrs, which is empty by default. Behind an
+      # unconfigured reverse proxy every caller presents the proxy's address and shares one
+      # bucket, which turns this rule into a global cap of three per hour.
+      "[/api/v1/support/public/tickets]":
+        max-attempts: 3
+        window-seconds: 3600
+      # The appeal link. Generous, because a legitimate appellant may fumble the form more than
+      # once and the token itself is single-use, so the token is the real control here.
+      "[/api/v1/support/appeal]":
+        max-attempts: 10
+        window-seconds: 3600
+      # Reading whether an appeal link is still valid, which the landing screen does on
+      # mount. Generous relative to the appeal itself: a reader may open the link, reload it
+      # and come back to a restored tab, and none of that redeems anything.
+      # One appeal, read by the appellant who filed it and holds no session. Same band as
+      # appeal/validate: both are anonymous reads behind a 32-byte random token, and this one is
+      # followed repeatedly over the life of an appeal rather than once.
+      # Replacement appeal links. The hardest bound in the support tree, because a single request
+      # causes mail to be sent to an address the caller chooses. Three an hour is enough for
+      # somebody who mistyped their address once; it is not enough to mail a list.
+      "[/api/v1/support/appeal/resend]":
+        max-attempts: 3
+        window-seconds: 3600
+      "[/api/v1/support/appeal/status]":
+        max-attempts: 30
+        window-seconds: 3600
+      "[/api/v1/support/appeal/validate]":
+        max-attempts: 30
+        window-seconds: 3600
+      "[/api/v1/support/public/confirm]":
+        max-attempts: 20
+        window-seconds: 3600
+      # The public form's category list. See application.yaml for why this rule exists; the
+      # handler's own limiter is a JVM-wide backstop rather than a per-caller budget.
+      "[/api/v1/support/public/categories]":
+        max-attempts: 60
+        window-seconds: 3600
       "[/api/v1/auth/register]":
         max-attempts: 5
         window-seconds: 60
@@ -133,6 +220,24 @@ app:
         window-seconds: 60
       "[/api/v1/admin/hashtags/search]":
         max-attempts: 40
+        window-seconds: 60
+      # Single indexed row read behind the /tags/{name} deep link. Sized above the posts listing
+      # below because it is cheaper and because a shared link is the first request of a session.
+      "[/api/v1/hashtags/name/*]":
+        max-attempts: 60
+        window-seconds: 60
+      # One Elasticsearch query per call plus a PostgreSQL hydration of the page. Matched to the
+      # admin trigram search budget above, which carries a comparable per-call cost.
+      "[/api/v1/hashtags/*/posts]":
+        max-attempts: 40
+        window-seconds: 60
+      # Cached per caller and page, so a miss is the only call that reaches the fusion.
+      "[/api/v1/hashtags/trending/for-you]":
+        max-attempts: 60
+        window-seconds: 60
+      # Administrative write, sized like the other moderation actions on this surface.
+      "[/api/v1/admin/hashtags/*/pin]":
+        max-attempts: 20
         window-seconds: 60
       "[/api/v1/recommendations/**]":
         max-attempts: 60

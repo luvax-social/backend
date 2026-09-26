@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.when;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -24,6 +26,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
+import com.app.common.outbox.service.OutboxService;
 import com.app.modules.admin.dto.request.AdminActionRequest;
 import com.app.modules.admin.dto.request.AdminSuspendUserRequest;
 import com.app.modules.admin.dto.response.AdminActionResponse;
@@ -37,6 +40,7 @@ import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.comment.repository.CommentRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.notification.entity.enums.NotificationType;
+import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.repository.PostRepository;
@@ -58,6 +62,7 @@ class AdminServiceImplTest {
 
     @Mock private AdminActionRepository adminActionRepository;
     @Mock private UserRepository userRepository;
+    @Mock private OutboxService outboxService;
     @Mock private PostRepository postRepository;
     @Mock private PostService postService;
     @Mock private CommentRepository commentRepository;
@@ -66,6 +71,7 @@ class AdminServiceImplTest {
     @Mock private ReportRepository reportRepository;
     @Mock private AdminActionMapper adminActionMapper;
     @Mock private NotificationService notificationService;
+    @Mock private com.app.modules.support.service.VerificationService verificationService;
 
     private AdminServiceImpl service;
 
@@ -82,9 +88,11 @@ class AdminServiceImplTest {
                         messageRepository,
                         reportRepository,
                         adminActionMapper,
-                        new AdminActionRecorder(adminActionRepository, adminActionMapper),
-                        new AdminAuthorizationServiceImpl(),
-                        notificationService);
+                        new AdminActionRecorder(
+                                adminActionRepository, adminActionMapper, outboxService),
+                        new AdminAuthorizationServiceImpl(userRepository),
+                        notificationService,
+                        verificationService);
     }
 
     private void stubActor(UUID actorId, UserRole role) {
@@ -256,13 +264,13 @@ class AdminServiceImplTest {
         verify(postService).applyModerationRemoval(postId);
         verify(notificationService)
                 .create(
-                        null,
-                        ownerId,
-                        NotificationType.POST_REMOVED,
-                        "post",
-                        postId,
-                        null,
-                        "Violation");
+                        notice(
+                                ownerId,
+                                NotificationType.POST_REMOVED,
+                                "post",
+                                postId,
+                                postId,
+                                "Violation"));
     }
 
     @Test
@@ -296,13 +304,13 @@ class AdminServiceImplTest {
         assertThat(result).isEqualTo(expected);
         verify(notificationService)
                 .create(
-                        null,
-                        reporterId,
-                        NotificationType.REPORT_POST_REMOVED,
-                        "report",
-                        reportId,
-                        postId,
-                        null);
+                        notice(
+                                reporterId,
+                                NotificationType.REPORT_POST_REMOVED,
+                                "report",
+                                reportId,
+                                postId,
+                                null));
     }
 
     @Test
@@ -421,13 +429,13 @@ class AdminServiceImplTest {
         assertThat(captor.getValue().getMetadata()).containsEntry("resultingStatus", "draft");
         verify(notificationService)
                 .create(
-                        null,
-                        ownerId,
-                        NotificationType.POST_RESTORED,
-                        "post",
-                        postId,
-                        null,
-                        "Appeal accepted");
+                        notice(
+                                ownerId,
+                                NotificationType.POST_RESTORED,
+                                "post",
+                                postId,
+                                postId,
+                                "Appeal accepted"));
     }
 
     @Test
@@ -452,11 +460,11 @@ class AdminServiceImplTest {
     }
 
     @Test
-    void restoreComment_deletedComment_clearsDeletedAtAndAudits() {
+    void restoreComment_removedComment_clearsAdminRemovedAtAndAudits() {
         UUID commentId = UUID.randomUUID();
         when(commentRepository.findOwnerIdIncludingDeleted(commentId))
                 .thenReturn(Optional.of(UUID.randomUUID()));
-        when(commentRepository.isDeletedIncludingDeleted(commentId)).thenReturn(Optional.of(true));
+        when(commentRepository.isAdminRemoved(commentId)).thenReturn(Optional.of(true));
         AdminActionResponse expected = response(AdminActionType.RESTORE_COMMENT);
         stubAudit(expected);
 
@@ -468,6 +476,49 @@ class AdminServiceImplTest {
 
         assertThat(result).isEqualTo(expected);
         verify(commentRepository).applyAdminModeration(commentId, null);
+    }
+
+    // The transition guard reads admin_removed_at, so a comment its author deleted is not a
+    // restorable moderation target. Before V95 both intents shared deleted_at and this restore
+    // would have succeeded, undoing the author's own deletion.
+    @Test
+    void restoreComment_authorDeletedButNotAdminRemoved_throwsInvalidTransition() {
+        UUID commentId = UUID.randomUUID();
+        when(commentRepository.findOwnerIdIncludingDeleted(commentId))
+                .thenReturn(Optional.of(UUID.randomUUID()));
+        when(commentRepository.isAdminRemoved(commentId)).thenReturn(Optional.of(false));
+
+        assertThatThrownBy(
+                        () ->
+                                service.restoreComment(
+                                        UUID.randomUUID(),
+                                        commentId,
+                                        new AdminActionRequest("Appeal accepted", null)))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.ADMIN_INVALID_TRANSITION);
+
+        verify(commentRepository, never()).applyAdminModeration(any(), any());
+    }
+
+    @Test
+    void restoreStory_ownerDeletedButNotAdminRemoved_throwsInvalidTransition() {
+        UUID storyId = UUID.randomUUID();
+        when(storyRepository.findOwnerIdIncludingDeleted(storyId))
+                .thenReturn(Optional.of(UUID.randomUUID()));
+        when(storyRepository.isAdminRemoved(storyId)).thenReturn(Optional.of(false));
+
+        assertThatThrownBy(
+                        () ->
+                                service.restoreStory(
+                                        UUID.randomUUID(),
+                                        storyId,
+                                        new AdminActionRequest("Appeal accepted", null)))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.ADMIN_INVALID_TRANSITION);
+
+        verify(storyRepository, never()).applyAdminModeration(any(), any());
     }
 
     @Test
@@ -522,13 +573,13 @@ class AdminServiceImplTest {
         assertThat(report.getStatus()).isEqualTo(ReportStatus.DISMISSED);
         verify(notificationService)
                 .create(
-                        null,
-                        reporterId,
-                        NotificationType.REPORT_DISMISSED,
-                        "report",
-                        reportId,
-                        null,
-                        "No violation found");
+                        notice(
+                                reporterId,
+                                NotificationType.REPORT_DISMISSED,
+                                "report",
+                                reportId,
+                                null,
+                                "No violation found"));
     }
 
     @Test
@@ -683,7 +734,7 @@ class AdminServiceImplTest {
         UUID storyId = UUID.randomUUID();
         UUID ownerId = UUID.randomUUID();
         when(storyRepository.findOwnerIdIncludingDeleted(storyId)).thenReturn(Optional.of(ownerId));
-        when(storyRepository.isDeletedIncludingDeleted(storyId)).thenReturn(Optional.of(false));
+        when(storyRepository.isAdminRemoved(storyId)).thenReturn(Optional.of(false));
         AdminActionResponse expected = response(AdminActionType.REMOVE_STORY);
         stubAudit(expected);
 
@@ -700,7 +751,7 @@ class AdminServiceImplTest {
         UUID storyId = UUID.randomUUID();
         when(storyRepository.findOwnerIdIncludingDeleted(storyId))
                 .thenReturn(Optional.of(UUID.randomUUID()));
-        when(storyRepository.isDeletedIncludingDeleted(storyId)).thenReturn(Optional.of(true));
+        when(storyRepository.isAdminRemoved(storyId)).thenReturn(Optional.of(true));
         AdminActionResponse expected = response(AdminActionType.RESTORE_STORY);
         stubAudit(expected);
 
@@ -721,7 +772,7 @@ class AdminServiceImplTest {
         UUID storyId = UUID.randomUUID();
         when(storyRepository.findOwnerIdIncludingDeleted(storyId))
                 .thenReturn(Optional.of(UUID.randomUUID()));
-        when(storyRepository.isDeletedIncludingDeleted(storyId)).thenReturn(Optional.of(true));
+        when(storyRepository.isAdminRemoved(storyId)).thenReturn(Optional.of(true));
 
         assertThatThrownBy(
                         () ->
@@ -836,6 +887,125 @@ class AdminServiceImplTest {
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.MESSAGE_NOT_FOUND);
+    }
+
+    @Test
+    void removeComment_notifiesTheOwnerAndDeepLinksToTheAuditRow() {
+        UUID commentId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        when(commentRepository.findOwnerIdIncludingDeleted(commentId))
+                .thenReturn(Optional.of(ownerId));
+        when(commentRepository.isAdminRemoved(commentId)).thenReturn(Optional.of(false));
+        AdminActionResponse expected = response(AdminActionType.REMOVE_COMMENT);
+        stubAudit(expected);
+
+        service.removeComment(UUID.randomUUID(), commentId, new AdminActionRequest("Abuse", null));
+
+        // entity_type is the audit row and not the comment: the in-product appeal endpoint opens
+        // an appeal against an admin_actions id, so this is what makes the notification actionable.
+        verify(notificationService)
+                .create(
+                        notice(
+                                ownerId,
+                                NotificationType.COMMENT_REMOVED,
+                                "admin_action",
+                                expected.id(),
+                                null,
+                                "Abuse"));
+    }
+
+    @Test
+    void removeStory_notifiesTheOwnerAndDeepLinksToTheAuditRow() {
+        UUID storyId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        when(storyRepository.findOwnerIdIncludingDeleted(storyId)).thenReturn(Optional.of(ownerId));
+        when(storyRepository.isAdminRemoved(storyId)).thenReturn(Optional.of(false));
+        AdminActionResponse expected = response(AdminActionType.REMOVE_STORY);
+        stubAudit(expected);
+
+        service.removeStory(UUID.randomUUID(), storyId, new AdminActionRequest("Nudity", null));
+
+        verify(notificationService)
+                .create(
+                        notice(
+                                ownerId,
+                                NotificationType.STORY_REMOVED,
+                                "admin_action",
+                                expected.id(),
+                                null,
+                                "Nudity"));
+    }
+
+    @Test
+    void removeMessage_notifiesTheSenderAndDeepLinksToTheAuditRow() {
+        UUID messageId = UUID.randomUUID();
+        UUID senderId = UUID.randomUUID();
+        when(messageRepository.isAdminRemoved(messageId)).thenReturn(Optional.of(false));
+        when(messageRepository.findSenderIdForModeration(messageId))
+                .thenReturn(Optional.of(senderId));
+        AdminActionResponse expected = response(AdminActionType.REMOVE_MESSAGE);
+        stubAudit(expected);
+
+        service.removeMessage(
+                UUID.randomUUID(), messageId, new AdminActionRequest("Harassment", null));
+
+        verify(notificationService)
+                .create(
+                        notice(
+                                senderId,
+                                NotificationType.MESSAGE_REMOVED,
+                                "admin_action",
+                                expected.id(),
+                                null,
+                                "Harassment"));
+    }
+
+    @Test
+    void removeMessage_senderAccountDeleted_writesNoNotification() {
+        UUID messageId = UUID.randomUUID();
+        when(messageRepository.isAdminRemoved(messageId)).thenReturn(Optional.of(false));
+        // sender_id is nullable (V32). There is nobody left to notify, and a null recipient would
+        // violate the not-null constraint on notifications.recipient_id.
+        when(messageRepository.findSenderIdForModeration(messageId)).thenReturn(Optional.empty());
+        stubAudit(response(AdminActionType.REMOVE_MESSAGE));
+
+        service.removeMessage(
+                UUID.randomUUID(), messageId, new AdminActionRequest("Harassment", null));
+
+        verify(notificationService, never()).create(any(NotificationDraft.class));
+    }
+
+    @Test
+    void restoreComment_writesNoRemovalNotification() {
+        UUID commentId = UUID.randomUUID();
+        when(commentRepository.findOwnerIdIncludingDeleted(commentId))
+                .thenReturn(Optional.of(UUID.randomUUID()));
+        when(commentRepository.isAdminRemoved(commentId)).thenReturn(Optional.of(true));
+        stubAudit(response(AdminActionType.RESTORE_COMMENT));
+
+        service.restoreComment(
+                UUID.randomUUID(), commentId, new AdminActionRequest("Appeal accepted", null));
+
+        verify(notificationService, never()).create(any(NotificationDraft.class));
+    }
+
+    private static NotificationDraft notice(
+            UUID recipientId,
+            NotificationType type,
+            String entityType,
+            UUID entityId,
+            UUID postId,
+            String message) {
+        return argThat(
+                draft ->
+                        draft.actorId() == null
+                                && recipientId.equals(draft.recipientId())
+                                && draft.type() == type
+                                && Objects.equals(entityType, draft.entityType())
+                                && Objects.equals(entityId, draft.entityId())
+                                && Objects.equals(postId, draft.postId())
+                                && Objects.equals(message, draft.message())
+                                && draft.adminActionId() != null);
     }
 
     private void stubAudit(AdminActionResponse response) {

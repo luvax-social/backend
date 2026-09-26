@@ -5,6 +5,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -21,9 +22,12 @@ import org.springframework.transaction.annotation.Transactional;
 import com.app.common.response.PageResponse;
 import com.app.modules.hashtag.config.HashtagProperties;
 import com.app.modules.hashtag.dto.response.HashtagTrendingResponse;
+import com.app.modules.hashtag.dto.response.TrendingPreviewResponse;
 import com.app.modules.hashtag.entity.Hashtag;
 import com.app.modules.hashtag.entity.HashtagTrending;
 import com.app.modules.hashtag.entity.HashtagTrendingId;
+import com.app.modules.hashtag.enums.HashtagStatus;
+import com.app.modules.hashtag.enums.TrendingSource;
 import com.app.modules.hashtag.mapper.HashtagMapper;
 import com.app.modules.hashtag.repository.HashtagRepository;
 import com.app.modules.hashtag.repository.HashtagTrendingRepository;
@@ -161,23 +165,101 @@ public class HashtagTrendingServiceImpl implements HashtagTrendingService {
             return PageResponse.from(Page.empty(pageable));
         }
 
+        // Pinned first, then rank. Ordered in the database rather than after paging, because
+        // sorting a fetched page would only float a pinned hashtag to the top of whichever page it
+        // already landed on, which is not what a platform-wide pin means.
         List<HashtagTrending> rows =
-                hashtagTrendingRepository.findByIdPeriodStartOrderByRankAsc(latest, pageable);
+                hashtagTrendingRepository.findByPeriodPinnedFirst(
+                        latest, pageable.getPageSize(), (int) pageable.getOffset());
         List<UUID> ids = rows.stream().map(r -> r.getId().getHashtagId()).toList();
-        Map<UUID, String> names =
+        Map<UUID, Hashtag> byId =
                 hashtagRepository.findAllById(ids).stream()
-                        .collect(Collectors.toMap(Hashtag::getId, Hashtag::getName));
+                        .collect(Collectors.toMap(Hashtag::getId, h -> h));
         List<HashtagTrendingResponse> content =
                 rows.stream()
                         .map(
-                                r ->
-                                        hashtagMapper.toTrendingResponse(
-                                                r, names.get(r.getId().getHashtagId())))
+                                r -> {
+                                    Hashtag h = byId.get(r.getId().getHashtagId());
+                                    return new HashtagTrendingResponse(
+                                            r.getId().getHashtagId(),
+                                            h == null ? null : h.getName(),
+                                            r.getPostCount(),
+                                            r.getRank() == null ? 0 : r.getRank(),
+                                            r.getId().getPeriodStart(),
+                                            r.getPeriodEnd(),
+                                            h != null && h.getPinnedAt() != null,
+                                            TrendingSource.PLATFORM);
+                                })
                         .toList();
 
         long total = hashtagTrendingRepository.countByIdPeriodStart(latest);
         Page<HashtagTrendingResponse> page = new PageImpl<>(content, pageable, total);
         return PageResponse.from(page);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TrendingPreviewResponse> attachCovers(List<HashtagTrendingResponse> entries) {
+        if (entries.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> ids = entries.stream().map(HashtagTrendingResponse::hashtagId).toList();
+        Map<UUID, String> covers = new HashMap<>();
+        for (Object[] row : hashtagTrendingRepository.findCoverUrls(ids)) {
+            if (row[1] != null) {
+                covers.put((UUID) row[0], (String) row[1]);
+            }
+        }
+        return entries.stream()
+                .map(
+                        entry ->
+                                new TrendingPreviewResponse(
+                                        entry.hashtagId(),
+                                        entry.name(),
+                                        entry.postCount(),
+                                        entry.pinned(),
+                                        covers.get(entry.hashtagId())))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<HashtagTrendingResponse> describeHashtags(List<UUID> hashtagIds) {
+        if (hashtagIds.isEmpty()) {
+            return List.of();
+        }
+        OffsetDateTime latest =
+                jdbcTemplate.queryForObject(
+                        "SELECT MAX(period_start) FROM hashtag_trending", OffsetDateTime.class);
+        OffsetDateTime periodEnd =
+                latest == null
+                        ? null
+                        : jdbcTemplate.queryForObject(
+                                "SELECT MAX(period_end) FROM hashtag_trending WHERE period_start"
+                                        + " = ?",
+                                OffsetDateTime.class,
+                                latest);
+        return hashtagRepository.findAllById(hashtagIds).stream()
+                .filter(h -> h.getStatus() == HashtagStatus.ACTIVE)
+                .map(
+                        h ->
+                                new HashtagTrendingResponse(
+                                        h.getId(),
+                                        h.getName(),
+                                        // Null, not h.getPostCount(). This hashtag is not in the
+                                        // snapshot, so it has no window count. Substituting the
+                                        // lifetime association count put two different
+                                        // measurements in one column: "#fnblife 1 posts" (one post
+                                        // this window) read as smaller than "#goldprice 40 posts"
+                                        // (forty associations since 2025), which is a comparison
+                                        // the reader cannot make and is not told they are making.
+                                        null,
+                                        0,
+                                        latest,
+                                        periodEnd,
+                                        h.getPinnedAt() != null,
+                                        TrendingSource.PLATFORM))
+                .toList();
     }
 
     private record TrendingCount(UUID hashtagId, int postCount) {}

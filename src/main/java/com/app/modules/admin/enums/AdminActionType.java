@@ -29,11 +29,22 @@ public enum AdminActionType {
     ESCALATE_REPORT,
     FORCE_LOGOUT,
     REVOKE_SESSION,
+    // Support centre. Claiming a ticket is deliberately not audited: it is a queue mechanic rather
+    // than a decision about a person, and a row for every claim would bury the rows that record
+    // verdicts.
+    RESPOND_SUPPORT_TICKET,
+    REJECT_SUPPORT_TICKET,
+    ESCALATE_SUPPORT_TICKET,
     CREATE_HASHTAG,
     EDIT_HASHTAG,
     BAN_HASHTAG,
     UNBAN_HASHTAG,
-    DELETE_HASHTAG;
+    DELETE_HASHTAG,
+    PIN_HASHTAG,
+    UNPIN_HASHTAG,
+    GRANT_VERIFICATION,
+    REJECT_VERIFICATION,
+    REVOKE_VERIFICATION;
 
     @JsonCreator
     public static AdminActionType fromJson(String value) {

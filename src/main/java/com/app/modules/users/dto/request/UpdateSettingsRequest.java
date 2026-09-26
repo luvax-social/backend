@@ -24,4 +24,10 @@ public record UpdateSettingsRequest(
         @Schema(description = "Allow replies to stories", example = "true")
                 Boolean allowStoryReplies,
         @Schema(description = "Allow message requests from non-followers", example = "true")
-                Boolean allowMessageRequests) {}
+                Boolean allowMessageRequests,
+        @Schema(
+                        description =
+                                "Set false to stop this account being offered in other people's"
+                                        + " suggestions",
+                        nullable = true)
+                Boolean suggestible) {}

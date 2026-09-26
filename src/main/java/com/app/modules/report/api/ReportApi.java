@@ -2,6 +2,7 @@ package com.app.modules.report.api;
 
 import java.util.UUID;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -87,7 +88,7 @@ public interface ReportApi {
     @AuthenticationRequiredResponse
     @PostMapping
     ResponseEntity<ApiResponse<ReportResponse>> submitReport(
-            @Valid @RequestBody CreateReportRequest request);
+            @Valid @RequestBody CreateReportRequest request, HttpServletRequest httpRequest);
 
     /** Lists reports for moderators and administrators using optional filters. */
     @Operation(
@@ -163,7 +164,6 @@ public interface ReportApi {
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int limit);
 
-    /** Returns one report for moderator or administrator review. */
     /** Lists the reports the caller escalated. */
     @Operation(
             summary = "List reports I escalated",

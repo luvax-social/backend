@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{mail/moderation/layout :: page('We have replied to your support request', ~{::statement})}">
+<body>
+<div th:fragment="statement">
+<p style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0 0 16px;">Our team has looked at your request. Here is their reply:</p>
+<blockquote style="margin: 0 0 16px; padding: 12px 16px; border-left: 3px solid #E8E8E8; color: #4B4B4B; font-size: 15px; line-height: 1.6; white-space: pre-wrap;" th:text="${supportResponse}">The response.</blockquote>
+</div>
+</body>
+</html>

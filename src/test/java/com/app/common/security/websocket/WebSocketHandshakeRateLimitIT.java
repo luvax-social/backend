@@ -22,6 +22,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.app.testsupport.TestContainerImages;
+
 /**
  * Proves the {@code /ws/**} rate-limit rule added to {@link
  * com.app.common.security.filter.AuthRateLimitFilter} actually rejects handshake attempts beyond
@@ -59,7 +61,7 @@ class WebSocketHandshakeRateLimitIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @DynamicPropertySource

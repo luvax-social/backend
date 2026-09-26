@@ -17,8 +17,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.comment.consumer.CommentNotificationConsumer;
-import com.app.modules.mail.service.MailSender;
+import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.story.consumer.StoryNotificationConsumer;
+import com.app.testsupport.TestContainerImages;
 
 @SpringBootTest(
         properties = {
@@ -30,7 +31,15 @@ import com.app.modules.story.consumer.StoryNotificationConsumer;
             "app.post.seed.enabled=false",
             "spring.rabbitmq.publisher-confirm-type=correlated",
             "spring.rabbitmq.publisher-returns=true",
-            "spring.rabbitmq.template.mandatory=true"
+            "spring.rabbitmq.template.mandatory=true",
+            // Surefire pins APP_MAIL_TRANSPORT=noop for the whole suite so no test reaches the
+            // real provider. This is the one prod-profile context, and MailTransportGuard refuses
+            // noop outside dev, so it has to name its own transport. It previously inherited
+            // application-prod.yml's literal transport: resend, which shadowed the pin by
+            // accident; that literal is gone now that the variable is the configured input, so
+            // the requirement is stated here instead. Nothing is sent: RESEND_API_KEY below is a
+            // dummy and the outbox publisher is disabled, so no mail path runs.
+            "app.mail.transport=resend"
         })
 @Testcontainers
 class ProdProfileConsumerActivationIT {
@@ -44,11 +53,20 @@ class ProdProfileConsumerActivationIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry r) {
+        // RequiredEnvironmentGuard is @Profile("prod") and this is the only prod-profile test, so
+        // it is the only place that bean runs. @ServiceConnection wires the real DataSource
+        // through a JdbcConnectionDetails bean, but leaves spring.datasource.url/username/password
+        // bound to application.yaml's own ${POSTGRES_URL}/${POSTGRES_USER}/${POSTGRES_PASSWORD}
+        // placeholders, which is exactly what the guard scans for. These three satisfy the scan;
+        // they do not change which DataSource the context actually builds.
+        r.add("POSTGRES_URL", () -> postgres.getJdbcUrl());
+        r.add("POSTGRES_USER", postgres::getUsername);
+        r.add("POSTGRES_PASSWORD", postgres::getPassword);
         r.add("spring.data.redis.host", redis::getHost);
         r.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         r.add("spring.data.redis.password", () -> "");
@@ -81,7 +99,12 @@ class ProdProfileConsumerActivationIT {
 
     @Autowired private ApplicationContext applicationContext;
 
-    @MockitoBean private MailSender mailSender;
+    // Overridden at AbstractTemplateMailSender, not at the MailSender interface. Under this
+    // profile the transport is resend, so resendMailSender is the only candidate, and both
+    // ModerationMailEventHandler injects the abstract class rather than the interface. A mock
+    // typed as the interface replaces the same bean with something it cannot accept, and the
+    // context fails to load before any assertion here runs.
+    @MockitoBean private AbstractTemplateMailSender resendMailSender;
 
     @Test
     void prodProfile_activatesCommentAndStoryNotificationConsumerBeans() {

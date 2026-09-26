@@ -20,6 +20,25 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
     Optional<Comment> findByIdAndDeletedAtIsNull(UUID id);
 
     /**
+     * A comment and every ancestor above it, tombstoned ones included, top-level first.
+     *
+     * <p>Native so the entity's {@code @SQLRestriction} does not silently drop a removed ancestor:
+     * the caller must see it to refuse the thread. The walk is bounded by the depth cap, so a
+     * corrupt parent cycle cannot loop.
+     *
+     * @param commentId the comment at the bottom of the chain
+     * @return the chain ordered by depth ascending; empty when the comment does not exist
+     */
+    @Query(
+            value =
+                    "WITH RECURSIVE chain AS (SELECT c.*, 0 AS hop FROM comments c"
+                            + " WHERE c.id = :commentId UNION ALL SELECT p.*, chain.hop + 1"
+                            + " FROM comments p JOIN chain ON p.id = chain.parent_id"
+                            + " WHERE chain.hop < 11) SELECT * FROM chain ORDER BY depth",
+            nativeQuery = true)
+    List<Comment> findAncestryIncludingHidden(@Param("commentId") UUID commentId);
+
+    /**
      * Reads the author of a comment regardless of its soft-delete state.
      *
      * @param commentId comment identifier
@@ -29,29 +48,37 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
     Optional<UUID> findOwnerIdIncludingDeleted(@Param("commentId") UUID commentId);
 
     /**
-     * Determines whether a comment is soft-deleted.
+     * Determines whether a comment is administratively removed.
+     *
+     * <p>Reads {@code admin_removed_at} and not {@code deleted_at}, so a comment its author deleted
+     * is not mistaken for one a moderator removed. Without that split a restore would reverse the
+     * author's own deletion.
      *
      * @param commentId comment identifier
-     * @return true when the comment has a deletion timestamp
+     * @return true when the comment carries an administrative removal timestamp
      */
     @Query(
-            value = "SELECT deleted_at IS NOT NULL FROM comments WHERE id = :commentId",
+            value = "SELECT admin_removed_at IS NOT NULL FROM comments WHERE id = :commentId",
             nativeQuery = true)
-    Optional<Boolean> isDeletedIncludingDeleted(@Param("commentId") UUID commentId);
+    Optional<Boolean> isAdminRemoved(@Param("commentId") UUID commentId);
 
     /**
-     * Applies an administrator-controlled soft-delete state to one comment.
+     * Applies the administrative removal tombstone to one comment.
+     *
+     * <p>Touches {@code admin_removed_at} only. The author-owned {@code deleted_at} is left exactly
+     * as it was, so a restore cannot undo a deletion the author performed.
      *
      * @param commentId comment identifier
-     * @param deletedAt soft-delete timestamp, or null when restoring
+     * @param adminRemovedAt removal timestamp, or null when restoring
      * @return number of updated comments
      */
     @Modifying
     @Query(
-            value = "UPDATE comments SET deleted_at = :deletedAt WHERE id = :commentId",
+            value = "UPDATE comments SET admin_removed_at = :adminRemovedAt WHERE id = :commentId",
             nativeQuery = true)
     int applyAdminModeration(
-            @Param("commentId") UUID commentId, @Param("deletedAt") OffsetDateTime deletedAt);
+            @Param("commentId") UUID commentId,
+            @Param("adminRemovedAt") OffsetDateTime adminRemovedAt);
 
     /**
      * Most-liked approved top-level comments for a post, for the pinned first-page block, excluding
@@ -73,6 +100,7 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             value =
                     "SELECT * FROM comments WHERE post_id = :postId AND parent_id IS NULL "
                             + "AND moderation_status = 'approved' AND deleted_at IS NULL "
+                            + "AND admin_removed_at IS NULL "
                             + "AND like_count > 0 "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
                             + " WHERE (b.blocker_id = :viewerId AND b.blocked_id = comments.user_id)"
@@ -101,6 +129,7 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             value =
                     "SELECT * FROM comments WHERE post_id = :postId AND parent_id IS NULL "
                             + "AND moderation_status = 'approved' AND deleted_at IS NULL "
+                            + "AND admin_removed_at IS NULL "
                             + "AND id <> ALL(CAST(:excludedIds AS uuid[])) "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
                             + " WHERE (b.blocker_id = :viewerId AND b.blocked_id = comments.user_id)"
@@ -139,6 +168,7 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             value =
                     "SELECT * FROM comments WHERE post_id = :postId AND parent_id IS NULL "
                             + "AND moderation_status = 'approved' AND deleted_at IS NULL "
+                            + "AND admin_removed_at IS NULL "
                             + "AND id <> ALL(CAST(:excludedIds AS uuid[])) "
                             + "AND (created_at, id) < (:cursorTime, :cursorId) "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
@@ -168,6 +198,7 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             value =
                     "SELECT * FROM comments WHERE parent_id = :parentId "
                             + "AND moderation_status = 'approved' AND deleted_at IS NULL "
+                            + "AND admin_removed_at IS NULL "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
                             + " WHERE (b.blocker_id = :viewerId AND b.blocked_id = comments.user_id)"
                             + " OR (b.blocker_id = comments.user_id AND b.blocked_id = :viewerId)) "
@@ -196,6 +227,7 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             value =
                     "SELECT * FROM comments WHERE parent_id = :parentId "
                             + "AND moderation_status = 'approved' AND deleted_at IS NULL "
+                            + "AND admin_removed_at IS NULL "
                             + "AND (created_at, id) < (:cursorTime, :cursorId) "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
                             + " WHERE (b.blocker_id = :viewerId AND b.blocked_id = comments.user_id)"

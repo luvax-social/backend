@@ -34,7 +34,7 @@ public class SuspensionExpiryServiceImpl implements SuspensionExpiryService {
     @Override
     @Transactional
     public UserStatus reinstateIfExpired(UUID userId) {
-        if (adminUserRepository.reinstateExpiredSuspension(userId) == 1) {
+        if (adminUserRepository.reinstateExpiredSuspension(userId, nowUtc()) == 1) {
             recordReinstatement(userId);
         }
         // Read back unconditionally. On the zero-row path another transaction or an administrator
@@ -47,18 +47,28 @@ public class SuspensionExpiryServiceImpl implements SuspensionExpiryService {
     @Override
     @Transactional
     public int reinstateExpiredBatch(int limit) {
-        List<UUID> candidates = adminUserRepository.findExpiredSuspensionIds(limit);
+        // One cutoff for the whole pass, so the select and the updates that follow it cannot
+        // disagree about what "expired" means because time moved between them.
+        java.time.OffsetDateTime cutoff = nowUtc();
+        List<UUID> candidates = adminUserRepository.findExpiredSuspensionIds(limit, cutoff);
         int reinstated = 0;
         for (UUID userId : candidates) {
             // Same conditional update the authentication path runs, so the two cannot disagree
             // about what "expired" means. A candidate that path repaired between the select above
             // and this update simply updates zero rows and is skipped.
-            if (adminUserRepository.reinstateExpiredSuspension(userId) == 1) {
+            if (adminUserRepository.reinstateExpiredSuspension(userId, cutoff) == 1) {
                 recordReinstatement(userId);
                 reinstated++;
             }
         }
         return reinstated;
+    }
+
+    // suspended_until is written from the JVM clock, so it is compared against the JVM clock too.
+    // Letting the statement read the database's own now() put one column in two clock domains,
+    // which decides whether a suspension is over by whichever clock happens to be ahead.
+    private static java.time.OffsetDateTime nowUtc() {
+        return java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC);
     }
 
     private void recordReinstatement(UUID userId) {

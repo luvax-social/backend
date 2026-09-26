@@ -36,7 +36,10 @@ import lombok.Setter;
 @Entity
 @Table(name = "stories")
 // Soft-delete filter: every query on stories must exclude deleted rows (GLOBAL_RULES §3).
-@SQLRestriction("deleted_at IS NULL")
+// Both tombstones, so every JPQL, derived and entity-graph read hides an administratively
+// removed story without each query restating the predicate. Native queries bypass this
+// filter and carry the predicate themselves.
+@SQLRestriction("deleted_at IS NULL AND admin_removed_at IS NULL")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -81,4 +84,13 @@ public class Story {
     /** Set by application code on soft delete; {@code null} for live rows (GLOBAL_RULES §6). */
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
+
+    /**
+     * Set by administrative removal; {@code null} when not administratively removed.
+     *
+     * <p>Independent of {@link #deletedAt}, which the owner owns. The row is hidden when either is
+     * set, and clearing this one never undoes the owner's own deletion.
+     */
+    @Column(name = "admin_removed_at")
+    private OffsetDateTime adminRemovedAt;
 }

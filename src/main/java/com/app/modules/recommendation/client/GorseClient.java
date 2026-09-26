@@ -53,6 +53,25 @@ public interface GorseClient {
     List<GorseScore> trending(int n, int offset);
 
     /**
+     * Fetches the accounts Gorse considers most similar to one user.
+     *
+     * <p>Backed by the {@code [[recommend.user-to-user]]} recommender and its background task. Two
+     * conditions make this return an empty list rather than fail: the recommender may not be
+     * configured at all, and its task may not have completed since the last retrain. Both are
+     * indistinguishable from "this user has no neighbours yet" at the wire level, and all three are
+     * handled the same way by the caller: a source that contributes nothing.
+     *
+     * <p>That is why an empty answer here must never be treated as a failure. Charging it to the
+     * circuit breaker would open the breaker on a correctly working Gorse that simply has no
+     * user-to-user recommender, and take the personalized feed down with it.
+     *
+     * @param userId app user id
+     * @param n maximum number of neighbours to return
+     * @return scored user ids ordered most-similar first; empty when Gorse has nothing
+     */
+    List<GorseScore> userNeighbors(UUID userId, int n);
+
+    /**
      * Inserts or updates users.
      *
      * @param users users in Gorse wire format

@@ -51,10 +51,11 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Stateless Spring Security wiring for the modular monolith.
  *
- * <p>Declares exactly one {@link SecurityFilterChain} bean: the JWT-based REST chain that disables
- * sessions, registers {@link JwtAuthenticationFilter}, and routes authentication and authorization
- * failures back through the {@link ApiResponse} envelope. Authorization rules are organized by
- * semantic category via private helper methods invoked from {@link #securityFilterChain}.
+ * <p>Declares the JWT-based REST chain that disables sessions, registers {@link
+ * JwtAuthenticationFilter}, and routes authentication and authorization failures back through the
+ * {@link ApiResponse} envelope. Authorization rules are organized by semantic category via private
+ * helper methods invoked from {@link #securityFilterChain}. The actuator management port has its
+ * own chain in {@link ManagementSecurityConfig}, matched separately so it never reaches this one.
  */
 @Configuration
 @EnableWebSecurity
@@ -77,12 +78,6 @@ public class SecurityConfig {
 
     private static final String[] PUBLIC_INFRA_PATHS = {
         "/actuator/health",
-        // A Prometheus scraper cannot present an admin JWT, and the rule below restricts the rest
-        // of /actuator/** to ADMIN. Registered here because the first matching rule wins, so this
-        // must precede that rule. Deliberately anonymous: the endpoint publishes URI templates,
-        // request counts, and JVM internals to any caller that can reach the port, and is expected
-        // to be restricted at the ingress rather than in the application.
-        "/actuator/prometheus",
         "/api-docs/**",
         "/swagger-ui/**",
         "/swagger-ui.html",
@@ -227,6 +222,55 @@ public class SecurityConfig {
     private void configureInfrastructureEndpoints(
             AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry
                     auth) {
+        // The four anonymous support paths.
+        //
+        // Anonymous by necessity rather than by convenience. TokenPrincipalResolverImpl admits only
+        // ACTIVE accounts, so a banned or suspended user cannot authenticate at all, and they are
+        // exactly the population an appeal path exists for. Each carries its own control instead of
+        // a session: a single-use Redis token for the appeal and the confirmation, and Turnstile
+        // plus email confirmation for the public form. None of them issues a session, a token pair
+        // or a refresh token row.
+        //
+        // Each also carries its own entry in app.rate-limit.endpoint-rules in all three profiles.
+        auth.requestMatchers(
+                        HttpMethod.POST,
+                        ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL,
+                        ApiConstants.Support.ROOT + ApiConstants.Support.PUBLIC_TICKET,
+                        ApiConstants.Support.ROOT + ApiConstants.Support.CONFIRM,
+                        ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL_RESEND)
+                .permitAll();
+
+        // The public form's category list, read before the form can be filled in. GET only, and it
+        // answers strictly less than the authenticated config vocabulary: enabled, public-form
+        // support categories, which is display metadata and no account data.
+        auth.requestMatchers(
+                        HttpMethod.GET,
+                        ApiConstants.Support.ROOT + ApiConstants.Support.PUBLIC_CATEGORIES)
+                .permitAll();
+
+        // Whether an appeal link is still redeemable, read without redeeming it. Anonymous for the
+        // same reason the appeal POST is: the account it concerns is banned or suspended and cannot
+        // authenticate. It widens nothing - a caller must already hold a 32-byte random token, and
+        // it answers only the appeal category, which the form itself would have shown them. It
+        // exists so the landing screen can refuse a dead link before the reader writes their
+        // appeal instead of after, and it must never consume the token.
+        auth.requestMatchers(
+                        HttpMethod.GET,
+                        ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL_VALIDATE)
+                .permitAll();
+
+        // One appeal, read by the appellant who filed it and holds no session. Anonymous for the
+        // same reason every other route here is: the account is banned or suspended and cannot
+        // authenticate. The appeal token was spent by the redemption that created the ticket, so
+        // this token is the only thing that can reach it afterwards. It widens nothing - the
+        // caller must already hold a 32-byte random token - and it answers the owner-facing shape,
+        // which structurally carries no internal note, assignee or escalation reason. Read-only:
+        // it must never consume the token, because the link is meant to be followed repeatedly.
+        auth.requestMatchers(
+                        HttpMethod.GET,
+                        ApiConstants.Support.ROOT + ApiConstants.Support.APPEAL_STATUS)
+                .permitAll();
+
         auth.requestMatchers(PUBLIC_INFRA_PATHS).permitAll();
         auth.requestMatchers("/actuator/**").hasRole("ADMIN");
     }

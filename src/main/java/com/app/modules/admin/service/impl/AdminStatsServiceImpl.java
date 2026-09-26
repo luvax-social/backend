@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +23,7 @@ import com.app.modules.admin.enums.PlatformMetric;
 import com.app.modules.admin.enums.StatGranularity;
 import com.app.modules.admin.repository.PlatformStatsRepository;
 import com.app.modules.admin.repository.PlatformStatsRepository.StatRow;
+import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.admin.service.AdminStatsService;
 import com.app.modules.hashtag.repository.HashtagRepository;
 
@@ -33,19 +35,23 @@ public class AdminStatsServiceImpl implements AdminStatsService {
     private final PlatformStatsRepository platformStatsRepository;
     private final HashtagRepository hashtagRepository;
     private final StatsProperties properties;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public AdminStatsServiceImpl(
             PlatformStatsRepository platformStatsRepository,
             HashtagRepository hashtagRepository,
-            StatsProperties properties) {
+            StatsProperties properties,
+            AdminAuthorizationService adminAuthorizationService) {
         this.platformStatsRepository = platformStatsRepository;
         this.hashtagRepository = hashtagRepository;
         this.properties = properties;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @Override
     @Transactional(readOnly = true)
-    public AdminStatsCurrentResponse getCurrent() {
+    public AdminStatsCurrentResponse getCurrent(UUID actorId) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
         Optional<OffsetDateTime> newest =
                 platformStatsRepository.findNewestBucket(StatGranularity.HALF_HOUR);
         List<StatRow> rows =
@@ -81,10 +87,12 @@ public class AdminStatsServiceImpl implements AdminStatsService {
     @Override
     @Transactional(readOnly = true)
     public AdminStatsTimeseriesResponse getTimeseries(
+            UUID actorId,
             PlatformMetric metric,
             StatGranularity granularity,
             OffsetDateTime from,
             OffsetDateTime to) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         OffsetDateTime effectiveFrom = from;
         OffsetDateTime effectiveTo = to;

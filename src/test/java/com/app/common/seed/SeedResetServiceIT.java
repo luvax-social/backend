@@ -27,6 +27,7 @@ import com.app.common.seed.reset.SeedResetService;
 import com.app.modules.hashtag.search.HashtagDocument;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.post.search.PostDocument;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves {@link SeedResetService#reset()} truncates seedable domain tables while leaving the
@@ -61,18 +62,21 @@ class SeedResetServiceIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @Container
     static ElasticsearchContainer elasticsearch =
-            new ElasticsearchContainer(
-                            DockerImageName.parse(
-                                    "docker.elastic.co/elasticsearch/elasticsearch:9.0.3"))
+            new ElasticsearchContainer(DockerImageName.parse(TestContainerImages.ELASTICSEARCH))
                     .withEnv("xpack.security.enabled", "false");
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry registry) {
+        // SeedResetService injects these two directly with @Value, which resolves eagerly and
+        // fails outright on an unset placeholder; @ServiceConnection wires the real DataSource
+        // through a different mechanism and never sets these two property names itself.
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         registry.add("spring.data.redis.password", () -> "");

@@ -251,11 +251,12 @@ class PasswordPolicyValidatorTest {
     }
 
     private static RegisterRequest register(String password) {
-        return new RegisterRequest("john_doe", "john@example.com", password, "John Doe");
+        return new RegisterRequest(
+                "john_doe", "john@example.com", password, "John Doe", "turnstile-token");
     }
 
     private static ResetPasswordRequest reset(String password) {
-        return new ResetPasswordRequest("a1b2c3d4e5f6", password);
+        return new ResetPasswordRequest("a1b2c3d4e5f6", password, "turnstile-token");
     }
 
     private static <T> Set<String> violationMessages(T target, String field) {

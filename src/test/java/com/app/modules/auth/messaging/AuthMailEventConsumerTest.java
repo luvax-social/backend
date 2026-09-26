@@ -144,6 +144,81 @@ class AuthMailEventConsumerTest {
     }
 
     @Test
+    void consumeProviderRejection_deadLettersOnFirstAttemptWithoutRetrying() throws Exception {
+        // A 422 about a malformed recipient used to arrive as SERVICE_UNAVAILABLE, so it burned
+        // the whole retry ladder with its backoff, held a consumer thread behind it, and then
+        // dead-lettered labelled "temporarily unavailable" - a reason that invites a replay which
+        // can only fail identically.
+        Message message = message(event(AuthEventTypes.USER_REGISTERED_V1));
+        when(processedMessageService.processOnce(
+                        org.mockito.ArgumentMatchers.eq(AuthMailEventConsumer.CONSUMER_NAME),
+                        org.mockito.ArgumentMatchers.eq(EVENT_ID),
+                        org.mockito.ArgumentMatchers.eq(AuthEventTypes.USER_REGISTERED_V1),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenThrow(
+                        new AppException(
+                                ApiErrorCode.MAIL_PERMANENTLY_REJECTED,
+                                "Mail provider permanently rejected the message: 422"));
+
+        consumer.consume(message, channel);
+
+        verify(processedMessageService, times(1))
+                .processOnce(
+                        org.mockito.ArgumentMatchers.eq(AuthMailEventConsumer.CONSUMER_NAME),
+                        org.mockito.ArgumentMatchers.eq(EVENT_ID),
+                        org.mockito.ArgumentMatchers.eq(AuthEventTypes.USER_REGISTERED_V1),
+                        org.mockito.ArgumentMatchers.any());
+        verify(deadLetterPublisher)
+                .publish(
+                        org.mockito.ArgumentMatchers.eq(message),
+                        org.mockito.ArgumentMatchers.eq(
+                                RabbitMqTopologyConfig.MAIL_DEAD_LETTER_ROUTING_KEY),
+                        org.mockito.ArgumentMatchers.contains("permanently rejected"));
+        verify(channel).basicAck(1L, false);
+        org.assertj.core.api.Assertions.assertThat(sleptMillis).isEmpty();
+    }
+
+    // P7-BE-002. The allowlist refusing a recipient is the operator's own configuration decision,
+    // not a delivery failure, so it must be acked rather than dead-lettered. Under the dev default
+    // allowlist of example.invalid this is every verification, reset and email-change message
+    // addressed to a seeded account at a real domain, which filled the DLQ with choices the
+    // operator had already made.
+    @Test
+    void consumeSuppressedRecipient_acksWithoutDeadLettering() throws Exception {
+        Message message = message(event(AuthEventTypes.USER_REGISTERED_V1));
+        when(processedMessageService.processOnce(
+                        org.mockito.ArgumentMatchers.eq(AuthMailEventConsumer.CONSUMER_NAME),
+                        org.mockito.ArgumentMatchers.eq(EVENT_ID),
+                        org.mockito.ArgumentMatchers.eq(AuthEventTypes.USER_REGISTERED_V1),
+                        org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new AppException(ApiErrorCode.MAIL_RECIPIENT_NOT_ALLOWED));
+
+        consumer.consume(message, channel);
+
+        verify(deadLetterPublisher, never())
+                .publish(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any());
+        verify(channel).basicAck(1L, false);
+        verify(channel, never()).basicNack(1L, false, true);
+        // Not retried either: a configuration decision will not change on a second attempt.
+        org.assertj.core.api.Assertions.assertThat(sleptMillis).isEmpty();
+    }
+
+    @Test
+    void isTransient_mailRecipientNotAllowed_returnsFalse() {
+        assertThat(consumer.isTransient(new AppException(ApiErrorCode.MAIL_RECIPIENT_NOT_ALLOWED)))
+                .isFalse();
+    }
+
+    @Test
+    void isTransient_mailPermanentlyRejected_returnsFalse() {
+        assertThat(consumer.isTransient(new AppException(ApiErrorCode.MAIL_PERMANENTLY_REJECTED)))
+                .isFalse();
+    }
+
+    @Test
     void consumePermanentFailure_routesToDlqAndAcksOriginal() throws Exception {
         Message message = message(event(AuthEventTypes.USER_REGISTERED_V1));
         when(processedMessageService.processOnce(

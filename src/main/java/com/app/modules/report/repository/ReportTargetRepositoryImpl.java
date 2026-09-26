@@ -24,10 +24,12 @@ public class ReportTargetRepositoryImpl implements ReportTargetRepository {
                     case POST ->
                             "SELECT user_id FROM posts WHERE id = :entityId AND deleted_at IS NULL";
                     case COMMENT ->
-                            "SELECT user_id FROM comments WHERE id = :entityId AND deleted_at IS NULL";
+                            "SELECT user_id FROM comments WHERE id = :entityId "
+                                    + "AND deleted_at IS NULL AND admin_removed_at IS NULL";
                     case USER -> "SELECT id FROM users WHERE id = :entityId AND deleted_at IS NULL";
                     case STORY ->
-                            "SELECT user_id FROM stories WHERE id = :entityId AND deleted_at IS NULL";
+                            "SELECT user_id FROM stories WHERE id = :entityId "
+                                    + "AND deleted_at IS NULL AND admin_removed_at IS NULL";
                     case MESSAGE ->
                             "SELECT sender_id FROM messages WHERE id = :entityId "
                                     + "AND is_deleted = FALSE AND deleted_at IS NULL "

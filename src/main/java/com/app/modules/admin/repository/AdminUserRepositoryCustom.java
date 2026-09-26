@@ -73,7 +73,8 @@ public interface AdminUserRepositoryCustom {
      * Indefinite suspensions have a null {@code suspended_until} and never appear here.
      *
      * @param limit maximum ids to return
+     * @param now the cutoff, from the same clock that wrote {@code suspended_until}
      * @return ids of suspended accounts whose {@code suspended_until} is in the past
      */
-    List<UUID> findExpiredSuspensionIds(int limit);
+    List<UUID> findExpiredSuspensionIds(int limit, java.time.OffsetDateTime now);
 }

@@ -25,4 +25,6 @@ public record VocabularyResponse(
         @Schema(description = "Notification types, ascending by key")
                 List<NotificationTypeVocabularyResponse> notificationTypes,
         @Schema(description = "Moderation action types, ascending by key")
-                List<ModerationActionVocabularyResponse> moderationActions) {}
+                List<ModerationActionVocabularyResponse> moderationActions,
+        @Schema(description = "Support ticket categories, in display order")
+                List<SupportCategoryVocabularyResponse> supportCategories) {}

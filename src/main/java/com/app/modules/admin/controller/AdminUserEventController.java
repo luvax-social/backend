@@ -18,6 +18,7 @@ import com.app.common.base.BaseController;
 import com.app.common.enums.ApiSuccessCode;
 import com.app.common.response.ApiResponse;
 import com.app.common.response.CursorPageResponse;
+import com.app.common.security.util.SecurityUtils;
 import com.app.common.web.StrictQueryParameters;
 import com.app.modules.admin.api.AdminUserEventApi;
 import com.app.modules.admin.service.AdminUserEventService;
@@ -29,11 +30,15 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 /**
  * REST endpoint for the administrative behavioural activity log.
  *
- * <p>The class-level {@code @PreAuthorize} is the role gate. This path sits under {@code
- * /api/v1/admin/} but outside the {@code /api/v1/admin/users/**} sub-tree, so the matcher that
- * applies in {@code SecurityConfig} is the broader {@code /api/v1/admin/**} rule, which admits a
- * moderator. Reading what any account did is an administrator's privilege, so the narrowing happens
- * here, the same way the hashtag registry does it.
+ * <p>The class-level {@code @PreAuthorize} is the first of two independent role gates. This path
+ * sits under {@code /api/v1/admin/} but outside the {@code /api/v1/admin/users/**} sub-tree, so the
+ * matcher that applies in {@code SecurityConfig} is the broader {@code /api/v1/admin/**} rule,
+ * which admits a moderator. Reading what any account did is an administrator's privilege, so the
+ * narrowing happens here, the same way the hashtag registry does it.
+ *
+ * <p>The second gate is {@code AdminAuthorizationService.assertActorIsAdministrator}, called by
+ * {@code AdminUserEventServiceImpl.listUserEvents}. Deleting this annotation no longer opens the
+ * endpoint, which is why the read takes an actor id.
  */
 @RestController
 @PreAuthorize("hasRole('ADMIN')")
@@ -60,7 +65,14 @@ public class AdminUserEventController extends BaseController implements AdminUse
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int limit) {
         return page(
-                adminUserEventService.listUserEvents(userId, from, to, eventType, cursor, limit));
+                adminUserEventService.listUserEvents(
+                        SecurityUtils.getCurrentUserId(),
+                        userId,
+                        from,
+                        to,
+                        eventType,
+                        cursor,
+                        limit));
     }
 
     private ResponseEntity<ApiResponse<CursorPageResponse<UserEventResponse>>> page(

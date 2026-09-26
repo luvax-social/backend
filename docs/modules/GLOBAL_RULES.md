@@ -12,6 +12,7 @@ Cross-cutting conventions that apply to all modules. Do not duplicate these in p
 | Cache | Redis | Fast reads, session tokens, rate-limit state | Yes — rebuild from PostgreSQL |
 | Search Index | Elasticsearch (`posts`, `hashtags` only) | Full-text search | Yes — rebuild from PostgreSQL |
 | Event Stream | RabbitMQ | Async event delivery | No persistence guarantee |
+| Telemetry | ClickHouse (logs, traces), Prometheus (metrics) | Observability data | Yes — disposable, never a source of truth |
 
 **Conflict resolution rule**: If a data conflict exists between tiers, PostgreSQL is always correct.
 
@@ -34,6 +35,7 @@ All counters are maintained exclusively by PostgreSQL triggers (introduced in Fl
 | `post_count` | `hashtags` | `trg_hashtag_post_count` | `post_hashtags` |
 | `view_count` | `stories` | `trg_story_view_count` | `story_views` |
 | `like_count` | `stories` | `trg_story_like_count` (V49) | `story_likes` |
+| `actor_count` | `notifications` | `trg_notification_actor_count` (V117) | `notification_actors` |
 
 If a counter appears stale, the correct action is to recalculate from the source join table — not to patch the counter directly.
 
@@ -54,6 +56,7 @@ Tables that use soft delete via a `deleted_at TIMESTAMPTZ` column:
 | `comments` | comment | Live |
 | `stories` | story | Live |
 | `messages` | message (uses `is_deleted BOOLEAN` + `deleted_at`, not pure soft-delete pattern) | Live |
+| `notifications` | notification (V116; set by the recipient's delete and by a retraction that leaves a row with no actor) | Live |
 
 > **`users.deleted_at` is not written by anything in the application.**
 > The column exists and is indexed, but no service, repository, migration, or trigger sets it, and there is no self-service account deletion endpoint.
@@ -142,7 +145,7 @@ The existence check in step 5 is not media inspection. The server reads the obje
 
 | Area | Simplification | Accepted Degradation |
 |------|---------------|----------------------|
-| Notifications | Real-time delivery is best-effort over a per-user STOMP topic; the REST list remains authoritative | A missed push is recovered on the next `GET /notifications`. Delivery latency is bounded by the outbox publisher's polling interval, not by the socket |
+| Notifications | Real-time delivery is best-effort over a per-user STOMP topic carrying typed events (`upserted`, `read-state`, `deleted`, `seen`, `requests`) with the feed state after each; the REST list remains authoritative. The badge counts rows above a per-user seen watermark, bounded at 99+ | A missed push is recovered by refetching after a reconnect. Delivery latency is bounded by the outbox publisher's polling interval, not by the socket. A row committing within commit latency of a concurrent seen advance can be counted as seen without having been shown |
 | Realtime transport | In-memory STOMP broker on a single application instance; the RabbitMQ fanout tier in front of it is multi-instance-safe, the broker itself shares nothing | A second instance delivers correctly but has no shared session state; nothing beyond delivery has been designed or tested for it |
 | Feed / Explore ranking | `post_interaction_scores` updated by a background scheduler, not in real-time | Feed ranking may lag behind actual activity by minutes |
 | Hashtag trending | `hashtag_trending` populated by a scheduled background job | Trending data is a periodic snapshot, not live |
@@ -178,6 +181,7 @@ Several domain tables use PostgreSQL enum types as the column type for classific
 | Table | Enum column | Enum type |
 |-------|-------------|-----------|
 | `notifications` | `type` | `notification_type` |
+| `notifications` | `category` | `notification_category` |
 | `admin_actions` | `action_type` | `admin_action_type` |
 | `reports` | `report_reason` | `report_reason` |
 | `reports` | `report_type` | `report_type` |

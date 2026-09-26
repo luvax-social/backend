@@ -150,7 +150,7 @@ public interface AdminService {
      *
      * @return the count
      */
-    EscalatedReportCountResponse countEscalatedReports();
+    EscalatedReportCountResponse countEscalatedReports(UUID actorId);
 
     /**
      * Lists audit-event summaries with optional actor and action-type filters.

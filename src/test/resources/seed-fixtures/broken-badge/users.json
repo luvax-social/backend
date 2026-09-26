@@ -1,0 +1,38 @@
+{
+  "users": [
+    {
+      "username": "alice",
+      "display_name": "Alice",
+      "email": "alice@test.local",
+      "bio": "",
+      "persona_id": "p01",
+      "role": "user",
+      "status": "active",
+      "is_private": false,
+      "email_verified": true,
+      "created_at_offset_days": -10,
+      "avatar_media_ref": "img_001",
+      "banner_media_ref": null,
+      "post_count_target": 1,
+      "is_qa_account": false,
+      "qa_note": ""
+    },
+    {
+      "username": "bob",
+      "display_name": "Bob",
+      "email": "bob@test.local",
+      "bio": "",
+      "persona_id": "p01",
+      "role": "user",
+      "status": "active",
+      "is_private": false,
+      "email_verified": true,
+      "created_at_offset_days": -5,
+      "avatar_media_ref": "img_002",
+      "banner_media_ref": null,
+      "post_count_target": 0,
+      "is_qa_account": false,
+      "qa_note": ""
+    }
+  ]
+}

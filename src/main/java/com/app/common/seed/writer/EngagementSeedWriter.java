@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import com.app.common.seed.loader.SeedContent;
 import com.app.common.seed.model.PostSeed;
+import com.app.common.seed.model.UserSeed;
 import com.app.common.seed.time.SeedTimeline;
 
 import lombok.RequiredArgsConstructor;
@@ -49,7 +50,13 @@ public class EngagementSeedWriter {
     // stream drives which (user, post)/(user, comment) pairs are chosen.
     private static final long ENGAGEMENT_RANDOM_SEED = 3_180_442L;
 
-    private static final int POST_LIKE_TARGET = 15_000;
+    private static final int POST_LIKE_TARGET = 20_000;
+    // Accounts that never post. They are weighted up as likers because consuming is the only
+    // thing they do, and a uniform draw would make them exactly as active as an account that
+    // also writes - which is not what the persona describes.
+    private static final Set<String> CONSUMER_PERSONAS =
+            Set.of("p09_lurker_commenter", "p11_silent_consumer");
+    private static final int CONSUMER_LIKE_WEIGHT = 3;
     private static final int POST_SAVE_TARGET = 2_000;
     private static final int COMMENT_LIKE_TARGET = 4_000;
     private static final int MAX_ATTEMPT_MULTIPLIER = 30;
@@ -86,7 +93,7 @@ public class EngagementSeedWriter {
             Map<String, UUID> postIdBySeedId,
             List<UUID> commentIds,
             SeedTimeline timeline) {
-        List<UUID> userIds = new ArrayList<>(usersByUsername.values());
+        List<UUID> userIds = buildWeightedUserPool(content, usersByUsername);
         Random random = new Random(ENGAGEMENT_RANDOM_SEED);
 
         WeightedPostIndex weightedPosts = buildWeightedPosts(content.posts(), postIdBySeedId);
@@ -134,6 +141,25 @@ public class EngagementSeedWriter {
     // given target-picker, dedupes locally (the compound PK would reject a repeat anyway, but a
     // local Set avoids burning attempts on a guaranteed-duplicate INSERT), and stops once the
     // target row count is reached or the attempt budget is exhausted.
+    // Repeats a consumer account's id in the draw pool rather than branching inside the draw
+    // loop, so the existing uniform pick stays uniform over a pool that is itself weighted. The
+    // local dedupe in writeReactions means a repeated id costs at most one wasted attempt.
+    private List<UUID> buildWeightedUserPool(
+            SeedContent content, Map<String, UUID> usersByUsername) {
+        List<UUID> pool = new ArrayList<>();
+        for (UserSeed user : content.users()) {
+            UUID id = usersByUsername.get(user.username());
+            if (id == null) {
+                continue;
+            }
+            int weight = CONSUMER_PERSONAS.contains(user.personaId()) ? CONSUMER_LIKE_WEIGHT : 1;
+            for (int i = 0; i < weight; i++) {
+                pool.add(id);
+            }
+        }
+        return pool;
+    }
+
     private int writeReactions(
             String insertSql,
             int targetCount,
@@ -204,7 +230,8 @@ public class EngagementSeedWriter {
     private Map<UUID, Instant> fetchNonDeletedCommentCreatedAt(List<UUID> commentIds) {
         Map<UUID, Instant> createdAtById = new HashMap<>();
         jdbc.query(
-                "SELECT id, created_at FROM comments WHERE deleted_at IS NULL",
+                "SELECT id, created_at FROM comments WHERE deleted_at IS NULL"
+                        + " AND admin_removed_at IS NULL",
                 rs -> {
                     UUID id = (UUID) rs.getObject("id");
                     Instant createdAt = rs.getTimestamp("created_at").toInstant();

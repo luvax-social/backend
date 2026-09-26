@@ -31,6 +31,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
+import com.app.modules.notification.messaging.NotificationEventTypes;
 
 /**
  * Pins the banned-hashtag boundary on every post write path, and the line that boundary must not
@@ -328,7 +329,7 @@ class PostBannedHashtagIT {
         assertThat(statusOf(postId)).isEqualTo("draft");
         assertThat(associatedHashtagNames(postId)).isEmpty();
         assertThat(countOutboxEvents()).isEqualTo(1);
-        assertThat(countOutboxEvents("notification.created.v1")).isEqualTo(1);
+        assertThat(countOutboxEvents(NotificationEventTypes.NOTIFICATION_UPSERTED_V1)).isEqualTo(1);
         // Nothing was dropped because nothing was re-derived, which is not the same as a restore
         // that silently lost a tag, so the list is empty rather than naming the banned one.
         assertThat(dataOf(response).get("remainingBannedHashtags")).isEqualTo(List.of());

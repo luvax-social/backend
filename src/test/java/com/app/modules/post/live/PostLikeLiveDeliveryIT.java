@@ -39,8 +39,9 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.common.outbox.service.OutboxService;
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.auth.service.WebSocketTicketService;
-import com.app.modules.mail.service.MailSender;
+import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.post.messaging.PostEventTypes;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Confirms a post like reaches a subscribed browser-equivalent client end to end through the
@@ -78,7 +79,7 @@ class PostLikeLiveDeliveryIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @DynamicPropertySource
@@ -120,7 +121,12 @@ class PostLikeLiveDeliveryIT {
     @Autowired
     private org.springframework.transaction.support.TransactionTemplate transactionTemplate;
 
-    @MockitoBean private MailSender mailSender;
+    // Declared at the concrete type rather than at the MailSender interface, because
+    // ModerationMailEventHandler injects AbstractTemplateMailSender rather than the
+    // interface. An interface-typed override replaces the transport bean with a
+    // proxy that is not assignable to it, and the context then fails to start before any
+    // assertion runs.
+    @MockitoBean private AbstractTemplateMailSender mailSender;
 
     private WebSocketStompClient stompClient;
     private StompSession session;

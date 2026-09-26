@@ -34,6 +34,25 @@ import lombok.extern.slf4j.Slf4j;
  * a fixed-seed {@link Random}, independent of {@link SeedTimeline}'s own random stream, so
  * re-running the writer against the same seed content reproduces the same graph.
  *
+ * <p>Selection is weighted rather than uniform. Uniform sampling produced a graph with no hubs, no
+ * topical clustering and a follower count that was almost the same for every account, which is why
+ * {@code seed/README.md} used to warn that no meaning should be read into who follows whom. Four
+ * weights shape it instead:
+ *
+ * <ul>
+ *   <li><b>Homophily.</b> Each persona belongs to one or more affinity clusters. A candidate
+ *       sharing a cluster with the follower is weighted {@value #SAME_CLUSTER_WEIGHT} times the
+ *       base, an adjacent cluster {@value #ADJACENT_CLUSTER_WEIGHT} times, anything else once.
+ *   <li><b>Preferential attachment.</b> Weight scales with the target's in-degree so far, so a few
+ *       accounts accumulate genuine hub status instead of the flat distribution uniform sampling
+ *       gives.
+ *   <li><b>Reciprocity.</b> A follow inside a shared cluster is followed back about {@value
+ *       #RECIPROCITY_PERCENT}% of the time, and never by a hub, which is what keeps hubs from also
+ *       having enormous following counts.
+ *   <li><b>Consumer asymmetry.</b> The accounts that never post follow far more than average and
+ *       are followed back by nobody, which is the shape of an account that only reads.
+ * </ul>
+ *
  * <p>Three QA-account behaviours documented in {@code users.json}'s {@code qa_note} fields are
  * guaranteed by construction rather than left to chance: {@code user_new_empty} is excluded from
  * both sides of every follow assignment this writer makes, so it neither receives a follow ("zero
@@ -51,11 +70,65 @@ import lombok.extern.slf4j.Slf4j;
 public class SocialGraphSeedWriter {
 
     private static final long GRAPH_RANDOM_SEED = 8_690_251L;
-    private static final int TOTAL_FOLLOWS_TARGET = 2500;
+    private static final int TOTAL_FOLLOWS_TARGET = 5500;
     private static final int MAX_PENDING_TOWARD_PRIVATE = 40;
     private static final int TOTAL_BLOCKS_TARGET = 25;
-    private static final int MIN_FOLLOWING_PER_USER = 15;
-    private static final int MAX_FOLLOWING_PER_USER = 40;
+    private static final int MIN_FOLLOWING_PER_USER = 12;
+    private static final int MAX_FOLLOWING_PER_USER = 45;
+    private static final int MIN_FOLLOWING_PER_CONSUMER = 40;
+    private static final int MAX_FOLLOWING_PER_CONSUMER = 120;
+
+    private static final double SAME_CLUSTER_WEIGHT = 4.0;
+    private static final double ADJACENT_CLUSTER_WEIGHT = 2.0;
+    private static final double UNRELATED_WEIGHT = 1.0;
+    // A consumer publishes nothing, so following one is following an empty feed. Excluding them
+    // outright gave all 47 exactly zero followers, which is a visible artefact rather than the
+    // asymmetry this is meant to model - a real account that only reads still has a few friends.
+    private static final double CONSUMER_TARGET_WEIGHT = 0.12;
+    // Sub-linear, so popularity compounds without one account swallowing the whole graph.
+    private static final double POPULARITY_EXPONENT = 0.75;
+    private static final int RECIPROCITY_PERCENT = 35;
+    // An account past this many followers stops following people back. Without it the hubs
+    // preferential attachment creates end up with symmetric following counts, which is the flat
+    // distribution this model exists to avoid.
+    private static final int HUB_FOLLOWER_THRESHOLD = 45;
+
+    // Affinity clusters by persona. A persona in two clusters bridges them, which is what keeps
+    // the graph connected rather than splitting it into disjoint communities.
+    private static final Map<String, Set<String>> CLUSTERS_BY_PERSONA =
+            Map.ofEntries(
+                    Map.entry("p01_dev_backend", Set.of("tech")),
+                    Map.entry("p02_designer_product", Set.of("tech", "creative")),
+                    Map.entry("p03_photographer_freelance", Set.of("creative")),
+                    Map.entry("p04_student_university", Set.of("life")),
+                    Map.entry("p05_shop_owner_clothes", Set.of("commerce")),
+                    Map.entry("p06_gym_runner", Set.of("fitness")),
+                    Map.entry("p07_fnb_owner", Set.of("commerce")),
+                    Map.entry("p08_finance_office", Set.of("life")),
+                    Map.entry("p09_lurker_commenter", Set.of()),
+                    Map.entry("p10_spam_scam", Set.of()),
+                    Map.entry("p11_silent_consumer", Set.of()),
+                    Map.entry("p12_musician", Set.of("creative", "media")),
+                    Map.entry("p13_filmmaker", Set.of("creative", "media")),
+                    Map.entry("p14_streamer", Set.of("media", "tech")));
+
+    // Clusters that are not the same but whose audiences overlap.
+    private static final Set<String> ADJACENT_CLUSTER_PAIRS =
+            Set.of(
+                    "creative|tech",
+                    "creative|media",
+                    "commerce|life",
+                    "fitness|life",
+                    "media|tech");
+
+    // Personas that never post. They receive an interest cluster anyway, drawn deterministically,
+    // so that what they follow is coherent rather than arbitrary - a reader still reads about
+    // something in particular.
+    private static final Set<String> CONSUMER_PERSONAS =
+            Set.of("p09_lurker_commenter", "p11_silent_consumer");
+
+    private static final List<String> INTEREST_POOL =
+            List.of("tech", "creative", "commerce", "fitness", "life", "media");
 
     private static final String EMPTY_SOCIAL_GRAPH_USERNAME = "user_new_empty";
     private static final String GUARANTEED_PENDING_TARGET_USERNAME = "user_private";
@@ -128,10 +201,26 @@ public class SocialGraphSeedWriter {
                 followRows,
                 followPairs,
                 blockedDirectedPairs);
-        fillRandomFollows(
+        Map<String, Set<String>> clustersByUsername = assignClusters(users, random);
+        Map<String, Integer> followerCounts = new HashMap<>();
+        for (Object[] row : followRows) {
+            // The guaranteed batches above already gave user_power and user_private their
+            // inbound edges; preferential attachment must see them.
+            UUID followingId = (UUID) row[1];
+            for (Map.Entry<String, UUID> entry : usersByUsername.entrySet()) {
+                if (entry.getValue().equals(followingId)) {
+                    followerCounts.merge(entry.getKey(), 1, Integer::sum);
+                    break;
+                }
+            }
+        }
+
+        fillWeightedFollows(
                 users,
                 usersByUsername,
                 isPrivateByUsername,
+                clustersByUsername,
+                followerCounts,
                 createdAtByUserId,
                 timeline,
                 random,
@@ -283,10 +372,60 @@ public class SocialGraphSeedWriter {
         }
     }
 
-    private void fillRandomFollows(
+    private Map<String, Set<String>> assignClusters(List<UserSeed> users, Random random) {
+        Map<String, Set<String>> clusters = new HashMap<>();
+        for (UserSeed user : users) {
+            Set<String> declared = CLUSTERS_BY_PERSONA.getOrDefault(user.personaId(), Set.of());
+            if (!declared.isEmpty()) {
+                clusters.put(user.username(), declared);
+                continue;
+            }
+            if (CONSUMER_PERSONAS.contains(user.personaId())) {
+                clusters.put(
+                        user.username(),
+                        Set.of(INTEREST_POOL.get(random.nextInt(INTEREST_POOL.size()))));
+            } else {
+                // p10_spam_scam and anything else with no declared cluster follows broadly and
+                // indiscriminately, which is what the persona describes.
+                clusters.put(user.username(), Set.of());
+            }
+        }
+        return clusters;
+    }
+
+    private double affinity(Set<String> followerClusters, Set<String> candidateClusters) {
+        if (followerClusters.isEmpty() || candidateClusters.isEmpty()) {
+            return UNRELATED_WEIGHT;
+        }
+        for (String followerCluster : followerClusters) {
+            if (candidateClusters.contains(followerCluster)) {
+                return SAME_CLUSTER_WEIGHT;
+            }
+        }
+        for (String followerCluster : followerClusters) {
+            for (String candidateCluster : candidateClusters) {
+                if (ADJACENT_CLUSTER_PAIRS.contains(pairKey(followerCluster, candidateCluster))) {
+                    return ADJACENT_CLUSTER_WEIGHT;
+                }
+            }
+        }
+        return UNRELATED_WEIGHT;
+    }
+
+    private String pairKey(String a, String b) {
+        return a.compareTo(b) < 0 ? a + "|" + b : b + "|" + a;
+    }
+
+    private boolean isConsumer(UserSeed user) {
+        return CONSUMER_PERSONAS.contains(user.personaId());
+    }
+
+    private void fillWeightedFollows(
             List<UserSeed> users,
             Map<String, UUID> usersByUsername,
             Map<String, Boolean> isPrivateByUsername,
+            Map<String, Set<String>> clustersByUsername,
+            Map<String, Integer> followerCounts,
             Map<UUID, Instant> createdAtByUserId,
             SeedTimeline timeline,
             Random random,
@@ -297,6 +436,13 @@ public class SocialGraphSeedWriter {
         List<UserSeed> followerOrder = new ArrayList<>(users);
         Collections.shuffle(followerOrder, random);
 
+        Map<String, UserSeed> userByUsername = new HashMap<>();
+        for (UserSeed user : users) {
+            userByUsername.put(user.username(), user);
+        }
+
+        List<String[]> reciprocityCandidates = new ArrayList<>();
+
         for (UserSeed follower : followerOrder) {
             if (followRows.size() >= TOTAL_FOLLOWS_TARGET) {
                 break;
@@ -304,31 +450,40 @@ public class SocialGraphSeedWriter {
             if (follower.username().equals(EMPTY_SOCIAL_GRAPH_USERNAME)) {
                 continue;
             }
+            boolean consumer = isConsumer(follower);
             int targetFollowingCount =
-                    MIN_FOLLOWING_PER_USER
-                            + random.nextInt(MAX_FOLLOWING_PER_USER - MIN_FOLLOWING_PER_USER + 1);
+                    consumer
+                            ? MIN_FOLLOWING_PER_CONSUMER
+                                    + random.nextInt(
+                                            MAX_FOLLOWING_PER_CONSUMER
+                                                    - MIN_FOLLOWING_PER_CONSUMER
+                                                    + 1)
+                            : MIN_FOLLOWING_PER_USER
+                                    + random.nextInt(
+                                            MAX_FOLLOWING_PER_USER - MIN_FOLLOWING_PER_USER + 1);
 
-            List<UserSeed> candidateOrder = new ArrayList<>(users);
-            Collections.shuffle(candidateOrder, random);
+            Set<String> followerClusters =
+                    clustersByUsername.getOrDefault(follower.username(), Set.of());
 
             int addedForThisFollower = 0;
-            for (UserSeed candidate : candidateOrder) {
-                if (addedForThisFollower >= targetFollowingCount
-                        || followRows.size() >= TOTAL_FOLLOWS_TARGET) {
+            int attempts = 0;
+            int maxAttempts = targetFollowingCount * 12;
+            while (addedForThisFollower < targetFollowingCount
+                    && followRows.size() < TOTAL_FOLLOWS_TARGET
+                    && attempts < maxAttempts) {
+                attempts++;
+                UserSeed candidate =
+                        pickWeightedCandidate(
+                                users,
+                                follower,
+                                followerClusters,
+                                clustersByUsername,
+                                followerCounts,
+                                followPairs,
+                                blockedDirectedPairs,
+                                random);
+                if (candidate == null) {
                     break;
-                }
-                if (candidate.username().equals(follower.username())) {
-                    continue;
-                }
-                if (candidate.username().equals(EMPTY_SOCIAL_GRAPH_USERNAME)) {
-                    continue;
-                }
-                if (followPairs.contains(follower.username() + "->" + candidate.username())) {
-                    continue;
-                }
-                if (blockedDirectedPairs.contains(
-                        follower.username() + "->" + candidate.username())) {
-                    continue;
                 }
                 boolean candidateIsPrivate =
                         Boolean.TRUE.equals(isPrivateByUsername.get(candidate.username()));
@@ -347,9 +502,128 @@ public class SocialGraphSeedWriter {
                         followPairs);
                 if (candidateIsPrivate) {
                     pendingCount[0]++;
+                } else {
+                    followerCounts.merge(candidate.username(), 1, Integer::sum);
                 }
                 addedForThisFollower++;
+
+                // A consumer is never followed back; that asymmetry is the whole point of the
+                // persona. Reciprocity is otherwise considered only inside a shared cluster.
+                if (!consumer
+                        && "accepted".equals(status)
+                        && affinity(
+                                        followerClusters,
+                                        clustersByUsername.getOrDefault(
+                                                candidate.username(), Set.of()))
+                                == SAME_CLUSTER_WEIGHT) {
+                    reciprocityCandidates.add(
+                            new String[] {candidate.username(), follower.username()});
+                }
             }
+        }
+
+        applyReciprocity(
+                reciprocityCandidates,
+                userByUsername,
+                usersByUsername,
+                isPrivateByUsername,
+                followerCounts,
+                createdAtByUserId,
+                timeline,
+                random,
+                followRows,
+                followPairs,
+                blockedDirectedPairs);
+    }
+
+    private UserSeed pickWeightedCandidate(
+            List<UserSeed> users,
+            UserSeed follower,
+            Set<String> followerClusters,
+            Map<String, Set<String>> clustersByUsername,
+            Map<String, Integer> followerCounts,
+            Set<String> followPairs,
+            Set<String> blockedDirectedPairs,
+            Random random) {
+        double totalWeight = 0.0;
+        List<UserSeed> eligible = new ArrayList<>();
+        List<Double> weights = new ArrayList<>();
+        for (UserSeed candidate : users) {
+            if (candidate.username().equals(follower.username())
+                    || candidate.username().equals(EMPTY_SOCIAL_GRAPH_USERNAME)
+                    || followPairs.contains(follower.username() + "->" + candidate.username())
+                    || blockedDirectedPairs.contains(
+                            follower.username() + "->" + candidate.username())) {
+                continue;
+            }
+            double weight =
+                    affinity(
+                            followerClusters,
+                            clustersByUsername.getOrDefault(candidate.username(), Set.of()));
+            if (isConsumer(candidate)) {
+                weight *= CONSUMER_TARGET_WEIGHT;
+            }
+            weight *=
+                    Math.pow(
+                            1.0 + followerCounts.getOrDefault(candidate.username(), 0),
+                            POPULARITY_EXPONENT);
+            eligible.add(candidate);
+            weights.add(weight);
+            totalWeight += weight;
+        }
+        if (eligible.isEmpty() || totalWeight <= 0.0) {
+            return null;
+        }
+        double roll = random.nextDouble() * totalWeight;
+        double running = 0.0;
+        for (int i = 0; i < eligible.size(); i++) {
+            running += weights.get(i);
+            if (roll <= running) {
+                return eligible.get(i);
+            }
+        }
+        return eligible.get(eligible.size() - 1);
+    }
+
+    private void applyReciprocity(
+            List<String[]> candidates,
+            Map<String, UserSeed> userByUsername,
+            Map<String, UUID> usersByUsername,
+            Map<String, Boolean> isPrivateByUsername,
+            Map<String, Integer> followerCounts,
+            Map<UUID, Instant> createdAtByUserId,
+            SeedTimeline timeline,
+            Random random,
+            List<Object[]> followRows,
+            Set<String> followPairs,
+            Set<String> blockedDirectedPairs) {
+        for (String[] pair : candidates) {
+            String followerUsername = pair[0];
+            String targetUsername = pair[1];
+            if (random.nextInt(100) >= RECIPROCITY_PERCENT) {
+                continue;
+            }
+            if (followerCounts.getOrDefault(followerUsername, 0) >= HUB_FOLLOWER_THRESHOLD) {
+                continue;
+            }
+            if (followPairs.contains(followerUsername + "->" + targetUsername)
+                    || blockedDirectedPairs.contains(followerUsername + "->" + targetUsername)) {
+                continue;
+            }
+            UserSeed target = userByUsername.get(targetUsername);
+            if (target == null || Boolean.TRUE.equals(isPrivateByUsername.get(targetUsername))) {
+                continue;
+            }
+            addFollow(
+                    followerUsername,
+                    targetUsername,
+                    "accepted",
+                    usersByUsername,
+                    createdAtByUserId,
+                    timeline,
+                    followRows,
+                    followPairs);
+            followerCounts.merge(targetUsername, 1, Integer::sum);
         }
     }
 

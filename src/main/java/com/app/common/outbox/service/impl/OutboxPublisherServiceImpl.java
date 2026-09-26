@@ -26,8 +26,16 @@ import com.app.common.outbox.config.OutboxPublisherProperties;
 import com.app.common.outbox.entity.OutboxEvent;
 import com.app.common.outbox.exception.OutboxPublishException;
 import com.app.common.outbox.model.DomainEventEnvelopeJson;
+import com.app.common.outbox.observability.OutboxMetrics;
 import com.app.common.outbox.service.OutboxPublisherService;
 import com.app.common.outbox.service.OutboxPublisherStateService;
+
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.opentelemetry.context.Scope;
 
 @Service
 @ConditionalOnProperty(
@@ -43,14 +51,26 @@ public class OutboxPublisherServiceImpl implements OutboxPublisherService {
     private final OutboxPublisherStateService outboxPublisherStateService;
     private final RabbitTemplate rabbitTemplate;
     private final OutboxPublisherProperties properties;
+    private final ObservationRegistry observationRegistry;
+    private final Tracer tracer;
+    private final OutboxTraceRelay outboxTraceRelay;
+    private final OutboxMetrics outboxMetrics;
 
     public OutboxPublisherServiceImpl(
             OutboxPublisherStateService outboxPublisherStateService,
             RabbitTemplate rabbitTemplate,
-            OutboxPublisherProperties properties) {
+            OutboxPublisherProperties properties,
+            ObservationRegistry observationRegistry,
+            Tracer tracer,
+            OutboxTraceRelay outboxTraceRelay,
+            OutboxMetrics outboxMetrics) {
         this.outboxPublisherStateService = outboxPublisherStateService;
         this.rabbitTemplate = rabbitTemplate;
         this.properties = properties;
+        this.observationRegistry = observationRegistry;
+        this.tracer = tracer;
+        this.outboxTraceRelay = outboxTraceRelay;
+        this.outboxMetrics = outboxMetrics;
     }
 
     @Override
@@ -61,36 +81,64 @@ public class OutboxPublisherServiceImpl implements OutboxPublisherService {
         OffsetDateTime now = now();
         List<OutboxEvent> events =
                 outboxPublisherStateService.claimPublishableBatch(now, resolvedBatchSize());
-        events.forEach(this::publishOne);
+        if (events.isEmpty()) {
+            return 0;
+        }
+        // A poll that claims nothing opens no trace; one that claims rows becomes one root trace.
+        Observation.createNotStarted("outbox.publish.batch", observationRegistry)
+                .contextualName("outbox publish batch")
+                .highCardinalityKeyValue("outbox.batch.size", String.valueOf(events.size()))
+                .observe(() -> events.forEach(this::publishOne));
         return events.size();
     }
 
     private void publishOne(OutboxEvent event) {
-        try {
-            publishToRabbit(event);
-        } catch (RuntimeException ex) {
-            // Every async domain event in the system flows through this publisher; without this
-            // log, a publish failure is only ever visible as a truncated string in the DB.
-            log.error("Outbox publish failed for event {}", event.getEventId(), ex);
-            recordFailure(event, ex);
-            return;
-        }
-        boolean marked = outboxPublisherStateService.markPublished(event, now());
-        if (!marked) {
-            log.warn(
-                    "Skipped marking outbox event {} as PUBLISHED because claim {} is no longer active",
-                    event.getEventId(),
-                    event.getClaimId());
+        Span.Builder builder =
+                tracer.spanBuilder()
+                        .name("outbox relay " + event.getEventType())
+                        .tag("messaging.message.id", event.getEventId().toString())
+                        .tag("outbox.event.type", event.getEventType())
+                        .tag("outbox.routing.key", event.getRoutingKey())
+                        .tag("outbox.attempt", String.valueOf(event.getAttemptCount() + 1));
+        outboxTraceRelay.originLink(event).ifPresent(builder::addLink);
+        Span relay = builder.start();
+        Timer.Sample sample = outboxMetrics.startPublish();
+        try (Tracer.SpanInScope ignored = tracer.withSpan(relay)) {
+            try {
+                publishToRabbit(event);
+            } catch (RuntimeException ex) {
+                // Every async domain event in the system flows through this publisher; without
+                // this log, a publish failure is only ever visible as a truncated string in the
+                // DB.
+                log.error("Outbox publish failed for event {}", event.getEventId(), ex);
+                relay.error(ex);
+                outboxMetrics.stopPublish(sample, recordFailure(event, ex));
+                return;
+            }
+            boolean marked = outboxPublisherStateService.markPublished(event, now());
+            if (!marked) {
+                log.warn(
+                        "Skipped marking outbox event {} as PUBLISHED because claim {} is no"
+                                + " longer active",
+                        event.getEventId(),
+                        event.getClaimId());
+            }
+            outboxMetrics.stopPublish(sample, OutboxMetrics.Outcome.PUBLISHED);
+            outboxMetrics.recordLag(event.getCreatedAt(), now());
+        } finally {
+            relay.end();
         }
     }
 
     private void publishToRabbit(OutboxEvent event) {
         CorrelationData correlationData = new CorrelationData(event.getEventId().toString());
-        rabbitTemplate.send(
-                RabbitMqTopologyConfig.SOCIAL_EVENTS_EXCHANGE,
-                event.getRoutingKey(),
-                buildMessage(event),
-                correlationData);
+        try (Scope ignored = outboxTraceRelay.makeOriginCurrent(event)) {
+            rabbitTemplate.send(
+                    RabbitMqTopologyConfig.SOCIAL_EVENTS_EXCHANGE,
+                    event.getRoutingKey(),
+                    buildMessage(event),
+                    correlationData);
+        }
 
         CorrelationData.Confirm confirm = waitForConfirm(correlationData, event.getEventId());
         if (!confirm.ack()) {
@@ -135,7 +183,7 @@ public class OutboxPublisherServiceImpl implements OutboxPublisherService {
         }
     }
 
-    private void recordFailure(OutboxEvent event, RuntimeException ex) {
+    private OutboxMetrics.Outcome recordFailure(OutboxEvent event, RuntimeException ex) {
         int nextAttempt = event.getAttemptCount() + 1;
         String lastError = truncate(ex.getMessage());
         OffsetDateTime failedAt = now();
@@ -148,7 +196,7 @@ public class OutboxPublisherServiceImpl implements OutboxPublisherService {
                         event.getEventId(),
                         event.getClaimId());
             }
-            return;
+            return OutboxMetrics.Outcome.DEAD;
         }
         OffsetDateTime nextRetryAt = failedAt.plus(properties.retryBackoffForAttempt(nextAttempt));
         boolean marked =
@@ -159,6 +207,7 @@ public class OutboxPublisherServiceImpl implements OutboxPublisherService {
                     event.getEventId(),
                     event.getClaimId());
         }
+        return OutboxMetrics.Outcome.RETRY_SCHEDULED;
     }
 
     private String truncate(String message) {

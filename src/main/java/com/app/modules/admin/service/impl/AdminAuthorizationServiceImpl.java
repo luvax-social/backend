@@ -11,9 +11,35 @@ import com.app.common.exception.AppException;
 import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.users.entity.User;
 import com.app.modules.users.enums.UserRole;
+import com.app.modules.users.repository.UserRepository;
 
 @Service
 public class AdminAuthorizationServiceImpl implements AdminAuthorizationService {
+
+    private final UserRepository userRepository;
+
+    public AdminAuthorizationServiceImpl(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    @Override
+    public Outcome evaluateAdministratorAction(UserRole actorRole) {
+        return actorRole == UserRole.ADMIN ? Outcome.ALLOWED : Outcome.ACTOR_NOT_ADMIN;
+    }
+
+    @Override
+    public void assertActorIsAdministrator(UUID actorId) {
+        // A soft-deleted account resolves to no role at all and is refused with the same code as a
+        // moderator, so the endpoint cannot distinguish a demoted account from a deleted one.
+        UserRole actorRole =
+                userRepository
+                        .findByIdAndDeletedAtIsNull(actorId)
+                        .map(User::getRole)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.FORBIDDEN));
+        if (evaluateAdministratorAction(actorRole) != Outcome.ALLOWED) {
+            throw new AppException(ApiErrorCode.FORBIDDEN);
+        }
+    }
 
     @Override
     public Outcome evaluateStatusChange(
@@ -47,6 +73,32 @@ public class AdminAuthorizationServiceImpl implements AdminAuthorizationService 
     @Override
     public void assertMayChangeUserStatus(UUID actorId, UserRole actorRole, User target) {
         switch (evaluateActorAndTarget(actorId, actorRole, target.getId(), target.getRole())) {
+            case ALLOWED -> {}
+            case ACTOR_NOT_ADMIN -> throw new AppException(ApiErrorCode.FORBIDDEN);
+            case SELF_TARGET -> throw new AppException(ApiErrorCode.ADMIN_SELF_ACTION_NOT_ALLOWED);
+            default -> throw new AppException(ApiErrorCode.ADMIN_TARGET_PROTECTED);
+        }
+    }
+
+    @Override
+    public Outcome evaluateVerificationDecision(
+            UUID actorId, UserRole actorRole, UUID targetId, UserRole targetRole) {
+        if (actorRole != UserRole.MODERATOR && actorRole != UserRole.ADMIN) {
+            return Outcome.ACTOR_NOT_ADMIN;
+        }
+        if (actorId.equals(targetId)) {
+            return Outcome.SELF_TARGET;
+        }
+        if (targetRole == UserRole.ADMIN) {
+            return Outcome.TARGET_IS_ADMIN;
+        }
+        return Outcome.ALLOWED;
+    }
+
+    @Override
+    public void assertMayDecideVerification(UUID actorId, UserRole actorRole, User target) {
+        switch (evaluateVerificationDecision(
+                actorId, actorRole, target.getId(), target.getRole())) {
             case ALLOWED -> {}
             case ACTOR_NOT_ADMIN -> throw new AppException(ApiErrorCode.FORBIDDEN);
             case SELF_TARGET -> throw new AppException(ApiErrorCode.ADMIN_SELF_ACTION_NOT_ALLOWED);

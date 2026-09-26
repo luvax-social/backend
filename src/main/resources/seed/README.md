@@ -1,10 +1,10 @@
 # Development Database Seed
 
 A seed run populates a local PostgreSQL instance with a full, internally consistent social-network
-dataset - 90 users, 722 posts, a follow graph, comment threads, stories, direct messages, a
-moderation history with a working discipline ladder, notifications, and 12 months of analytics -
-so a developer or QA reviewer can exercise every surface of the application, including the admin
-panel, against realistic data instead of an empty database.
+dataset - 140 users, 746 posts, a weighted follow graph, comment threads, stories, direct messages,
+a moderation history with a working discipline ladder, verification badges, notifications, and 12
+months of analytics - so a developer or QA reviewer can exercise every surface of the application,
+including the admin panel, against realistic data instead of an empty database.
 By default it refuses to run against anything but a local database, and every seed component is
 gated to the `dev` profile.
 It also runs under the `prod` profile when `seed` is explicitly active alongside it
@@ -16,17 +16,20 @@ before reseeding.
 
 | Content | Volume |
 |---------|--------|
-| Users | 90 (8 fixed QA accounts, 82 generated) |
-| Posts | 722 (image/video/carousel/text) |
-| Hashtags | 152 |
-| Media assets (Pexels-sourced, R2-hosted) | 165 (125 images, 15 videos, 25 banners) |
-| Avatars (randomuser.me, externally hosted) | 90, one per user, never uploaded to R2 |
-| Comment pool entries | 900 across 22 topic pools |
+| Users | 140 (8 fixed QA accounts, 132 generated) |
+| Posts | 746 (410 image, 147 text, 114 carousel, 75 video) |
+| Hashtags | 164 |
+| Media assets (Pexels-sourced, R2-hosted) | 631 (536 images, 70 videos, 25 banners) |
+| Avatars (randomuser.me, externally hosted) | 140, one per user, never uploaded to R2 |
+| Comment pool entries | 1,020 across 25 topic pools |
 | Conversations / messages | 85 conversations, ~1,600 messages |
 | Moderation cases (full narrative) | 6 |
 | Reports | ~180 (narrative + standalone) |
 | Warnings / strikes | 27 / 14 |
-| Personas | 10 |
+| Support tickets / verification requests | 70 / 16 |
+| Verification badges granted / still active | 18 / 13 |
+| Follow edges | ~5,500 |
+| Personas | 14 |
 
 ## Running the seed
 
@@ -157,6 +160,62 @@ message's `media_ref` is resolved the same way a post's media is: `MediaSeedWrit
 `media_assets` row owned by the message's sender for the referenced manifest entry, reusing entries
 already in `media_manifest.json` rather than provisioning anything new.
 
+## Support tickets
+
+`SupportSeedWriter` seeds 70 `support_tickets` (every `support_category` value, 6-10 tickets each)
+plus 10 `verification_requests` from `support/support_ticket_pools.json`'s pooled request, response
+and escalation prose.
+There is no message thread to seed: the schema carries exactly one `staff_response` and one
+`internal_note` per ticket, never a conversation, so every ticket is written once in its final
+resolved shape.
+Every decision is attributed to one of the two fixed QA staff accounts: `appeal_*` tickets are
+always decided by `admin` (a moderator may claim or escalate one but never decide it), every other
+category is decided by `mod1` unless it went through an escalate-to-admin path, in which case
+`admin` makes the final call.
+`appeal_*` tickets link `admin_action_id` back to a real punitive `admin_actions` row
+`ModerationSeedWriter` already wrote against the target account (for example a `ban_user` row for an
+`appeal_ban` ticket), matching how a real signed-link appeal binds to the audit row it contests.
+Every decision - `respond_support_ticket`, `reject_support_ticket`, `escalate_support_ticket` - also
+writes a matching `admin_actions` row, mirroring `AdminActionRecorder`'s production shape, which is
+what keeps `SeedRunner.assertEnumCoverage()`'s floor for those three action types satisfied. No
+outbox event is ever enqueued for this data.
+
+## Verification badges
+
+`verification/badges.json` declares every badge, and `VerificationSeedWriter` writes them after
+`SupportSeedWriter` and `ModerationSeedWriter`, because a granted badge points at the request that
+produced it and at the audit row that recorded the decision.
+
+Eighteen grants land on eighteen distinct accounts and five are later withdrawn, leaving **13
+verified accounts out of 140**. Every one of the eight `verification_categories` keeps at least one
+active badge, so the admin panel's category filter has something to show for each.
+
+| Lane | Count | Shape |
+|---|---|---|
+| Granted through a request | 6 | `request_ticket_id` points at an `answered` verification ticket; decided by `mod1` |
+| Granted before the request flow existed | 12 | `request_ticket_id` is null, granted by `admin`. Nothing else in the seed exercises that nullable path |
+| Refused | 5 | A `reject_verification` audit row and no badge |
+| Withdrawn by a moderator | 3 | `revocation_actor = 'moderator'`, `revoked_by` names them |
+| Withdrawn by a status change | 2 | `revocation_actor = 'system'`, `revoked_by` null, and the audit row's `admin_id` is null too |
+
+Three rules from `docs/modules/support/DATA_RULES.md` section 9 shape the data rather than decorate
+it, and the writer asserts the first of them at the end of its run:
+
+- A suspended or banned account may not hold an active badge, because
+  `VerificationService.applyStatusChange` withdraws one. The two `system` revocations are therefore
+  not an arbitrary count: they are the badge holders the moderation narrative later disciplines.
+- A **deactivated** account keeps its badge. One grant sits on a deactivated account precisely to
+  cover that, since it is the one status where an inactive account legitimately stays verified.
+- `users.is_verified` and `users.verified_category` are never written by this writer.
+  `trg_user_verification_sync` derives both from the rows it inserts.
+
+The sixteen verification tickets name their subject in `badges.json` rather than drawing one at
+random. Before this, a claim about an illustration studio could land on a gym account, and an
+approved ticket left no badge behind it because nothing downstream knew which account had been
+approved. Five tickets are still undecided, on five distinct accounts, because V107's
+`uq_support_tickets_one_open_verification_per_user` admits one open verification request per
+account.
+
 ## File map
 
 Files used across nearly every writer stay at the top level; everything else is grouped by what it
@@ -171,7 +230,9 @@ describes.
 | `content/comment_pools.json` | 900 pooled comment lines across 22 topics, plus scripted comment chains | `CommentSeedWriter` |
 | `messaging/conversations.json` | 85 conversations and their message history (60 between generated accounts, 25 involving `admin`) | `MessageSeedWriter` |
 | `moderation/moderation_cases.json` | 6 narrative moderation cases plus supplementary actions and reports | `ModerationSeedWriter` |
-| `media/media_manifest.json` | 165 Pexels-sourced media entries already uploaded to R2 (avatars are not in this file - see "Avatars" below) | `MediaSeedWriter`, `UserSeedWriter` (banner `cdn_url` lookup) |
+| `media/media_manifest.json` | 631 Pexels-sourced media entries already uploaded to R2 (avatars are not in this file - see "Avatars" below) | `MediaSeedWriter`, `UserSeedWriter` (banner `cdn_url` lookup) |
+| `support/support_ticket_pools.json` | Pooled support-ticket request, response and escalation prose | `SupportSeedWriter` |
+| `verification/badges.json` | 16 verification requests bound to named accounts, 12 legacy grants and 5 revocations | `SupportSeedWriter` (the request lane), `VerificationSeedWriter` |
 
 ## Java package map
 
@@ -179,10 +240,10 @@ describes.
 |---------|-------|
 | `com.app.common.seed` | `SeedRunner` (orchestration entry point) and `SeedProperties` |
 | `com.app.common.seed.loader` | `SeedDataLoader` (reads and validates all seed JSON) and `SeedContent` (the loaded, typed result) |
-| `com.app.common.seed.model` | The 14 content record types the JSON files deserialize into |
+| `com.app.common.seed.model` | The 20 content record types the JSON files deserialize into |
 | `com.app.common.seed.time` | `SeedTimeline`, the deterministic timestamp generator |
 | `com.app.common.seed.reset` | `SeedResetService`, the pre-run table truncation |
-| `com.app.common.seed.writer` | The 11 domain writers, one per subsystem |
+| `com.app.common.seed.writer` | The 13 domain writers, one per subsystem |
 | `com.app.common.seed.outbox` | `SeedOutboxEmitter` / `SeedOutboxBatchWriter`, which replay seeded activity through the real transactional outbox |
 
 ## Avatars
@@ -193,9 +254,11 @@ This is an external runtime dependency: the app never uploads or proxies these i
 seeded avatar is only reachable while randomuser.me itself is reachable. It was chosen because it
 is the only option found that is simultaneously photographic (not illustrated, per an earlier
 product decision), free with no API key or rate limit, and large enough (200 distinct images) to
-give all 90 users a distinct face. Assignment is positional - alternating `men`/`women` by the
+give all 140 users a distinct face. Assignment is positional - alternating `men`/`women` by the
 user's index in `users.json`'s array, sequential portrait index per gender bucket - so it is
 stable across seed runs as long as that array's order does not change, and no two users collide.
+At 140 accounts the highest portrait number in use is 70, so there is headroom for another 60
+accounts before the pool runs out.
 `UserSeedWriter` writes this value straight to `users.avatar_url`; it never touches R2 or
 `media_assets`. Banners are unaffected and still come from R2 via `banner_media_ref`, resolved
 against `media_manifest.json`'s `cdn_url` the same way as before.
@@ -204,17 +267,48 @@ against `media_manifest.json`'s `cdn_url` the same way as before.
 
 Seed media (banners and post images/video) is sourced from Pexels and provisioned to the
 configured object storage bucket ahead of a seed run - the seed writers reference already-uploaded
-assets rather than uploading at seed time. To (re-)provision it:
+assets rather than uploading at seed time.
+
+**Do not run the bare `provision` mode against the checked-in manifest.** It renumbers from
+`pexels_img_001` on every run, so it would rewrite every manifest id and invalidate every
+`media_refs` entry in `content/posts.json`. Use `--append`, which continues the numbering and
+leaves every existing entry untouched:
 
 ```
-python scripts/provision-seed-media.py
+export PEXELS_API_KEY=...                      # the script reads os.environ; it does not load .env
+python scripts/provision-seed-media.py --append --images 350 --videos 35
 ```
 
-Add `--verify` to check the manifest against what is actually in storage without re-uploading
-anything. Assets already uploaded are skipped, not re-downloaded, so re-running the script after an
-interrupted run is safe. Requires `PEXELS_API_KEY` to be set.
-The script refuses to run against any R2 bucket other than the configured dev bucket name, and
-writes its manifest to `src/main/resources/seed/media/media_manifest.json`.
+`--image-topic TOPIC=N` and `--video-topic TOPIC=N` append to one topic instead of spreading
+evenly, which is how the uneven topics were brought under the reuse cap - demand per topic ranges
+from 10 slots to 89, so an even spread leaves some topics starved and others idle.
+
+`--verify` checks every manifest entry against what is actually in storage and uploads nothing.
+Assets already uploaded are skipped rather than re-downloaded, and `--append` rewrites the manifest
+after every topic, so a run interrupted partway keeps what it uploaded and a re-run resumes.
+The script refuses to run against any R2 bucket other than the configured dev bucket name.
+
+## Rebalancing media references
+
+`scripts/remap-seed-media-refs.py` reassigns every `media_refs` entry in `content/posts.json`
+across the manifest. Provisioning more assets does nothing on its own, because the existing refs
+keep pointing where they always did.
+
+```
+python scripts/remap-seed-media-refs.py --check    # report only
+python scripts/remap-seed-media-refs.py            # rewrite posts.json
+```
+
+It is deterministic and idempotent, keeps each post's arity, gives a video post a video and
+everything else an image, never uses a banner as post media, and holds every asset to at most three
+uses. Run it after any `--append`.
+
+| | Before | After |
+|---|---|---|
+| Distinct assets referenced | 183 | 530 |
+| Mean uses per asset | 5.52 | 1.91 |
+| Maximum uses of one asset | 16 | 3 |
+| Refs drawn from a topic other than the post's own | - | 0 |
 
 ## Determinism
 

@@ -58,6 +58,16 @@ public class UserSettings {
     @Builder.Default
     private boolean allowStoryReplies = true;
 
+    /**
+     * False when the account has asked not to be offered in other people's suggestions.
+     *
+     * <p>Applied at read time as well as in the precompute job, because a twelve-hour cycle would
+     * otherwise keep offering an account that opted out this morning until tonight.
+     */
+    @Column(name = "suggestible", nullable = false)
+    @Builder.Default
+    private boolean suggestible = true;
+
     @Column(name = "allow_message_requests", nullable = false)
     @Builder.Default
     private boolean allowMessageRequests = true;

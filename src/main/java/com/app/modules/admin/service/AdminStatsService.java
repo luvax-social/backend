@@ -2,6 +2,7 @@ package com.app.modules.admin.service;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 import com.app.modules.admin.dto.response.AdminStatsCurrentResponse;
 import com.app.modules.admin.dto.response.AdminStatsTimeseriesResponse;
@@ -29,7 +30,7 @@ public interface AdminStatsService {
      * @return the newest snapshot, with null timestamps and empty breakdowns when nothing has been
      *     collected yet
      */
-    AdminStatsCurrentResponse getCurrent();
+    AdminStatsCurrentResponse getCurrent(UUID actorId);
 
     /**
      * Returns one metric's stored series over a window.
@@ -57,6 +58,7 @@ public interface AdminStatsService {
      *     the request is dispatched.
      */
     AdminStatsTimeseriesResponse getTimeseries(
+            UUID actorId,
             PlatformMetric metric,
             StatGranularity granularity,
             OffsetDateTime from,

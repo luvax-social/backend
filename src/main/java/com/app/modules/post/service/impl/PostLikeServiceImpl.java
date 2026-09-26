@@ -131,6 +131,16 @@ public class PostLikeServiceImpl implements PostLikeService {
         if (deleted == 0) {
             throw new AppException(ApiErrorCode.POST_NOT_FOUND);
         }
+        outboxService.enqueue(
+                PostEventTypes.POST_UNLIKED_V1,
+                PostEventTypes.POST_UNLIKED_V1,
+                AGGREGATE_TYPE,
+                postId,
+                userId,
+                Map.of(
+                        "postId", postId.toString(),
+                        "postOwnerId", post.getUserId().toString(),
+                        "userId", userId.toString()));
         enqueueLiveEvent(PostEventTypes.POST_LIVE_UNLIKED_V1, post, userId);
         return new LikeActionResponse(postId, false, postRepository.findLikeCount(postId));
     }

@@ -20,4 +20,7 @@ public interface UserSearchProjection {
     String getAvatarUrl();
 
     boolean getIsVerified();
+
+    /** Null exactly when {@link #getIsVerified()} is false. */
+    String getVerifiedCategory();
 }

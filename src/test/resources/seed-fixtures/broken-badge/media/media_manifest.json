@@ -1,0 +1,39 @@
+{
+  "images": [
+    {
+      "id": "img_001",
+      "kind": "image",
+      "role": "post",
+      "topic_tags": ["software-engineering"],
+      "pexels_id": 1,
+      "pexels_url": "https://example.test/1",
+      "photographer": "Test",
+      "license": "Test License",
+      "width": 100,
+      "height": 100,
+      "mime_type": "image/jpeg",
+      "file_size_bytes": 1000,
+      "storage_key": "seed/library/img_001.jpg",
+      "cdn_url": "https://cdn.test/img_001.jpg"
+    },
+    {
+      "id": "img_002",
+      "kind": "image",
+      "role": "avatar",
+      "topic_tags": ["portrait"],
+      "pexels_id": 2,
+      "pexels_url": "https://example.test/2",
+      "photographer": "Test",
+      "license": "Test License",
+      "width": 100,
+      "height": 100,
+      "mime_type": "image/jpeg",
+      "file_size_bytes": 1000,
+      "storage_key": "seed/library/img_002.jpg",
+      "cdn_url": "https://cdn.test/img_002.jpg"
+    }
+  ],
+  "videos": [],
+  "avatars": [],
+  "banners": []
+}

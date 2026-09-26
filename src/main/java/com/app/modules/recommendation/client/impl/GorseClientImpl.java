@@ -75,6 +75,21 @@ public class GorseClientImpl implements GorseClient {
     }
 
     @Override
+    public List<GorseScore> userNeighbors(UUID userId, int n) {
+        List<GorseScore> body =
+                gorseRestClient
+                        .get()
+                        .uri(
+                                uri ->
+                                        uri.path("/api/user/{userId}/neighbors")
+                                                .queryParam("n", n)
+                                                .build(userId))
+                        .retrieve()
+                        .body(SCORE_LIST);
+        return body == null ? List.of() : body;
+    }
+
+    @Override
     public void upsertUsers(List<GorseUser> users) {
         gorseRestClient.post().uri("/api/users").body(users).retrieve().toBodilessEntity();
     }

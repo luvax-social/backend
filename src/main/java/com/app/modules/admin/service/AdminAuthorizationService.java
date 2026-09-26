@@ -53,6 +53,38 @@ public interface AdminAuthorizationService {
             boolean canChangeStatus, boolean canChangeRole, List<UserRole> assignableRoles) {}
 
     /**
+     * Classifies an action that requires the administrator role and names no target account.
+     *
+     * <p>The reports, hashtag registry, statistics and activity-log surfaces act on the platform
+     * rather than on one account, so the shared actor-and-target rules do not apply to them. Only
+     * the first of those rules does: the actor must be an administrator.
+     *
+     * @param actorRole the actor's role as read from the source of truth, never from a token claim
+     * @return {@link Outcome#ALLOWED} for an administrator, {@link Outcome#ACTOR_NOT_ADMIN}
+     *     otherwise
+     */
+    Outcome evaluateAdministratorAction(UserRole actorRole);
+
+    /**
+     * Asserts that the actor holds the administrator role, resolving that role from the source of
+     * truth.
+     *
+     * <p>This is the second gate behind the {@code @PreAuthorize} annotations on the administrator
+     * surface. Those annotations are the only gate the eleven administrator-only endpoints had, and
+     * the {@code SecurityConfig} matcher covering their paths is the broad {@code /api/v1/admin/**}
+     * rule, which admits a moderator. Deleting or mistyping one annotation therefore opened the
+     * endpoint with nothing else to catch it.
+     *
+     * <p>The role lookup lives here rather than at each call site because the same four-line read
+     * was already repeated across this module, and a rule that is copied is a rule that drifts.
+     *
+     * @param actorId the account performing the action
+     * @throws AppException {@code FORBIDDEN} when the actor is not an administrator, or when no
+     *     live account exists for {@code actorId}
+     */
+    void assertActorIsAdministrator(UUID actorId);
+
+    /**
      * Classifies a requested status change without throwing.
      *
      * @param actorId the account performing the action
@@ -89,6 +121,39 @@ public interface AdminAuthorizationService {
      *     ADMIN_TARGET_PROTECTED} when the target is an administrator
      */
     void assertMayChangeUserStatus(UUID actorId, UserRole actorRole, User target);
+
+    /**
+     * Classifies a verification decision without throwing.
+     *
+     * <p>The same actor-and-target skeleton the status rules use, with one difference: a moderator
+     * is admitted alongside an administrator. Verification is a discretionary grant rather than an
+     * enforcement action, so the narrowing that keeps unban and unsuspend administrator-only does
+     * not apply to it; a moderator granting a badge is not recording a verdict they cannot execute.
+     *
+     * <p>The other two guards do apply and are the reason this routes here rather than checking a
+     * role inline. Granting yourself a badge and revoking an administrator's are exactly the abuses
+     * {@code SELF_TARGET} and {@code TARGET_IS_ADMIN} exist to stop.
+     *
+     * @param actorId the staff member deciding
+     * @param actorRole the actor's role as read from the source of truth, never from a token claim
+     * @param targetId the account whose badge would change
+     * @param targetRole the target's current role
+     * @return the outcome; {@link Outcome#ALLOWED} when the actor may decide
+     */
+    Outcome evaluateVerificationDecision(
+            UUID actorId, UserRole actorRole, UUID targetId, UserRole targetRole);
+
+    /**
+     * Asserts that the actor may grant, reject or revoke verification for the target account.
+     *
+     * @param actorId the staff member deciding
+     * @param actorRole the role resolved for {@code actorId} from the source of truth
+     * @param target the target account, already loaded inside the caller's transaction
+     * @throws AppException {@code FORBIDDEN} when the actor is neither moderator nor administrator,
+     *     {@code ADMIN_SELF_ACTION_NOT_ALLOWED} when actor and target are the same account, and
+     *     {@code ADMIN_TARGET_PROTECTED} when the target is an administrator
+     */
+    void assertMayDecideVerification(UUID actorId, UserRole actorRole, User target);
 
     /**
      * Classifies a requested role transition without throwing.

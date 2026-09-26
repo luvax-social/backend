@@ -33,7 +33,11 @@ import com.app.common.seed.writer.NotificationSeedWriter;
 import com.app.common.seed.writer.PostSeedWriter;
 import com.app.common.seed.writer.SocialGraphSeedWriter;
 import com.app.common.seed.writer.StorySeedWriter;
+import com.app.common.seed.writer.SupportSeedWriter;
 import com.app.common.seed.writer.UserSeedWriter;
+import com.app.common.seed.writer.VerificationSeedWriter;
+import com.app.modules.comment.consumer.CommentNotificationConsumer;
+import com.app.modules.post.consumer.PostNotificationConsumer;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,7 +62,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class SeedRunner {
 
-    // The 16 enum-typed columns the plan names as the mandatory coverage set, paired with the
+    // The 17 enum-typed columns the plan names as the mandatory coverage set, paired with the
     // table each lives on. Every value of every one of these enums must appear on at least
     // MIN_ROWS_PER_ENUM_VALUE rows once a full seed run completes.
     private static final List<EnumColumn> ENUM_COLUMNS =
@@ -76,6 +80,7 @@ public class SeedRunner {
                     new EnumColumn("reports", "status", "report_status"),
                     new EnumColumn("reports", "report_reason", "report_reason"),
                     new EnumColumn("notifications", "type", "notification_type"),
+                    new EnumColumn("notifications", "category", "notification_category"),
                     new EnumColumn("admin_actions", "action_type", "admin_action_type"),
                     new EnumColumn("user_events", "event_type", "event_type"),
                     new EnumColumn("platform_stats", "granularity", "stat_granularity"));
@@ -89,6 +94,21 @@ public class SeedRunner {
     private static final Map<String, Set<String>> ASYNC_ENUM_VALUES =
             Map.of("user_events.event_type", Set.of("post_view"));
 
+    // Values the schema keeps but nothing writes any more. notification_type 'message' and its
+    // notification_category 'message' stay in their enums so historical rows remain readable,
+    // but direct messages left the activity feed and no producer writes either.
+    private static final Map<String, Set<String>> RETIRED_ENUM_VALUES =
+            Map.of(
+                    "notifications.type", Set.of("message"),
+                    "notifications.category", Set.of("message"));
+
+    // Each replayed event whose notification NotificationSeedWriter already wrote, and the
+    // consumer that would otherwise write it a second time when the replay drains.
+    private static final Map<String, String> REPLAYED_NOTIFICATION_EVENTS =
+            Map.of(
+                    "post.liked.v1", PostNotificationConsumer.CONSUMER_NAME,
+                    "comment.created.v1", CommentNotificationConsumer.CONSUMER_NAME);
+
     private final JdbcTemplate jdbc;
     private final SeedResetService resetService;
     private final UserSeedWriter userSeedWriter;
@@ -101,6 +121,8 @@ public class SeedRunner {
     private final MessageSeedWriter messageSeedWriter;
     private final NotificationSeedWriter notificationSeedWriter;
     private final ModerationSeedWriter moderationSeedWriter;
+    private final SupportSeedWriter supportSeedWriter;
+    private final VerificationSeedWriter verificationSeedWriter;
     private final AnalyticsSeedWriter analyticsSeedWriter;
     private final SeedOutboxEmitter seedOutboxEmitter;
     private final SeedProperties seedProperties;
@@ -208,6 +230,7 @@ public class SeedRunner {
             log.info("[seed] phase=outbox-emission complete: total={}", counts.total());
 
             assertEnumCoverage();
+            assertReplayCannotNotify();
             logRowCountSummary();
 
             log.info(
@@ -245,13 +268,18 @@ public class SeedRunner {
         // Must run before NotificationSeedWriter: warning notifications are read back from
         // user_warnings, which this call is what populates.
         moderationSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
+        // Returns the verification ticket ids, because a badge granted through the request flow
+        // anchors to the ticket that produced it.
+        Map<String, UUID> verificationTicketIds =
+                supportSeedWriter.write(content, usersByUsername, timeline);
+        verificationSeedWriter.write(content, usersByUsername, verificationTicketIds, timeline);
         notificationSeedWriter.write(timeline);
         analyticsSeedWriter.write(timeline);
         return new WriterChainResult(usersByUsername, postIdBySeedId);
     }
 
     /**
-     * Queries every one of the 16 mandatory enum-typed columns and asserts every distinct value
+     * Queries every one of the 17 mandatory enum-typed columns and asserts every distinct value
      * present in the column's PostgreSQL enum type has at least {@link #MIN_ROWS_PER_ENUM_VALUE}
      * rows.
      *
@@ -265,11 +293,12 @@ public class SeedRunner {
         for (EnumColumn column : ENUM_COLUMNS) {
             Map<String, Integer> declaredValues = fetchEnumValues(column.enumTypeName());
             Map<String, Integer> actualCounts = fetchColumnCounts(column);
-            Set<String> asyncValues =
-                    ASYNC_ENUM_VALUES.getOrDefault(
-                            column.table() + "." + column.column(), Set.of());
+            String qualified = column.table() + "." + column.column();
+            Set<String> skippedValues = new java.util.HashSet<>();
+            skippedValues.addAll(ASYNC_ENUM_VALUES.getOrDefault(qualified, Set.of()));
+            skippedValues.addAll(RETIRED_ENUM_VALUES.getOrDefault(qualified, Set.of()));
             for (String value : declaredValues.keySet()) {
-                if (asyncValues.contains(value)) {
+                if (skippedValues.contains(value)) {
                     continue;
                 }
                 int count = actualCounts.getOrDefault(value, 0);
@@ -295,6 +324,36 @@ public class SeedRunner {
                             + String.join("; ", shortfalls));
         }
         log.info("[seed] enum coverage assertion passed for all {} columns", ENUM_COLUMNS.size());
+    }
+
+    /**
+     * Asserts that no replayed seed event can reach a notification consumer as new work, so
+     * draining the replay after the run cannot duplicate the notifications {@code
+     * NotificationSeedWriter} wrote.
+     *
+     * @throws IllegalStateException naming each event type with replayed events the consumer's
+     *     inbox does not already hold
+     */
+    void assertReplayCannotNotify() {
+        List<String> unguarded = new ArrayList<>();
+        for (Map.Entry<String, String> entry : REPLAYED_NOTIFICATION_EVENTS.entrySet()) {
+            Integer count =
+                    jdbc.queryForObject(
+                            "SELECT count(*) FROM outbox_events o WHERE o.event_type = ?"
+                                    + " AND NOT EXISTS (SELECT 1 FROM processed_messages pm"
+                                    + " WHERE pm.consumer_name = ? AND pm.event_id = o.event_id)",
+                            Integer.class,
+                            entry.getKey(),
+                            entry.getValue());
+            if (count != null && count > 0) {
+                unguarded.add(entry.getKey() + " (" + count + " event(s))");
+            }
+        }
+        if (!unguarded.isEmpty()) {
+            throw new IllegalStateException(
+                    "Seed replay would notify again: " + String.join("; ", unguarded));
+        }
+        log.info("[seed] replayed notification events are already handled by their consumers");
     }
 
     // Every value a PostgreSQL enum type declares, regardless of whether any row currently uses
@@ -350,11 +409,15 @@ public class SeedRunner {
                         "conversations",
                         "messages",
                         "notifications",
+                        "notification_actors",
+                        "notification_seen_states",
                         "reports",
                         "admin_actions",
                         "user_warnings",
                         "user_strikes",
                         "hashtags",
+                        "support_tickets",
+                        "verification_requests",
                         "platform_stats",
                         "user_events",
                         "outbox_events");

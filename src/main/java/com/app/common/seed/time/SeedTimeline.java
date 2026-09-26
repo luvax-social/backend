@@ -31,6 +31,8 @@ public class SeedTimeline {
     private static final Duration MAX_REACTION_GAP = Duration.ofDays(14);
     private static final Duration MAX_FOLLOW_GAP = Duration.ofDays(60);
     private static final Duration MAX_ADMIN_ACTION_GAP = Duration.ofDays(7);
+    private static final Duration MAX_SUPPORT_TICKET_AGE = Duration.ofDays(180);
+    private static final Duration MAX_SUPPORT_DECISION_GAP = Duration.ofDays(5);
     private static final Duration LIVE_STORY_WINDOW = Duration.ofHours(24);
     private static final Duration EXPIRED_STORY_MIN_AGE = Duration.ofHours(24);
     private static final Duration EXPIRED_STORY_MAX_AGE = Duration.ofHours(72);
@@ -273,6 +275,27 @@ public class SeedTimeline {
      */
     public Instant referenceNow() {
         return referenceNow;
+    }
+
+    /**
+     * Returns a timestamp for a support ticket: on or after the account's own creation time,
+     * bounded to a realistic recency window so the whole ticket population is not clustered at
+     * account creation.
+     */
+    public Instant supportTicketCreatedAt(Instant userCreatedAt) {
+        return userCreatedAt.plus(
+                strictlyPositiveRandomDuration(
+                        gapUpperBound(userCreatedAt, MAX_SUPPORT_TICKET_AGE)));
+    }
+
+    /**
+     * Returns a timestamp strictly after {@code ticketCreatedAt}, used for a claim, an escalation,
+     * or a final decision on a support ticket - none of which can predate the ticket they act on.
+     */
+    public Instant supportTicketDecidedAt(Instant ticketCreatedAt) {
+        return ticketCreatedAt.plus(
+                strictlyPositiveRandomDuration(
+                        gapUpperBound(ticketCreatedAt, MAX_SUPPORT_DECISION_GAP)));
     }
 
     /**

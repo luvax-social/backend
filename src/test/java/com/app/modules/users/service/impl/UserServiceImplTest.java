@@ -385,7 +385,8 @@ class UserServiceImplTest {
 
         service.updateMySettings(
                 id,
-                new UpdateSettingsRequest(false, false, false, false, false, false, false, false));
+                new UpdateSettingsRequest(
+                        false, false, false, false, false, false, false, false, false));
 
         assertThat(settings.isNotifyLikes()).isFalse();
         assertThat(settings.isNotifyComments()).isFalse();
@@ -406,7 +407,8 @@ class UserServiceImplTest {
         when(userMapper.toSettingsResponse(settings)).thenReturn(settingsResponse());
 
         service.updateMySettings(
-                id, new UpdateSettingsRequest(null, null, null, null, null, null, null, null));
+                id,
+                new UpdateSettingsRequest(null, null, null, null, null, null, null, null, null));
 
         assertThat(settings.isNotifyLikes()).isTrue();
         assertThat(settings.isNotifyComments()).isTrue();
@@ -461,6 +463,7 @@ class UserServiceImplTest {
                 null,
                 false,
                 false,
+                null,
                 0,
                 0,
                 0,
@@ -479,6 +482,7 @@ class UserServiceImplTest {
                 null,
                 false,
                 false,
+                null,
                 follower,
                 following,
                 post,
@@ -487,6 +491,6 @@ class UserServiceImplTest {
     }
 
     private static UserSettingsResponse settingsResponse() {
-        return new UserSettingsResponse(true, true, true, true, true, true, true, true, null);
+        return new UserSettingsResponse(true, true, true, true, true, true, true, true, true, null);
     }
 }

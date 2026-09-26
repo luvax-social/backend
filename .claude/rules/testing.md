@@ -16,7 +16,9 @@ description: Load when writing, running, or reviewing any test class. Contains t
 
 `@WebMvcTest` slices are not used.
 `@DataJpaTest` slices, backed by Testcontainers PostgreSQL via `@Container @ServiceConnection`, are the established pattern for repository integration tests that exercise only repository queries and the SQL they emit.
-Every `*RepositoryIT` uses this slice: `FollowRepositoryIT`, `OutboxEventRepositoryIT`, `MediaAssetRepositoryIT`, `ReportRepositoryIT`, and `PostKeysetRowLossIT`.
+Every `*RepositoryIT` uses this slice: `FollowRepositoryIT`, `HashtagRepositoryIT`, `MediaAssetRepositoryIT`, `OutboxEventRepositoryIT`, `ReportRepositoryIT`, `UserHashtagAffinityRepositoryIT` and `UserWarningRepositoryIT`.
+The slice is not confined to that naming: 28 test classes carry `@DataJpaTest` in total, including the `*KeysetRowLossIT` family and other query-level tests.
+List them with `git grep -l '@DataJpaTest' -- src/test` rather than trusting this sentence to have kept up.
 The slice is sound for these because a native `@Query` emits identical SQL whether its repository is loaded in the slice or the full context, and native queries bypass `@SQLRestriction` in both, so the repository behaviour under test is the same either way.
 Use a full `@SpringBootTest` for any test that spans more than the repository layer.
 

@@ -20,6 +20,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 
@@ -43,9 +44,7 @@ class ElasticsearchHealthIT {
 
     @Container
     static ElasticsearchContainer elasticsearch =
-            new ElasticsearchContainer(
-                            DockerImageName.parse(
-                                    "docker.elastic.co/elasticsearch/elasticsearch:9.0.3"))
+            new ElasticsearchContainer(DockerImageName.parse(TestContainerImages.ELASTICSEARCH))
                     .withEnv("xpack.security.enabled", "false");
 
     @DynamicPropertySource

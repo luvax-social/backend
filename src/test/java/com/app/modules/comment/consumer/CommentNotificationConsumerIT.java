@@ -18,6 +18,7 @@ import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -30,7 +31,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.common.outbox.model.DomainEventEnvelopeJson;
 import com.app.modules.comment.messaging.CommentEventTypes;
-import com.app.modules.mail.service.MailSender;
+import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.notification.entity.Notification;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.repository.NotificationRepository;
@@ -38,6 +39,7 @@ import com.app.modules.users.entity.User;
 import com.app.modules.users.enums.UserRole;
 import com.app.modules.users.enums.UserStatus;
 import com.app.modules.users.repository.UserRepository;
+import com.app.testsupport.TestContainerImages;
 import com.rabbitmq.client.Channel;
 
 @SpringBootTest(
@@ -64,7 +66,7 @@ class CommentNotificationConsumerIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @DynamicPropertySource
@@ -96,8 +98,14 @@ class CommentNotificationConsumerIT {
     @Autowired private CommentNotificationConsumer consumer;
     @Autowired private NotificationRepository notificationRepository;
     @Autowired private UserRepository userRepository;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
-    @MockitoBean private MailSender mailSender;
+    // Declared at the concrete type rather than at the MailSender interface, because
+    // ModerationMailEventHandler injects AbstractTemplateMailSender rather than the
+    // interface. An interface-typed override replaces the transport bean with a
+    // proxy that is not assignable to it, and the context then fails to start before any
+    // assertion runs.
+    @MockitoBean private AbstractTemplateMailSender mailSender;
 
     private User actor;
     private User postOwner;
@@ -186,9 +194,26 @@ class CommentNotificationConsumerIT {
     void handle_commentLiked_createsLikeCommentNotification() throws Exception {
         Channel channel = mock(Channel.class);
         User commentOwner = userRepository.save(activeUser("liked_" + suffix()));
-        UUID postId = UUID.randomUUID();
+        // The consumer writes a like notification only while the like exists, so the like is
+        // recorded first, as CommentServiceImpl does before it enqueues the event.
+        UUID postId =
+                jdbcTemplate.queryForObject(
+                        "INSERT INTO posts (user_id) VALUES (?) RETURNING id",
+                        UUID.class,
+                        commentOwner.getId());
+        UUID commentId =
+                jdbcTemplate.queryForObject(
+                        "INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, 'hi')"
+                                + " RETURNING id",
+                        UUID.class,
+                        postId,
+                        commentOwner.getId());
+        jdbcTemplate.update(
+                "INSERT INTO comment_likes (user_id, comment_id) VALUES (?, ?)",
+                actor.getId(),
+                commentId);
         Map<String, Object> data = new HashMap<>();
-        data.put("commentId", UUID.randomUUID().toString());
+        data.put("commentId", commentId.toString());
         data.put("commentOwnerId", commentOwner.getId().toString());
         data.put("postId", postId.toString());
 

@@ -31,7 +31,10 @@ import lombok.Setter;
  */
 @Entity
 @Table(name = "comments")
-@SQLRestriction("deleted_at IS NULL")
+// Both tombstones, so every JPQL, derived and entity-graph read hides an administratively
+// removed comment without each query restating the predicate. Native queries bypass this
+// filter and carry the predicate themselves.
+@SQLRestriction("deleted_at IS NULL AND admin_removed_at IS NULL")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -100,4 +103,13 @@ public class Comment {
     /** Set by application code on soft delete; {@code null} for live rows (GLOBAL_RULES §6). */
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
+
+    /**
+     * Set by administrative removal; {@code null} when not administratively removed.
+     *
+     * <p>Independent of {@link #deletedAt}, which the author owns. The row is hidden when either is
+     * set, and clearing this one never undoes the author's own deletion.
+     */
+    @Column(name = "admin_removed_at")
+    private OffsetDateTime adminRemovedAt;
 }

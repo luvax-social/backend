@@ -32,6 +32,11 @@ public record PublicUserProfileResponse(
         @Schema(description = "Whether the account has a verified badge", example = "false")
                 boolean isVerified,
         @Schema(
+                        description = "Category of the verified badge; null when not verified",
+                        example = "music",
+                        nullable = true)
+                String verifiedCategory,
+        @Schema(
                         description = "Number of followers; null when caller is unauthenticated",
                         example = "120",
                         nullable = true)

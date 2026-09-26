@@ -1,5 +1,6 @@
 package com.app.modules.admin.repository;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,7 +30,13 @@ public interface AdminUserRepository extends Repository<User, UUID>, AdminUserRe
      * which invalidates the predicate for the other. A zero row count therefore means the work was
      * already done, not that it failed, and both callers must treat it as success.
      *
+     * <p>The cutoff is a bound parameter rather than the database's {@code now()}, because {@code
+     * suspended_until} is written from the JVM clock. Comparing a JVM-written value against the
+     * database clock puts one column in two clock domains: with the database behind, a suspension
+     * the service has already decided is over is not yet expired here.
+     *
      * @param userId account to reinstate
+     * @param now the cutoff, from the same clock that wrote {@code suspended_until}
      * @return {@code 1} when this call performed the reinstatement, {@code 0} when it did not apply
      */
     @Modifying
@@ -40,9 +47,9 @@ public interface AdminUserRepository extends Repository<User, UUID>, AdminUserRe
                             + " WHERE id = :userId"
                             + " AND status = 'suspended'"
                             + " AND suspended_until IS NOT NULL"
-                            + " AND suspended_until <= now()",
+                            + " AND suspended_until <= :now",
             nativeQuery = true)
-    int reinstateExpiredSuspension(@Param("userId") UUID userId);
+    int reinstateExpiredSuspension(@Param("userId") UUID userId, @Param("now") OffsetDateTime now);
 
     /**
      * Reads the current status of one account, spanning soft-deleted rows.

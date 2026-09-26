@@ -24,6 +24,7 @@ import com.app.common.response.ApiResponse;
 import com.app.common.response.CursorPageResponse;
 import com.app.modules.comment.dto.request.CreateCommentRequest;
 import com.app.modules.comment.dto.request.EditCommentRequest;
+import com.app.modules.comment.dto.response.CommentContextResponse;
 import com.app.modules.comment.dto.response.CommentDeletionScopeResponse;
 import com.app.modules.comment.dto.response.CommentResponse;
 
@@ -204,6 +205,32 @@ public interface CommentApi {
                     @Min(1)
                     @Max(100)
                     int limit);
+
+    @Operation(
+            summary = "Get a comment in its thread",
+            description =
+                    "Returns the comment with every ancestor above it, top-level first, so a"
+                            + " notification can open a reply wherever it sits. Applies the list"
+                            + " endpoints' visibility rules to every comment in the chain.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "The thread down to the comment"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description =
+                        "COMMENT_NOT_FOUND: the comment or an ancestor is missing, deleted,"
+                                + " removed, unapproved or hidden by a block, or the post is"
+                                + " not visible to the viewer",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @GetMapping(ApiConstants.Comments.ROOT + ApiConstants.Comments.CONTEXT)
+    ResponseEntity<ApiResponse<CommentContextResponse>> getContext(
+            @PathVariable("commentId") UUID commentId);
 
     @Operation(
             summary = "Edit a comment",

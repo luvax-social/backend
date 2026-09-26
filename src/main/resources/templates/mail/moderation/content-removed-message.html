@@ -1,0 +1,7 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{mail/moderation/layout :: page('Your message was removed', ~{::statement})}">
+<body>
+<p th:fragment="statement" style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0 0 16px;">One of your messages has been removed and is no longer visible to anyone.</p>
+</body>
+</html>

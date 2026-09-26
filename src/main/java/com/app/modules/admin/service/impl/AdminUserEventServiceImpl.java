@@ -16,6 +16,7 @@ import com.app.common.pagination.CursorScope;
 import com.app.common.pagination.KeysetPage;
 import com.app.common.pagination.TimeCursors;
 import com.app.common.response.CursorPageResponse;
+import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.admin.service.AdminUserEventService;
 import com.app.modules.recommendation.dto.response.UserEventResponse;
 import com.app.modules.recommendation.entity.UserEvent;
@@ -29,20 +30,26 @@ public class AdminUserEventServiceImpl implements AdminUserEventService {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final UserEventRepository userEventRepository;
+    private final AdminAuthorizationService adminAuthorizationService;
 
-    public AdminUserEventServiceImpl(UserEventRepository userEventRepository) {
+    public AdminUserEventServiceImpl(
+            UserEventRepository userEventRepository,
+            AdminAuthorizationService adminAuthorizationService) {
         this.userEventRepository = userEventRepository;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @Override
     @Transactional(readOnly = true)
     public CursorPageResponse<UserEventResponse> listUserEvents(
+            UUID actorId,
             UUID userId,
             OffsetDateTime from,
             OffsetDateTime to,
             UserEventType eventType,
             String cursor,
             int limit) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
         validateWindow(from, to);
         int pageSize = normalizeLimit(limit);
         Cursor decoded = CursorCodec.decode(cursor, CursorScope.ADMIN_USER_EVENTS);

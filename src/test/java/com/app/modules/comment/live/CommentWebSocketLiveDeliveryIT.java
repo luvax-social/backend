@@ -37,7 +37,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.auth.service.WebSocketTicketService;
-import com.app.modules.mail.service.MailSender;
+import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
 import com.app.modules.post.entity.Post;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.enums.PostType;
@@ -46,6 +46,7 @@ import com.app.modules.users.entity.User;
 import com.app.modules.users.enums.UserRole;
 import com.app.modules.users.enums.UserStatus;
 import com.app.modules.users.repository.UserRepository;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Confirms a real browser-equivalent client can complete the full STOMP-over-WebSocket handshake
@@ -84,7 +85,7 @@ class CommentWebSocketLiveDeliveryIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @DynamicPropertySource
@@ -122,7 +123,12 @@ class CommentWebSocketLiveDeliveryIT {
     // real socket mints one the same way the client does.
     @Autowired private WebSocketTicketService webSocketTicketService;
 
-    @MockitoBean private MailSender mailSender;
+    // Declared at the concrete type rather than at the MailSender interface, because
+    // ModerationMailEventHandler injects AbstractTemplateMailSender rather than the
+    // interface. An interface-typed override replaces the transport bean with a
+    // proxy that is not assignable to it, and the context then fails to start before any
+    // assertion runs.
+    @MockitoBean private AbstractTemplateMailSender mailSender;
 
     private WebSocketStompClient stompClient;
     private StompSession session;

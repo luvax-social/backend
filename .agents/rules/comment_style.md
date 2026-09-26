@@ -72,7 +72,7 @@ Forbidden:
 // Get user by id          ← restates the method name
 // Loop through the list   ← restates the code
 // TODO fix this later     ← no issue reference, FORBIDDEN
-// TODO(VR-123): fix this  ← ALLOWED (must have ticket reference in VR-NNN format)
+// TODO(#123): fix this    ← ALLOWED (must reference a GitHub issue in this repository)
 // Created by agent v2     ← no attribution comments
 ```
 
@@ -108,7 +108,7 @@ public enum JobStatus {
 
 ## 5. Removed / Commented-Out Code
 
-Dead code must be deleted, not commented out. Enforced by code review, not by tooling: a heuristic flagging 3+ consecutive `//` lines as a violation also fires on legitimate multi-sentence explanatory comments, so no pre-commit hook checks for it. If reactivation is uncertain, create a Git branch or a tracked issue (`VR-NNN`).
+Dead code must be deleted, not commented out. Enforced by code review, not by tooling: a heuristic flagging 3+ consecutive `//` lines as a violation also fires on legitimate multi-sentence explanatory comments, so no pre-commit hook checks for it. If reactivation is uncertain, create a Git branch or a GitHub issue in this repository.
 
 ---
 
@@ -125,18 +125,6 @@ Dead code must be deleted, not commented out. Enforced by code review, not by to
 | `dto/` | No comments unless a field name is a domain abbreviation opaque to a new engineer. |
 | `config/` | Class-level Javadoc required. Inline comments for non-default configuration values where the reason is non-obvious. |
 | `common/security/` | Document security contracts and token lifecycle invariants on class-level Javadoc. |
-
-### AI Module Specifics
-
-```java
-// Combines job description and candidate profile to generate a relevance score (0–100)
-String prompt = promptBuilder.build(job, candidate);
-
-// Key format: ai:emb:{sha256(text)} — TTL 24hr, avoids redundant external embedding API calls
-String cacheKey = "ai:emb:" + DigestUtils.sha256Hex(text);
-
-// Key format: ai:mem:{userId}:{sessionId} — TTL 1hr, capped at 10 messages via Lua script
-```
 
 ### Transaction Boundary Annotations
 
@@ -182,7 +170,7 @@ Before committing any source file, verify:
 
 - [ ] No commented-out code exists.
 - [ ] No decorative dividers (`====`, `----`, `***`, `███`, etc.).
-- [ ] No `TODO` / `FIXME` / `HACK` without a tracked issue reference in `VR-NNN` format.
+- [ ] No `TODO` / `FIXME` / `HACK` without a GitHub issue reference (`#123`).
 - [ ] No attribution comments (`// added by`, `// agent`, `// created`, `// author`).
 - [ ] Javadoc exists on all `public` service interface method declarations.
 - [ ] Javadoc exists on all `@RestController` handler methods.

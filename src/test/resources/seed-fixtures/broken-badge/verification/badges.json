@@ -1,0 +1,28 @@
+{
+  "_note": "Names an account users.json does not carry; the loader must refuse it.",
+  "verification_tickets": [
+    {
+      "username": "nobody_at_all",
+      "outcome": "answered",
+      "via_escalation": false,
+      "category_key": "visual_arts",
+      "claimed_name": "Alice Fixture",
+      "evidence_website": "https://alice.example.com",
+      "evidence_other_profile": "https://example.com/alice",
+      "evidence_email_domain": null,
+      "evidence_published_work": null,
+      "evidence_press": null,
+      "evidence_official_listing": null,
+      "evidence_note": "Fixture claim."
+    }
+  ],
+  "legacy_grants": [
+    {
+      "username": "bob",
+      "category_key": "business",
+      "granted_by": "alice",
+      "granted_offset_days": -100
+    }
+  ],
+  "revocations": []
+}

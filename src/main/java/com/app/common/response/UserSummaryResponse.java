@@ -28,4 +28,27 @@ public record UserSummaryResponse(
                         nullable = true)
                 String displayName,
         @Schema(description = "Avatar CDN URL; null when absent", nullable = true) String avatarUrl,
-        @Schema(description = "Verified badge flag", example = "false") boolean isVerified) {}
+        @Schema(description = "Verified badge flag", example = "false") boolean isVerified,
+        @Schema(
+                        description =
+                                "Category of the verified badge, or null when the account is not"
+                                        + " verified. The client maps this to the glyph inside the"
+                                        + " badge; the badge container itself is the same for every"
+                                        + " category.",
+                        example = "music",
+                        nullable = true)
+                String verifiedCategory) {
+
+    /**
+     * Builds a summary for a caller that has no verification context to supply.
+     *
+     * <p>The placeholder for a deleted or unknown account is the only correct use: it is not
+     * verified, so it has no category either. A caller that does know the account is verified must
+     * pass the category, because a badge whose glyph is missing renders as a bare container and
+     * says less than no badge at all.
+     */
+    public UserSummaryResponse(
+            UUID id, String username, String displayName, String avatarUrl, boolean isVerified) {
+        this(id, username, displayName, avatarUrl, isVerified, null);
+    }
+}

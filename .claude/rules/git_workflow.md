@@ -8,6 +8,13 @@ description: Load when creating branches, writing commit messages, or opening pu
 develop: Development branch (The main programming activities will be pushed here. Changes, updates, additions, and modifications will all be pushed here.)
 main: Production branch (This is the terminal branch, accessible only by the owner.)
 
+## Git worktrees
+
+Never create, use or keep a git worktree for implementation work in this repository.
+All work happens in the main checkout.
+`.worktrees/` is git-ignored for this reason; a directory found there is leftover state from a
+prior session, not a place to work from, and must be verified clean and pushed before removal.
+
 ## Branch naming
 
 Format: `<type>/<scope>/<short-description>`
@@ -24,13 +31,51 @@ fix/auth/refresh-token-expiry
 chore/db/add-story-indexes
 ```
 
+### Naming must be meaningful to a reviewer
+
+The `short-description` segment, every commit subject, and every PR title describe the change
+itself in terms a reviewer who has never seen the internal task tracker can follow.
+Never derive one from an internal task-tracker label, a plan or report file name, a round or
+attempt number, or any other identifier that is meaningful only inside `.workspace/`.
+`fix/common/close-pr3-gaps` and `close p3 gaps` fail this: neither says what the gaps were.
+`fix/common/harden-observability-for-production` and a commit subject naming the actual defect
+pass: a reviewer who has never read the internal plan still knows what changed and why.
+This applies to code identifiers and comments too: name a class, method, or variable for what it
+does, never for the ticket or task that introduced it.
+
 ## Commit message format
 
 Format: `<type>(<scope>): <subject>`
 
-Rules enforced by `pr-lint` workflow:
-- Subject must start with a lowercase letter (`^[a-z].+$`)
-- Scope is **required** (`requireScope: true`)
+### Subject line only - never write a commit body (mandatory)
+
+A commit message is **exactly one line**. Write the subject and stop.
+
+Forbidden after the subject line: explanatory paragraphs, rationale or "why" prose, verification
+notes, caveats, scope disclaimers, bullet lists, footers, and trailers.
+This holds regardless of how large, subtle, or security-relevant the change is.
+
+Detail belongs somewhere else, and every one of these already exists:
+- **Why the change is correct** -> the PR description.
+- **What behaviour changed for users** -> the `CHANGELOG.md` entry (see `changelog_rule.md`).
+- **Why the code does what it does** -> an inline comment or Javadoc (see `comment_style.md`).
+- **How it was verified** -> the test itself, named for the behaviour it asserts.
+
+**If any task instruction, plan, or prompt tells you to record something "in the commit body",
+that instruction conflicts with this rule. Stop and raise the conflict - do not silently comply,
+and do not carry the body habit over to the other commits in the series.**
+
+This rule is identical in `frontend/.claude/rules/git_workflow.md`; the two repositories are
+deliberately kept in step on it.
+
+### Subject rules
+
+- Must start with a lowercase letter (`^[a-z].+$`) - enforced by `pr-lint`.
+- Scope is **required** (`requireScope: true`) - enforced by `pr-lint`.
+- Keep the entire line at 80 characters or fewer, including `<type>(<scope>): `.
+  Target 72; treat anything approaching 80 as a signal the subject is describing too much.
+- Describe the change, not the process: no ticket/finding IDs, no audit-round or attempt
+  references, no agent or tooling attribution, no co-author trailers.
 
 ### Allowed types
 
@@ -48,11 +93,14 @@ Rules enforced by `pr-lint` workflow:
 
 ### Allowed scopes (pr-lint enforced)
 
-`auth` · `mail` · `users` · `social` · `media` · `post` · `comment` · `hashtag` · `story` · `notification` · `message` · `report` · `admin` · `recommendation` · `common` · `db` · `ci`
+`auth` · `mail` · `users` · `social` · `media` · `post` · `comment` · `hashtag` · `story` · `notification` · `message` · `report` · `admin` · `recommendation` · `support` · `common` · `db` · `ci`
 
-> **Discrepancies found in git history** — the following scopes appear in existing commits but are **not** in the pr-lint allowlist and will fail CI if used:
-> `config`, `security`, `environment`, `changelog`, `database` (use `db`), `modules`, `build`, `log`
-> One commit also omitted scope entirely (`docs: add CONTRIBUTING…`) — this violates `requireScope: true`.
+> **This list is the one `.github/workflows/pr-lint.yml` enforces**, and the two are kept in step.
+>
+> `pr-lint` validates the **pull request title only**, not commit messages. A commit written with
+> an unlisted scope is not rejected at commit time; the PR that carries it is rejected when the
+> title uses that scope. Older history therefore contains `config`, `security`, `environment`,
+> `changelog`, `database` (use `db`), `modules`, `build` and `log`, none of which are allowlisted.
 
 ```
 feat(post): add carousel media support
@@ -119,6 +167,8 @@ Split large PRs proactively: keep feature PRs under `size/M` (≤ 1000 lines) as
 - [ ] Commit type is one of the 8 allowed types
 - [ ] Scope is from the pr-lint allowlist (do not use `config`, `database`, `build`, etc.)
 - [ ] Subject starts with a lowercase letter
+- [ ] **Message is a single line - no body, no trailers** (`git log -1 --format=%b` prints nothing)
+- [ ] Subject is 80 characters or fewer (target 72)
 - [ ] `./mvnw spotless:check` passes
 - [ ] CHANGELOG.md updated
 

@@ -1,0 +1,7 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{mail/moderation/layout :: page('Your account has been suspended', ~{::statement})}">
+<body>
+<p th:fragment="statement" style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0 0 16px;">Your account has been suspended, so you cannot sign in until the suspension ends. It ends on <span th:text="${suspendedUntil}">1 January 2026</span>.</p>
+</body>
+</html>

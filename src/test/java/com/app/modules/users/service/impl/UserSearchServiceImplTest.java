@@ -171,6 +171,11 @@ class UserSearchServiceImplTest {
             }
 
             @Override
+            public String getVerifiedCategory() {
+                return null;
+            }
+
+            @Override
             public String getUsername() {
                 return username;
             }

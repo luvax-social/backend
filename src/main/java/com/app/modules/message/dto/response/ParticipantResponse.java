@@ -10,6 +10,13 @@ import io.swagger.v3.oas.annotations.media.Schema;
 public record ParticipantResponse(
         @Schema(description = "User identifier.") UUID userId,
         @Schema(description = "Unique username.", nullable = true) String username,
+        @Schema(description = "Whether this participant carries a verified badge.")
+                boolean isVerified,
+        @Schema(
+                        description =
+                                "Category of the participant's badge; null when not verified.",
+                        nullable = true)
+                String verifiedCategory,
         @Schema(description = "Display name shown on the profile.", nullable = true)
                 String displayName,
         @Schema(description = "Avatar CDN URL.", nullable = true) String avatarUrl,

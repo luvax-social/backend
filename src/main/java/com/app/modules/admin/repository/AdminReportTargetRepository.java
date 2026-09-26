@@ -95,7 +95,9 @@ public class AdminReportTargetRepository {
         return jdbcClient
                 .sql(
                         """
-						SELECT c.id, c.user_id, u.username, c.content, c.deleted_at, c.created_at
+						SELECT c.id, c.user_id, u.username, c.content,
+							c.deleted_at IS NOT NULL OR c.admin_removed_at IS NOT NULL AS deleted,
+							c.created_at
 						FROM comments c
 						LEFT JOIN users u ON u.id = c.user_id
 						WHERE c.id = :entityId
@@ -111,7 +113,7 @@ public class AdminReportTargetRepository {
                                         null,
                                         rs.getString("content"),
                                         List.of(),
-                                        rs.getObject("deleted_at") != null,
+                                        rs.getBoolean("deleted"),
                                         rs.getObject("created_at", java.time.OffsetDateTime.class)))
                 .optional();
     }
@@ -148,7 +150,8 @@ public class AdminReportTargetRepository {
                 .sql(
                         """
 						SELECT s.id, s.user_id, u.username, s.caption, m.cdn_url,
-							s.deleted_at, s.created_at
+							s.deleted_at IS NOT NULL OR s.admin_removed_at IS NOT NULL AS deleted,
+							s.created_at
 						FROM stories s
 						LEFT JOIN users u ON u.id = s.user_id
 						LEFT JOIN media_assets m ON m.id = s.media_asset_id
@@ -166,7 +169,7 @@ public class AdminReportTargetRepository {
                                     null,
                                     rs.getString("caption"),
                                     cdnUrl == null ? List.of() : List.of(cdnUrl),
-                                    rs.getObject("deleted_at") != null,
+                                    rs.getBoolean("deleted"),
                                     rs.getObject("created_at", java.time.OffsetDateTime.class));
                         })
                 .optional();

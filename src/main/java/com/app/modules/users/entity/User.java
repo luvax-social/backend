@@ -81,6 +81,17 @@ public class User {
     @Column(name = "is_verified", nullable = false)
     private boolean isVerified;
 
+    /**
+     * The category of the account's active verified badge, or null when it holds none.
+     *
+     * <p>Denormalised from {@code user_verifications} by {@code trg_user_verification_sync} and
+     * never written by application code, exactly as the counter columns are never written by it.
+     * {@code insertable = false, updatable = false} makes that structural rather than a convention
+     * somebody has to remember: a service cannot set this even by accident.
+     */
+    @Column(name = "verified_category", length = 50, insertable = false, updatable = false)
+    private String verifiedCategory;
+
     /** Client IP captured at account creation; null for every account created before V56. */
     @Column(name = "registration_ip", columnDefinition = "inet")
     private String registrationIp;

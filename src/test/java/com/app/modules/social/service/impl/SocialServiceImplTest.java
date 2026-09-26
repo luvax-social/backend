@@ -255,7 +255,8 @@ class SocialServiceImplTest {
         UUID follower = UUID.randomUUID();
         UUID target = UUID.randomUUID();
         when(socialUserRepository.existsByIdAndDeletedAtIsNull(target)).thenReturn(true);
-        when(followRepository.deleteByFollowerIdAndFollowingId(follower, target)).thenReturn(0);
+        when(followRepository.findById(new FollowId(follower, target)))
+                .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.unfollowUser(follower, target))
                 .isInstanceOf(AppException.class)
@@ -264,15 +265,51 @@ class SocialServiceImplTest {
     }
 
     @Test
-    void unfollowUser_existing_deletes() {
+    void unfollowUser_existing_deletesAndPublishesTheStatusItHad() {
         UUID follower = UUID.randomUUID();
         UUID target = UUID.randomUUID();
         when(socialUserRepository.existsByIdAndDeletedAtIsNull(target)).thenReturn(true);
-        when(followRepository.deleteByFollowerIdAndFollowingId(follower, target)).thenReturn(1);
+        when(followRepository.findById(new FollowId(follower, target)))
+                .thenReturn(Optional.of(follow(follower, target, FollowStatus.ACCEPTED)));
+        when(followRepository.deleteByFollowerIdAndFollowingIdAndStatus(
+                        follower, target, FollowStatus.ACCEPTED))
+                .thenReturn(1);
 
         service.unfollowUser(follower, target);
 
-        verify(followRepository).deleteByFollowerIdAndFollowingId(follower, target);
+        verify(socialEventService).publishUnfollowed(follower, target, FollowStatus.ACCEPTED);
+    }
+
+    @Test
+    void unfollowUser_pendingRequest_publishesACancelledRequest() {
+        UUID follower = UUID.randomUUID();
+        UUID target = UUID.randomUUID();
+        when(socialUserRepository.existsByIdAndDeletedAtIsNull(target)).thenReturn(true);
+        when(followRepository.findById(new FollowId(follower, target)))
+                .thenReturn(Optional.of(follow(follower, target, FollowStatus.PENDING)));
+        when(followRepository.deleteByFollowerIdAndFollowingIdAndStatus(
+                        follower, target, FollowStatus.PENDING))
+                .thenReturn(1);
+
+        service.unfollowUser(follower, target);
+
+        verify(socialEventService).publishUnfollowed(follower, target, FollowStatus.PENDING);
+    }
+
+    @Test
+    void unfollowUser_concurrentDuplicate_throwsNotFoundAndPublishesNothing() {
+        UUID follower = UUID.randomUUID();
+        UUID target = UUID.randomUUID();
+        when(socialUserRepository.existsByIdAndDeletedAtIsNull(target)).thenReturn(true);
+        when(followRepository.findById(new FollowId(follower, target)))
+                .thenReturn(Optional.of(follow(follower, target, FollowStatus.ACCEPTED)));
+        when(followRepository.deleteByFollowerIdAndFollowingIdAndStatus(
+                        follower, target, FollowStatus.ACCEPTED))
+                .thenReturn(0);
+
+        assertThatThrownBy(() -> service.unfollowUser(follower, target))
+                .isInstanceOf(AppException.class);
+        verify(socialEventService, never()).publishUnfollowed(any(), any(), any());
     }
 
     @Test
@@ -290,6 +327,7 @@ class SocialServiceImplTest {
 
         assertThat(follow.getStatus()).isEqualTo(FollowStatus.ACCEPTED);
         verify(followRepository).save(follow);
+        verify(socialEventService).publishFollowRequestResolved(requester, current, true);
     }
 
     @Test
@@ -307,6 +345,7 @@ class SocialServiceImplTest {
         verify(followRepository)
                 .deleteByFollowerIdAndFollowingIdAndStatus(
                         requester, current, FollowStatus.PENDING);
+        verify(socialEventService).publishFollowRequestResolved(requester, current, false);
     }
 
     @Test
@@ -401,6 +440,7 @@ class SocialServiceImplTest {
         verify(blockRepository).save(any(Block.class));
         verify(followRepository).delete(direct);
         verify(followRepository).delete(reverse);
+        verify(socialEventService).publishBlocked(current, target);
     }
 
     @Test

@@ -116,16 +116,17 @@ public class AdminUserRepositoryImpl implements AdminUserRepositoryCustom {
     }
 
     @Override
-    public List<UUID> findExpiredSuspensionIds(int limit) {
+    public List<UUID> findExpiredSuspensionIds(int limit, java.time.OffsetDateTime now) {
         Query query =
                 entityManager.createNativeQuery(
                         "SELECT u.id FROM users u"
                                 + " WHERE u.status = 'suspended'"
                                 + " AND u.suspended_until IS NOT NULL"
-                                + " AND u.suspended_until <= now()"
+                                + " AND u.suspended_until <= :now"
                                 + " ORDER BY u.suspended_until"
                                 + " LIMIT :limit");
         query.setParameter("limit", limit);
+        query.setParameter("now", now);
         @SuppressWarnings("unchecked")
         List<UUID> ids = query.getResultList();
         return ids;

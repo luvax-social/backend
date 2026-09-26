@@ -473,7 +473,7 @@ public class SeedOutboxEmitter {
                 "SELECT c.id, c.post_id, c.user_id, c.depth, p.user_id AS post_owner_id, parent.user_id"
                         + " AS parent_owner_id FROM comments c JOIN posts p ON p.id = c.post_id LEFT"
                         + " JOIN comments parent ON parent.id = c.parent_id WHERE c.deleted_at IS"
-                        + " NULL";
+                        + " NULL AND c.admin_removed_at IS NULL";
         return jdbc.query(
                 sql,
                 (rs, rowNum) -> {

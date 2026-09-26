@@ -40,6 +40,8 @@ import com.app.modules.mail.service.MailService;
 import com.app.modules.post.messaging.PostEventTypes;
 import com.app.modules.post.search.PostDocument;
 import com.app.modules.post.search.PostSearchRepository;
+import com.app.modules.recommendation.client.GorseClient;
+import com.app.testsupport.TestContainerImages;
 import com.rabbitmq.client.Channel;
 
 @SpringBootTest(
@@ -65,14 +67,12 @@ class PostIndexSyncConsumerIT {
 
     @Container
     static GenericContainer<?> rabbit =
-            new GenericContainer<>(DockerImageName.parse("rabbitmq:3.13-alpine"))
+            new GenericContainer<>(DockerImageName.parse(TestContainerImages.RABBITMQ))
                     .withExposedPorts(5672);
 
     @Container
     static ElasticsearchContainer elasticsearch =
-            new ElasticsearchContainer(
-                            DockerImageName.parse(
-                                    "docker.elastic.co/elasticsearch/elasticsearch:9.0.3"))
+            new ElasticsearchContainer(DockerImageName.parse(TestContainerImages.ELASTICSEARCH))
                     .withEnv("xpack.security.enabled", "false");
 
     @DynamicPropertySource
@@ -103,6 +103,11 @@ class PostIndexSyncConsumerIT {
         // Seed runner stays off so the index begins empty and each test owns its documents.
         r.add("app.post.seed.enabled", () -> false);
     }
+
+    // Gorse is an external HTTP service with no container in this test, and the post index-sync
+    // path calls it before writing to Elasticsearch. Left real, every upsert fails on connection
+    // refused, the message is dead-lettered, and nothing is ever indexed.
+    @MockitoBean private GorseClient gorseClient;
 
     @MockitoBean private MailService mailService;
 

@@ -85,7 +85,8 @@ public class UserSearchServiceImpl implements UserSearchService {
                                                         hit.getUsername(),
                                                         hit.getDisplayName(),
                                                         hit.getAvatarUrl(),
-                                                        hit.getIsVerified()),
+                                                        hit.getIsVerified(),
+                                                        hit.getVerifiedCategory()),
                                                 relationships.getOrDefault(
                                                         hit.getId(),
                                                         ViewerRelationshipResponse.NONE)))

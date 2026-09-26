@@ -374,7 +374,7 @@ public interface AuthApi {
     @MalformedBodyErrorResponses
     @PostMapping(ApiConstants.Auth.RESEND_VERIFY)
     ResponseEntity<ApiResponse<Void>> resendVerification(
-            @Valid @RequestBody ResendVerificationRequest request);
+            @Valid @RequestBody ResendVerificationRequest request, HttpServletRequest httpRequest);
 
     /**
      * Records a password-reset mail event when an account exists. Always returns 200 to prevent
@@ -401,7 +401,7 @@ public interface AuthApi {
     @MalformedBodyErrorResponses
     @PostMapping(ApiConstants.Auth.FORGOT_PASSWORD)
     ResponseEntity<ApiResponse<Void>> forgotPassword(
-            @Valid @RequestBody ForgotPasswordRequest request);
+            @Valid @RequestBody ForgotPasswordRequest request, HttpServletRequest httpRequest);
 
     /** Consumes a password-reset token and replaces the user's password hash. */
     @Operation(
@@ -446,7 +446,7 @@ public interface AuthApi {
     })
     @PostMapping(ApiConstants.Auth.RESET_PASSWORD)
     ResponseEntity<ApiResponse<Void>> resetPassword(
-            @Valid @RequestBody ResetPasswordRequest request);
+            @Valid @RequestBody ResetPasswordRequest request, HttpServletRequest httpRequest);
 
     /** Redeems a short-lived OAuth2 exchange code for an access/refresh token pair. */
     @Operation(

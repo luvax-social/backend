@@ -111,6 +111,37 @@ public interface FollowRepository extends JpaRepository<Follow, FollowId>, Follo
     List<Follow> findFirstPendingRequests(@Param("userId") UUID userId, Pageable pageable);
 
     /**
+     * Counts a user's pending follow requests, stopping at {@code limit}, so a celebrity account's
+     * backlog costs no more to count than a small one's. Served by {@code
+     * idx_follows_following_created_follower} (V37).
+     *
+     * @param userId followee whose pending requests are counted
+     * @param limit the most rows read
+     * @return pending requests, at most {@code limit}
+     */
+    @Query(
+            value =
+                    "SELECT count(*) FROM (SELECT 1 FROM follows WHERE following_id = :userId"
+                            + " AND status = 'pending' LIMIT :limit) pending",
+            nativeQuery = true)
+    long countPendingRequestsUpTo(@Param("userId") UUID userId, @Param("limit") int limit);
+
+    /**
+     * The subset of {@code candidateIds} that have a pending follow request to {@code userId}.
+     *
+     * @param userId followee
+     * @param candidateIds users who may have asked to follow
+     * @return the candidates with a pending request
+     */
+    @Query(
+            value =
+                    "SELECT follower_id FROM follows WHERE following_id = :userId"
+                            + " AND status = 'pending' AND follower_id IN (:candidateIds)",
+            nativeQuery = true)
+    List<UUID> findPendingRequesterIdsAmong(
+            @Param("userId") UUID userId, @Param("candidateIds") Collection<UUID> candidateIds);
+
+    /**
      * Keyset page of a user's pending follow requests strictly after the cursor tuple, newest
      * first.
      *

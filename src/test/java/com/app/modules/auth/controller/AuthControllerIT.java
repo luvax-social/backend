@@ -95,6 +95,11 @@ class AuthControllerIT {
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry r) {
+        // These tests drive login, register and report submission as setup, not as the
+        // subject under test. The kill switch keeps them off the network: the dev profile
+        // defaults the secret to Cloudflare's test key, and a real siteverify call would
+        // make the suite depend on an external service being reachable.
+        r.add("TURNSTILE_AUTH_ENABLED", () -> false);
         r.add("spring.data.redis.host", redis::getHost);
         r.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         r.add("spring.data.redis.password", () -> "");
@@ -952,7 +957,7 @@ class AuthControllerIT {
 
     @Test
     void login_bodyExceedsMaxLoginBodyBytes_returns400WithApiResponseEnvelope() {
-        // Default maxLoginBodyBytes is 2048; build ~5KB of JSON padding.
+        // Default maxLoginBodyBytes is 4096; build ~5KB of JSON padding.
         StringBuilder padding = new StringBuilder(5000);
         for (int i = 0; i < 5000; i++) {
             padding.append('x');

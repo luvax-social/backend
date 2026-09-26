@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.app.modules.mail.config.MailProperties;
 import com.app.modules.mail.config.noop.SentMail;
 import com.app.modules.mail.config.noop.SentMailRecorder;
+import com.app.modules.mail.config.resend.ResendProperties;
 import com.app.modules.mail.enums.MailTemplate;
 import com.app.modules.mail.service.MailSender;
 import com.app.modules.mail.service.impl.NoopMailSender;
@@ -63,7 +64,8 @@ class TemplateMailSenderParityTest {
         properties.setAppName("Social");
         properties.setFrontendBaseUrl("http://localhost:3000");
         sentMailRecorder = new SentMailRecorder();
-        resendMailSender = new ResendMailSender(resend, properties, mailTemplateRenderer);
+        resendMailSender =
+                new ResendMailSender(resend, resendProperties(), properties, mailTemplateRenderer);
         noopMailSender = new NoopMailSender(properties, mailTemplateRenderer, sentMailRecorder);
         when(resend.emails()).thenReturn(emails);
         when(mailTemplateRenderer.render(any(MailTemplate.class), any()))
@@ -123,5 +125,11 @@ class TemplateMailSenderParityTest {
         mailSender.sendWelcome(TO_EMAIL, TO_NAME);
         mailSender.sendPasswordChanged(TO_EMAIL, TO_NAME);
         mailSender.sendOAuthAccountNoPassword(TO_EMAIL, TO_NAME);
+    }
+
+    private static ResendProperties resendProperties() {
+        ResendProperties resendProperties = new ResendProperties();
+        resendProperties.setApiKey("test-key");
+        return resendProperties;
     }
 }

@@ -11,6 +11,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
 public record StoryFeedItemResponse(
         @Schema(description = "Author user identifier.") UUID userId,
         @Schema(description = "Author username.") String username,
+        @Schema(description = "Whether the author carries a verified badge.") boolean isVerified,
+        @Schema(
+                        description = "Category of the author's badge; null when not verified.",
+                        nullable = true)
+                String verifiedCategory,
         @Schema(description = "Author display name.", nullable = true) String userDisplayName,
         @Schema(description = "Author avatar CDN URL.", nullable = true) String userAvatarUrl,
         @Schema(description = "True when at least one story is unseen by the viewer.")

@@ -1,7 +1,11 @@
 package com.app.modules.social.service.impl;
 
+import static com.app.modules.social.messaging.SocialEventTypes.USER_BLOCKED_V1;
 import static com.app.modules.social.messaging.SocialEventTypes.USER_FOLLOWED_V1;
 import static com.app.modules.social.messaging.SocialEventTypes.USER_FOLLOW_REQUESTED_V1;
+import static com.app.modules.social.messaging.SocialEventTypes.USER_FOLLOW_REQUEST_APPROVED_V1;
+import static com.app.modules.social.messaging.SocialEventTypes.USER_FOLLOW_REQUEST_REJECTED_V1;
+import static com.app.modules.social.messaging.SocialEventTypes.USER_UNFOLLOWED_V1;
 
 import java.util.Map;
 import java.util.UUID;
@@ -50,6 +54,54 @@ public class SocialEventServiceImpl implements SocialEventService {
                         followingId.toString(),
                         "status",
                         follow.getStatus()));
+    }
+
+    @Override
+    public void publishUnfollowed(UUID followerId, UUID followingId, FollowStatus previousStatus) {
+        Assert.notNull(followerId, "followerId must not be null");
+        Assert.notNull(followingId, "followingId must not be null");
+        Assert.notNull(previousStatus, "previousStatus must not be null");
+        outboxService.enqueue(
+                USER_UNFOLLOWED_V1,
+                USER_UNFOLLOWED_V1,
+                AGGREGATE_TYPE_USER,
+                followingId,
+                followerId,
+                Map.of(
+                        "followerId",
+                        followerId.toString(),
+                        "followingId",
+                        followingId.toString(),
+                        "previousStatus",
+                        previousStatus));
+    }
+
+    @Override
+    public void publishFollowRequestResolved(UUID requesterId, UUID approverId, boolean approved) {
+        Assert.notNull(requesterId, "requesterId must not be null");
+        Assert.notNull(approverId, "approverId must not be null");
+        String eventType =
+                approved ? USER_FOLLOW_REQUEST_APPROVED_V1 : USER_FOLLOW_REQUEST_REJECTED_V1;
+        outboxService.enqueue(
+                eventType,
+                eventType,
+                AGGREGATE_TYPE_USER,
+                approverId,
+                approverId,
+                Map.of("requesterId", requesterId.toString(), "approverId", approverId.toString()));
+    }
+
+    @Override
+    public void publishBlocked(UUID blockerId, UUID blockedId) {
+        Assert.notNull(blockerId, "blockerId must not be null");
+        Assert.notNull(blockedId, "blockedId must not be null");
+        outboxService.enqueue(
+                USER_BLOCKED_V1,
+                USER_BLOCKED_V1,
+                AGGREGATE_TYPE_USER,
+                blockedId,
+                blockerId,
+                Map.of("blockerId", blockerId.toString(), "blockedId", blockedId.toString()));
     }
 
     private static String eventTypeFor(FollowStatus status) {

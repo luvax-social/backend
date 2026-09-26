@@ -31,6 +31,8 @@ public interface MessageMapper {
      */
     @Mapping(source = "participant.id.userId", target = "userId")
     @Mapping(source = "user.username", target = "username")
+    @Mapping(source = "user.verified", target = "isVerified")
+    @Mapping(source = "user.verifiedCategory", target = "verifiedCategory")
     @Mapping(source = "user.displayName", target = "displayName")
     @Mapping(source = "user.avatarUrl", target = "avatarUrl")
     @Mapping(source = "participant.nickname", target = "nickname")

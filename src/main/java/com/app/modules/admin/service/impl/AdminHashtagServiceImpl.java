@@ -14,6 +14,7 @@ import com.app.modules.admin.dto.request.AdminUpdateHashtagRequest;
 import com.app.modules.admin.dto.response.AdminActionResponse;
 import com.app.modules.admin.enums.AdminActionType;
 import com.app.modules.admin.service.AdminActionRecorder;
+import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.admin.service.AdminHashtagService;
 import com.app.modules.hashtag.dto.response.HashtagAdminResponse;
 import com.app.modules.hashtag.enums.HashtagStatus;
@@ -27,31 +28,37 @@ public class AdminHashtagServiceImpl implements AdminHashtagService {
 
     private final HashtagLifecycleService hashtagLifecycleService;
     private final AdminActionRecorder adminActionRecorder;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public AdminHashtagServiceImpl(
             HashtagLifecycleService hashtagLifecycleService,
-            AdminActionRecorder adminActionRecorder) {
+            AdminActionRecorder adminActionRecorder,
+            AdminAuthorizationService adminAuthorizationService) {
         this.hashtagLifecycleService = hashtagLifecycleService;
         this.adminActionRecorder = adminActionRecorder;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     @Override
     @Transactional(readOnly = true)
     public CursorPageResponse<HashtagAdminResponse> listHashtags(
-            HashtagStatus status, String cursor, int limit) {
+            UUID actorId, HashtagStatus status, String cursor, int limit) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
         return hashtagLifecycleService.list(status, cursor, limit);
     }
 
     @Override
     @Transactional(readOnly = true)
     public CursorPageResponse<HashtagAdminResponse> searchHashtags(
-            String query, HashtagStatus status, String cursor, int limit) {
+            UUID actorId, String query, HashtagStatus status, String cursor, int limit) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
         return hashtagLifecycleService.search(query, status, cursor, limit);
     }
 
     @Override
     @Transactional
     public AdminActionResponse createHashtag(UUID actorId, AdminCreateHashtagRequest request) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
         HashtagLifecycleResult result =
                 hashtagLifecycleService.create(
                         actorId, request.name(), request.status(), request.note());
@@ -62,6 +69,7 @@ public class AdminHashtagServiceImpl implements AdminHashtagService {
     @Transactional
     public AdminActionResponse updateHashtag(
             UUID actorId, UUID hashtagId, AdminUpdateHashtagRequest request) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
         HashtagLifecycleResult result =
                 hashtagLifecycleService.changeStatus(
                         actorId, hashtagId, request.status(), request.note());
@@ -72,6 +80,7 @@ public class AdminHashtagServiceImpl implements AdminHashtagService {
     @Transactional
     public AdminActionResponse deleteHashtag(
             UUID actorId, UUID hashtagId, AdminDeleteHashtagRequest request) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
         HashtagLifecycleResult result =
                 hashtagLifecycleService.changeStatus(
                         actorId, hashtagId, HashtagStatus.DELETED, request.reason());
@@ -92,6 +101,22 @@ public class AdminHashtagServiceImpl implements AdminHashtagService {
                             ? AdminActionType.UNBAN_HASHTAG
                             : AdminActionType.EDIT_HASHTAG;
         };
+    }
+
+    @Override
+    @Transactional
+    public AdminActionResponse pinHashtag(UUID actorId, UUID hashtagId, String note) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
+        HashtagLifecycleResult result = hashtagLifecycleService.pin(actorId, hashtagId);
+        return record(actorId, AdminActionType.PIN_HASHTAG, result, note);
+    }
+
+    @Override
+    @Transactional
+    public AdminActionResponse unpinHashtag(UUID actorId, UUID hashtagId, String note) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
+        HashtagLifecycleResult result = hashtagLifecycleService.unpin(actorId, hashtagId);
+        return record(actorId, AdminActionType.UNPIN_HASHTAG, result, note);
     }
 
     // Every value here is a fact this transaction established, which is the only thing

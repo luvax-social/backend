@@ -38,7 +38,7 @@ class SuspensionExpiryServiceImplTest {
     @Test
     void reinstateIfExpired_updateApplied_recordsAuditAndReturnsActive() {
         UUID userId = UUID.randomUUID();
-        when(adminUserRepository.reinstateExpiredSuspension(userId)).thenReturn(1);
+        when(adminUserRepository.reinstateExpiredSuspension(eq(userId), any())).thenReturn(1);
         when(adminUserRepository.findStatusIncludingDeleted(userId)).thenReturn("active");
 
         assertThat(service.reinstateIfExpired(userId)).isEqualTo(UserStatus.ACTIVE);
@@ -61,7 +61,7 @@ class SuspensionExpiryServiceImplTest {
     @Test
     void reinstateIfExpired_zeroRowsButRowNowActive_isSuccessWithoutASecondAuditRow() {
         UUID userId = UUID.randomUUID();
-        when(adminUserRepository.reinstateExpiredSuspension(userId)).thenReturn(0);
+        when(adminUserRepository.reinstateExpiredSuspension(eq(userId), any())).thenReturn(0);
         when(adminUserRepository.findStatusIncludingDeleted(userId)).thenReturn("active");
 
         assertThat(service.reinstateIfExpired(userId)).isEqualTo(UserStatus.ACTIVE);
@@ -76,7 +76,7 @@ class SuspensionExpiryServiceImplTest {
     @Test
     void reinstateIfExpired_zeroRowsBecauseAdministratorBanned_returnsBanned() {
         UUID userId = UUID.randomUUID();
-        when(adminUserRepository.reinstateExpiredSuspension(userId)).thenReturn(0);
+        when(adminUserRepository.reinstateExpiredSuspension(eq(userId), any())).thenReturn(0);
         when(adminUserRepository.findStatusIncludingDeleted(userId)).thenReturn("banned");
 
         assertThat(service.reinstateIfExpired(userId)).isEqualTo(UserStatus.BANNED);
@@ -85,7 +85,7 @@ class SuspensionExpiryServiceImplTest {
     @Test
     void reinstateIfExpired_rowGone_returnsNull() {
         UUID userId = UUID.randomUUID();
-        when(adminUserRepository.reinstateExpiredSuspension(userId)).thenReturn(0);
+        when(adminUserRepository.reinstateExpiredSuspension(eq(userId), any())).thenReturn(0);
         when(adminUserRepository.findStatusIncludingDeleted(userId)).thenReturn(null);
 
         assertThat(service.reinstateIfExpired(userId)).isNull();
@@ -95,10 +95,11 @@ class SuspensionExpiryServiceImplTest {
     void reinstateExpiredBatch_countsOnlyRowsThisPassUpdated() {
         UUID applied = UUID.randomUUID();
         UUID alreadyHandled = UUID.randomUUID();
-        when(adminUserRepository.findExpiredSuspensionIds(500))
+        when(adminUserRepository.findExpiredSuspensionIds(eq(500), any()))
                 .thenReturn(List.of(applied, alreadyHandled));
-        when(adminUserRepository.reinstateExpiredSuspension(applied)).thenReturn(1);
-        when(adminUserRepository.reinstateExpiredSuspension(alreadyHandled)).thenReturn(0);
+        when(adminUserRepository.reinstateExpiredSuspension(eq(applied), any())).thenReturn(1);
+        when(adminUserRepository.reinstateExpiredSuspension(eq(alreadyHandled), any()))
+                .thenReturn(0);
 
         assertThat(service.reinstateExpiredBatch(500)).isEqualTo(1);
 
@@ -126,10 +127,10 @@ class SuspensionExpiryServiceImplTest {
 
     @Test
     void reinstateExpiredBatch_noCandidates_reinstatesNothing() {
-        when(adminUserRepository.findExpiredSuspensionIds(500)).thenReturn(List.of());
+        when(adminUserRepository.findExpiredSuspensionIds(eq(500), any())).thenReturn(List.of());
 
         assertThat(service.reinstateExpiredBatch(500)).isZero();
 
-        verify(adminUserRepository, never()).reinstateExpiredSuspension(any());
+        verify(adminUserRepository, never()).reinstateExpiredSuspension(any(), any());
     }
 }

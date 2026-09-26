@@ -24,6 +24,8 @@ The batch is bounded and an oversized batch is rejected as a validation error ra
 Each impression carries a client-generated `impressionId`, which becomes the outbox `event_id`.
 A retry after a network failure therefore resends the same ids and is absorbed by three constraints that already existed: `outbox_events.event_id` is `UNIQUE`, `processed_messages` is unique on `(consumer_name, event_id)`, and `UserEventJdbcRepository.insertIgnoreDuplicate` keys the row on the event id.
 `OutboxService.enqueueOnce` is the entry point; the ordinary `enqueue` generates a random event id and would count a resubmitted batch twice.
+This dedupe holds for as long as the retention job keeps the rows it depends on: the outbox row for 7 days (`app.retention.outbox-published`) and the inbox marker for 14 days (`app.retention.processed-messages`).
+A retry older than both windows is no longer recognised as a duplicate and is processed as a new impression.
 
 **`posts.view_count` is never touched by this path**, and neither is it touched by `POST /posts/{postId}/view`.
 Both endpoints emit `post.viewed.v1` and neither writes the counter, which a background job maintains and application code never writes.
@@ -180,6 +182,7 @@ The last row is the read the activity log's mandatory window exists to make impo
 | An analytics write must never fail the request that triggered it | `UserEventRecorder` - no retry, no outbox, no dead letter. `OutboxService` exists for events that must reach RabbitMQ; these are not those |
 | Event writes must not be able to exhaust the connection pool | `UserEventRecorder` - submission is bounded by a permit count well under the Hikari pool size, and a submission with no permit free is dropped immediately rather than queued or blocked, because backpressure onto a request thread would defeat the rule above |
 | `UserEventRecorder` writes only three event types | `session_start` on any route that issues a session, `search` on both search surfaces carrying the term, `profile_view` for another account's profile. Chosen for investigative value per unit of write volume |
+| A dropped or delayed analytics write must not lose the request's trace | `UserEventRecorder`'s task decorator restores the caller's W3C trace context on the virtual thread before the insert runs, so the write's own span still joins the request's trace even though it commits independently and on no schedule the caller can observe |
 | Engagement event writes must not drop rows and must survive redelivery | `RecommendationFeedbackConsumer` with `UserEventJdbcRepository.insertIgnoreDuplicate` - the row id is the domain event id and the insert is `ON CONFLICT DO NOTHING`, so a replay is a no-op. These rows are the canonical record Gorse is rebuilt from, which is why they take the durable path rather than the dropping one |
 | An engagement write must never fail the user action that triggered it | `PostLikeServiceImpl` / `PostSaveServiceImpl` enqueue an outbox row inside the domain transaction; the event reaches `user_events` and Gorse later, off the request thread |
 | A view of one's own profile is not recorded | `UserServiceImpl.assemblePublicProfile` - excluded at the call site rather than filtered out later, so the table does not fill with the views that answer no question |
@@ -198,6 +201,84 @@ The last row is the read the activity log's mandatory window exists to make impo
 - No explicit user "not interested" signal. Negative training examples are inferred rather than declared: a `read` with no accompanying positive feedback is what the factorization machine ranker trains against. A seeded database with no read signal therefore teaches the ranker nothing, which is why `SeedOutboxEmitter` emits `post.viewed.v1` and `AnalyticsSeedWriter` no longer writes `post_view` rows of its own.
 
 ---
+
+## Section 3D: `user_hashtag_affinity`
+
+A derived read model: how strongly each user leans toward each hashtag, over a bounded window.
+Three surfaces consume it - personalised trending, composer suggestions, and the interest similarity candidate source planned next - so it is built once rather than three times.
+
+Fully rebuildable from `user_events` joined to `post_hashtags`.
+Losing the table costs only the next scheduled recompute, so it is a cache tier by the classification in `GLOBAL_RULES.md`, not a source of truth.
+
+### Key shape: in place, not versioned by window
+
+The primary key is `(user_id, hashtag_id)` and each run overwrites the previous score.
+Versioning by window was considered and rejected: no consumer reads a historical window, all three ask only what the user leans toward now, and the row count would multiply by the number of retained windows on a table already sized users by hashtags.
+The rollback argument that usually favours versioning is weak here specifically, because the job is a full recompute of a rolling window: a bad run is corrected by the next run twelve hours later rather than by restoring its predecessor.
+
+`window_start` and `window_end` are kept on every row even though the score is not versioned by them.
+A score is meaningless without the interval it was computed over, and a stale row left by a job that stopped running is otherwise undetectable.
+
+### Writers
+
+**Written only by the affinity job.** No request path may write this table.
+
+The job runs on a 12 hour cycle and assumes a single application instance with no distributed scheduler lock, the same assumption `platform_stats` makes.
+What makes that safe is the write shape rather than the schedule: the recompute is `INSERT ... ON CONFLICT (user_id, hashtag_id) DO UPDATE`, so a second concurrent run rewrites the same rows with the same values instead of duplicating them.
+
+Each run stamps `computed_at` and then deletes rows carrying an older stamp, in the same transaction as the upsert.
+Both statements committing together is what stops a reader seeing the previous run's rows for one user and this run's for another.
+A user who stops engaging, or a hashtag that leaves circulation, therefore loses its rows rather than keeping a score frozen at whatever it held when the job last saw it.
+
+The job catches and logs its own failures rather than letting them propagate.
+Spring's scheduler abandons a `fixedDelay` task whose method throws, which would silently stop every later run; this model is rebuildable and a missed cycle is corrected by the next one, so surviving to the next cycle matters more than surfacing the failure from the scheduler.
+
+### The `user_events` time bound is mandatory here
+
+`user_events` is partitioned by month with a `DEFAULT` catch-all.
+Every read in the derivation is bounded on both sides by `created_at`, because a predicate on `user_id` alone prunes nothing and touches every partition ever declared.
+
+Measured on the seeded database, 24 partitions declared, `EXPLAIN (ANALYZE, BUFFERS)` on the bounded derivation read: **4 partitions scanned** (`user_events_2026_06` through `user_events_2026_09`), 61 ms total.
+The three older months are index scans; the current month is a sequential scan because it holds 43,375 of the rows.
+
+### Weighting, decay and normalisation
+
+| Event | Weight | Why |
+|---|---|---|
+| `post_save` | 4.0 | a deliberate keep-for-later, the strongest statement of interest available |
+| `post_share` | 3.0 | endorsement to other people |
+| `post_comment` | 3.0 | effortful public engagement |
+| `post_like` | 2.0 | cheap approval |
+| `post_view` | 0.25 | passive, and by far the most numerous |
+| `post_unsave` | -4.0 | exact negation of `post_save` |
+| `post_unlike` | -2.0 | exact negation of `post_like` |
+| `hashtag_click` | 3.0 | direct navigational intent, joined on the hashtag itself rather than through a post |
+
+**`post_view = 0.25` was calibrated against a seeding artefact and must be re-measured against real traffic.**
+Do not read it as a considered production constant.
+At the time it was chosen, all 21,548 `post_view` rows in the seeded database carried a single date (2026-09-07) while every other event type spanned the full 90 days.
+That is an artefact of how the seed replays events: `SeedOutboxEmitter` emits `post.viewed.v1` and the consumer stamps the row at replay time, so every view looks like it happened at once, and looks like it happened now.
+The combination made views simultaneously the most numerous signal and, after time decay, the most recent one, which is why the weight sits an order of magnitude below a like rather than merely below it.
+Under real traffic, views will spread across the window like every other event and the same 0.25 will suppress them further than intended.
+Re-measure it against a production event distribution before treating the ranking as tuned.
+
+Reversals negate their own action exactly, so a user who liked and then unliked a post contributes nothing from that pair.
+A hashtag whose contributions sum to zero or below is dropped rather than stored at zero.
+
+`hashtag_click` is unioned in separately because its `entity_id` is already a hashtag id: it needs no join through `post_hashtags`.
+
+Decay is exponential with a **30 day half-life** across a **90 day window**.
+Three half-lives span the window, so its far edge still contributes about an eighth rather than falling off a cliff, while last week clearly outranks last month.
+A 7 day half-life would make the 90 day window pointless, since the far edge would contribute a hundredth of a percent; a 60 day half-life would barely separate the two ends.
+
+Scores are normalised into each user's share of their own decayed total, so the values for one user sum to 1.
+This is what makes a user with three thousand events comparable with one with thirty.
+Without it, the blend that reads this table would rank by activity volume rather than by interest.
+
+### Cold start
+
+A user with no events in the window ends with no rows.
+That is the correct outcome, not a gap to paper over: the read path handles an empty result by falling back to the platform list, and the job never fabricates a row to avoid one.
 
 ## Section 4: Inter-Module Dependencies
 

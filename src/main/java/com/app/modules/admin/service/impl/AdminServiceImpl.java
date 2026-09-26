@@ -34,6 +34,7 @@ import com.app.modules.admin.service.AdminService;
 import com.app.modules.comment.repository.CommentRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.notification.entity.enums.NotificationType;
+import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.repository.PostRepository;
@@ -44,6 +45,7 @@ import com.app.modules.report.enums.ReportStatus;
 import com.app.modules.report.enums.ReportType;
 import com.app.modules.report.repository.ReportRepository;
 import com.app.modules.story.repository.StoryRepository;
+import com.app.modules.support.service.VerificationService;
 import com.app.modules.users.entity.User;
 import com.app.modules.users.enums.UserRole;
 import com.app.modules.users.enums.UserStatus;
@@ -70,6 +72,7 @@ public class AdminServiceImpl implements AdminService {
     private final AdminActionRecorder adminActionRecorder;
     private final AdminAuthorizationService adminAuthorizationService;
     private final NotificationService notificationService;
+    private final VerificationService verificationService;
 
     public AdminServiceImpl(
             AdminActionRepository adminActionRepository,
@@ -83,7 +86,8 @@ public class AdminServiceImpl implements AdminService {
             AdminActionMapper adminActionMapper,
             AdminActionRecorder adminActionRecorder,
             AdminAuthorizationService adminAuthorizationService,
-            NotificationService notificationService) {
+            NotificationService notificationService,
+            VerificationService verificationService) {
         this.adminActionRepository = adminActionRepository;
         this.userRepository = userRepository;
         this.postRepository = postRepository;
@@ -96,6 +100,7 @@ public class AdminServiceImpl implements AdminService {
         this.adminActionRecorder = adminActionRecorder;
         this.adminAuthorizationService = adminAuthorizationService;
         this.notificationService = notificationService;
+        this.verificationService = verificationService;
     }
 
     @Override
@@ -236,7 +241,8 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(readOnly = true)
-    public EscalatedReportCountResponse countEscalatedReports() {
+    public EscalatedReportCountResponse countEscalatedReports(UUID actorId) {
+        adminAuthorizationService.assertActorIsAdministrator(actorId);
         return new EscalatedReportCountResponse(
                 reportRepository.countByStatus(ReportStatus.ESCALATED));
     }
@@ -349,8 +355,26 @@ public class AdminServiceImpl implements AdminService {
         // administrator has already handled.
         user.setSuspendedUntil(targetStatus == UserStatus.SUSPENDED ? suspendedUntil : null);
         userRepository.save(user);
+        // The badge follows the account status in the same transaction as the status change, so
+        // the two can never be observed disagreeing. Suspension and a ban withdraw it;
+        // reinstatement does not restore it, because a badge is a claim the platform makes and
+        // re-making it is a decision somebody has to take again rather than one that unwinds
+        // automatically.
+        //
+        // No support ticket is created for this. It is a status-driven side effect rather than a
+        // request, and the audit row it writes carries a null actor so the log distinguishes it
+        // from a badge a moderator chose to withdraw.
+        verificationService.applyStatusChange(userId, targetStatus);
+        // The suspension end date is a server-derived fact, so it belongs on the audit row, and the
+        // suspension notice is the one template that has to state a date. Passing it through the
+        // metadata map is what lets the recorder build the notice payload without this method
+        // knowing that a notice exists.
+        Map<String, Object> metadata =
+                targetStatus == UserStatus.SUSPENDED && suspendedUntil != null
+                        ? Map.of(AdminActionRecorder.SUSPENDED_UNTIL_KEY, suspendedUntil.toString())
+                        : null;
         return adminActionRecorder.record(
-                actorId, actionType, userId, "user", userId, null, reason, null);
+                actorId, actionType, userId, "user", userId, null, reason, metadata);
     }
 
     // The mutation itself is deliberately not performed here. PostService owns every side effect
@@ -397,8 +421,9 @@ public class AdminServiceImpl implements AdminService {
                     NotificationType.POST_RESTORED,
                     "post",
                     postId,
-                    null,
-                    request.reason());
+                    postId,
+                    request.reason(),
+                    action.id());
         } else {
             resolveLinkedReport(linkedReport, actorId, request.reason());
             notifySystem(
@@ -406,8 +431,9 @@ public class AdminServiceImpl implements AdminService {
                     NotificationType.POST_REMOVED,
                     "post",
                     postId,
-                    null,
-                    request.reason());
+                    postId,
+                    request.reason(),
+                    action.id());
             if (isMatchingPostReport(linkedReport, postId)
                     && !linkedReport.getReporterId().equals(result.ownerId())) {
                 notifySystem(
@@ -416,7 +442,8 @@ public class AdminServiceImpl implements AdminService {
                         "report",
                         linkedReport.getId(),
                         postId,
-                        null);
+                        null,
+                        action.id());
             }
         }
         return new ModerationOutcome(action, result.remainingBannedHashtags());
@@ -433,12 +460,14 @@ public class AdminServiceImpl implements AdminService {
                 commentRepository
                         .findOwnerIdIncludingDeleted(commentId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
-        boolean deleted =
+        // Reads admin_removed_at and not deleted_at, so a comment its author deleted is not
+        // mistaken for one a moderator removed and a restore cannot undo the author's deletion.
+        boolean removed =
                 commentRepository
-                        .isDeletedIncludingDeleted(commentId)
+                        .isAdminRemoved(commentId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
         boolean restore = actionType == AdminActionType.RESTORE_COMMENT;
-        if (restore != deleted) {
+        if (restore != removed) {
             throw new AppException(ApiErrorCode.ADMIN_INVALID_TRANSITION);
         }
         Report linkedReport =
@@ -457,6 +486,7 @@ public class AdminServiceImpl implements AdminService {
                         null);
         if (!restore) {
             resolveLinkedReport(linkedReport, actorId, request.reason());
+            notifyContentRemoved(ownerId, NotificationType.COMMENT_REMOVED, action, request);
         }
         return action;
     }
@@ -469,12 +499,13 @@ public class AdminServiceImpl implements AdminService {
                 storyRepository
                         .findOwnerIdIncludingDeleted(storyId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.STORY_NOT_FOUND));
-        boolean deleted =
+        // Reads admin_removed_at and not deleted_at, for the same reason moderateComment does.
+        boolean removed =
                 storyRepository
-                        .isDeletedIncludingDeleted(storyId)
+                        .isAdminRemoved(storyId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.STORY_NOT_FOUND));
         boolean restore = actionType == AdminActionType.RESTORE_STORY;
-        if (restore != deleted) {
+        if (restore != removed) {
             throw new AppException(ApiErrorCode.ADMIN_INVALID_TRANSITION);
         }
         Report linkedReport =
@@ -492,6 +523,7 @@ public class AdminServiceImpl implements AdminService {
                         null);
         if (!restore) {
             resolveLinkedReport(linkedReport, actorId, request.reason());
+            notifyContentRemoved(ownerId, NotificationType.STORY_REMOVED, action, request);
         }
         return action;
     }
@@ -528,6 +560,7 @@ public class AdminServiceImpl implements AdminService {
                         null);
         if (!restore) {
             resolveLinkedReport(linkedReport, actorId, request.reason());
+            notifyContentRemoved(senderId, NotificationType.MESSAGE_REMOVED, action, request);
         }
         return action;
     }
@@ -575,7 +608,8 @@ public class AdminServiceImpl implements AdminService {
                     "report",
                     reportId,
                     null,
-                    request.reason());
+                    request.reason(),
+                    action.id());
         }
         return action;
     }
@@ -683,14 +717,46 @@ public class AdminServiceImpl implements AdminService {
         reportRepository.save(report);
     }
 
+    /**
+     * Tells a content owner their comment, story or message was removed, and by which decision.
+     *
+     * <p>{@code entityType} is the audit row rather than the removed content, and that is the deep
+     * link: the in-product appeal endpoint opens an appeal against an {@code admin_actions} id, so
+     * pointing the notification at the removed row would leave the client with nothing to appeal
+     * against. The removed content is gone and has no surface to navigate to in any case.
+     *
+     * <p>{@code recipientId} is null for a message whose sender's account was permanently deleted
+     * (V32). That is a legitimate moderation target with nobody left to notify.
+     */
+    private void notifyContentRemoved(
+            UUID recipientId,
+            NotificationType type,
+            AdminActionResponse action,
+            AdminActionRequest request) {
+        if (recipientId == null) {
+            return;
+        }
+        notifySystem(
+                recipientId,
+                type,
+                "admin_action",
+                action.id(),
+                null,
+                request.reason(),
+                action.id());
+    }
+
     private void notifySystem(
             UUID recipientId,
             NotificationType type,
             String entityType,
             UUID entityId,
             UUID postId,
-            String message) {
-        notificationService.create(null, recipientId, type, entityType, entityId, postId, message);
+            String message,
+            UUID adminActionId) {
+        notificationService.create(
+                NotificationDraft.systemNotice(
+                        recipientId, type, entityType, entityId, postId, message, adminActionId));
     }
 
     private CursorPageResponse<AdminActionSummaryResponse> toPage(

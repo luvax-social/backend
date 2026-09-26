@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 import com.app.common.vocabulary.dto.response.ModerationActionVocabularyResponse;
 import com.app.common.vocabulary.dto.response.NotificationTypeVocabularyResponse;
 import com.app.common.vocabulary.dto.response.ReportReasonVocabularyResponse;
+import com.app.common.vocabulary.dto.response.SupportCategoryVocabularyResponse;
 
 /**
  * Read-only access to the three configuration tables that carry display metadata for enum values.
@@ -100,6 +101,34 @@ public class VocabularyRepository {
                                         rs.getBoolean("requires_reason"),
                                         rs.getBoolean("is_reversible"),
                                         rs.getBoolean("is_enabled")))
+                .list();
+    }
+
+    /**
+     * Reads every support ticket category, in the display order the table declares.
+     *
+     * <p>Ordered by {@code sort_order} then key, matching the report reason read above, so two rows
+     * sharing a sort order still come back in a stable order.
+     *
+     * @return every row of {@code support_category_configs}, enabled or not
+     */
+    public List<SupportCategoryVocabularyResponse> findSupportCategories() {
+        return jdbcClient
+                .sql(
+                        "SELECT category_key, display_name, description, is_appeal,"
+                                + " allows_public_form, is_enabled, sort_order"
+                                + " FROM support_category_configs"
+                                + " ORDER BY sort_order ASC, category_key ASC")
+                .query(
+                        (ResultSet rs, int rowNum) ->
+                                new SupportCategoryVocabularyResponse(
+                                        rs.getString("category_key"),
+                                        rs.getString("display_name"),
+                                        rs.getString("description"),
+                                        rs.getBoolean("is_appeal"),
+                                        rs.getBoolean("allows_public_form"),
+                                        rs.getBoolean("is_enabled"),
+                                        rs.getShort("sort_order")))
                 .list();
     }
 

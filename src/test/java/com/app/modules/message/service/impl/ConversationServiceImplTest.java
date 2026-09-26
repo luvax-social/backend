@@ -91,6 +91,8 @@ class ConversationServiceImplTest {
                             return new ParticipantResponse(
                                     p.getId().getUserId(),
                                     u == null ? null : u.getUsername(),
+                                    u != null && u.isVerified(),
+                                    u == null ? null : u.getVerifiedCategory(),
                                     u == null ? null : u.getDisplayName(),
                                     u == null ? null : u.getAvatarUrl(),
                                     p.getJoinedAt(),

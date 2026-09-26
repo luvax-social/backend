@@ -1,6 +1,7 @@
 package com.app.common.outbox.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -162,6 +164,90 @@ class OutboxEventRepositoryIT {
                 .isBefore(deadAt.plusSeconds(1));
         assertThat(persisted.getLastError()).isEqualTo("nack");
         assertThat(persisted.getPublishedAt()).isNull();
+    }
+
+    @Test
+    void insertPending_withTraceContext_roundTripsThroughInsertAndClaim() {
+        String traceParent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        OutboxEvent event =
+                newEvent(now.minusSeconds(1), 0).toBuilder()
+                        .traceParent(traceParent)
+                        .traceState("congo=t61")
+                        .build();
+
+        OutboxEvent saved = outboxEventRepository.insertPending(event);
+        entityManager.clear();
+        OutboxEvent persisted = outboxEventRepository.findById(saved.getId()).orElseThrow();
+        List<OutboxEvent> claimed =
+                outboxEventRepository.claimPublishableBatch(now, now, now.plusMinutes(2), 100);
+
+        assertThat(saved.getTraceParent()).isEqualTo(traceParent);
+        assertThat(saved.getTraceState()).isEqualTo("congo=t61");
+        assertThat(persisted.getTraceParent()).isEqualTo(traceParent);
+        assertThat(persisted.getTraceState()).isEqualTo("congo=t61");
+        assertThat(claimed).extracting(OutboxEvent::getTraceParent).containsExactly(traceParent);
+    }
+
+    @Test
+    void insertPending_withoutTraceContext_storesNullTraceColumns() {
+        OutboxEvent saved =
+                outboxEventRepository.insertPending(
+                        newEvent(OffsetDateTime.now(ZoneOffset.UTC), 0));
+
+        assertThat(saved.getTraceParent()).isNull();
+        assertThat(saved.getTraceState()).isNull();
+    }
+
+    @Test
+    void insertPending_malformedTraceparent_rejectedByCheckConstraint() {
+        OutboxEvent event =
+                newEvent(OffsetDateTime.now(ZoneOffset.UTC), 0).toBuilder()
+                        .traceParent("not-a-w3c-traceparent")
+                        .build();
+
+        assertThatThrownBy(() -> outboxEventRepository.insertPending(event))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("chk_outbox_events_trace_parent_format");
+    }
+
+    @Test
+    void deletePublishedBefore_removesOnlyOldPublishedRows() {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        OutboxEvent oldPublished = publishedAt(now.minusDays(10));
+        OutboxEvent recentPublished = publishedAt(now.minusHours(1));
+        OutboxEvent pending = outboxEventRepository.insertPending(newEvent(now, 0));
+        OutboxEvent dead = claimedEvent(2);
+        outboxEventRepository.markDead(
+                dead.getId(), dead.getEventId(), dead.getClaimId(), 3, now, "nack");
+
+        int deleted = outboxEventRepository.deletePublishedBefore(now.minusDays(1), 100);
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(outboxEventRepository.findById(oldPublished.getId())).isEmpty();
+        assertThat(outboxEventRepository.findById(recentPublished.getId())).isPresent();
+        assertThat(outboxEventRepository.findById(pending.getId())).isPresent();
+        assertThat(outboxEventRepository.findById(dead.getId())).isPresent();
+    }
+
+    @Test
+    void deletePublishedBefore_boundedByLimit() {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        publishedAt(now.minusDays(10));
+        publishedAt(now.minusDays(9));
+        publishedAt(now.minusDays(8));
+
+        int deleted = outboxEventRepository.deletePublishedBefore(now.minusDays(1), 2);
+
+        assertThat(deleted).isEqualTo(2);
+    }
+
+    private OutboxEvent publishedAt(OffsetDateTime publishedAt) {
+        OutboxEvent event = claimedEvent(0);
+        outboxEventRepository.markPublished(
+                event.getId(), event.getEventId(), event.getClaimId(), publishedAt);
+        entityManager.clear();
+        return outboxEventRepository.findById(event.getId()).orElseThrow();
     }
 
     @Test

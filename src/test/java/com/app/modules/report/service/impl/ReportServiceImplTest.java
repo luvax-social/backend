@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -19,9 +20,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
+import com.app.common.turnstile.AuthTurnstileGuard;
 import com.app.modules.report.dto.request.CreateReportRequest;
 import com.app.modules.report.dto.request.UpdateReportStatusRequest;
 import com.app.modules.report.dto.response.ReportResponse;
@@ -37,14 +41,29 @@ import com.app.modules.users.enums.UserRole;
 @ExtendWith(MockitoExtension.class)
 class ReportServiceImplTest {
 
+    private static final String TURNSTILE_TOKEN = "turnstile-token";
+    private static final String CLIENT_IP = "4.5.6.7";
+
     @Mock private ReportRepository reportRepository;
     @Mock private ReportMapper reportMapper;
+    @Mock private AuthTurnstileGuard turnstileGuard;
+    @Mock private TransactionTemplate transactionTemplate;
 
     private ReportServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new ReportServiceImpl(reportRepository, reportMapper);
+        // Execute TransactionTemplate callbacks directly (no real PlatformTransactionManager).
+        lenient()
+                .when(transactionTemplate.execute(any(TransactionCallback.class)))
+                .thenAnswer(
+                        inv -> {
+                            TransactionCallback<?> cb = inv.getArgument(0);
+                            return cb.doInTransaction(null);
+                        });
+        service =
+                new ReportServiceImpl(
+                        reportRepository, reportMapper, turnstileGuard, transactionTemplate);
     }
 
     @Test
@@ -54,7 +73,11 @@ class ReportServiceImplTest {
         UUID entityId = UUID.randomUUID();
         CreateReportRequest request =
                 new CreateReportRequest(
-                        ReportType.POST, ReportReason.SPAM, entityId, "Repeated advertisements");
+                        ReportType.POST,
+                        ReportReason.SPAM,
+                        entityId,
+                        "Repeated advertisements",
+                        TURNSTILE_TOKEN);
         ReportResponse expected = response(ReportStatus.PENDING);
         when(reportRepository.findOwnerId(ReportType.POST, entityId))
                 .thenReturn(Optional.of(ownerId));
@@ -62,7 +85,7 @@ class ReportServiceImplTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(reportMapper.toResponse(any(Report.class))).thenReturn(expected);
 
-        ReportResponse result = service.submitReport(reporterId, request);
+        ReportResponse result = service.submitReport(reporterId, request, CLIENT_IP);
 
         assertThat(result).isEqualTo(expected);
         ArgumentCaptor<Report> captor = ArgumentCaptor.forClass(Report.class);
@@ -84,7 +107,9 @@ class ReportServiceImplTest {
                                                 ReportType.USER,
                                                 ReportReason.HARASSMENT,
                                                 entityId,
-                                                null)))
+                                                null,
+                                                TURNSTILE_TOKEN),
+                                        CLIENT_IP))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.REPORT_TARGET_NOT_FOUND);
@@ -106,7 +131,9 @@ class ReportServiceImplTest {
                                                 ReportType.POST,
                                                 ReportReason.OTHER,
                                                 entityId,
-                                                null)))
+                                                null,
+                                                TURNSTILE_TOKEN),
+                                        CLIENT_IP))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.REPORT_SELF_NOT_ALLOWED);
@@ -132,7 +159,9 @@ class ReportServiceImplTest {
                                                 ReportType.COMMENT,
                                                 ReportReason.HATE_SPEECH,
                                                 entityId,
-                                                null)))
+                                                null,
+                                                TURNSTILE_TOKEN),
+                                        CLIENT_IP))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.REPORT_DUPLICATE);

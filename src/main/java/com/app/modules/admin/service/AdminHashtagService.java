@@ -24,25 +24,29 @@ public interface AdminHashtagService {
     /**
      * Lists hashtags newest first, spanning every status unless one is named.
      *
+     * @param actorId the acting administrator, checked against the source of truth
      * @param status status to match, or null for every status
      * @param cursor opaque cursor from the prior page
      * @param limit requested page size
      * @return matching hashtags with their lifecycle state
+     * @throws AppException {@code FORBIDDEN} when the actor is not an administrator
      */
     CursorPageResponse<HashtagAdminResponse> listHashtags(
-            HashtagStatus status, String cursor, int limit);
+            UUID actorId, HashtagStatus status, String cursor, int limit);
 
     /**
      * Searches hashtags by case-insensitive substring, spanning every status unless one is named.
      *
+     * @param actorId the acting administrator, checked against the source of truth
      * @param query search text
      * @param status status to match, or null for every status
      * @param cursor opaque cursor from the prior page
      * @param limit requested page size
      * @return matching hashtags with their lifecycle state
+     * @throws AppException {@code FORBIDDEN} when the actor is not an administrator
      */
     CursorPageResponse<HashtagAdminResponse> searchHashtags(
-            String query, HashtagStatus status, String cursor, int limit);
+            UUID actorId, String query, HashtagStatus status, String cursor, int limit);
 
     /**
      * Creates a hashtag directly in the requested state and records one {@code create_hashtag} row.
@@ -87,4 +91,27 @@ public interface AdminHashtagService {
      */
     AdminActionResponse deleteHashtag(
             UUID actorId, UUID hashtagId, AdminDeleteHashtagRequest request);
+
+    /**
+     * Pins a hashtag platform-wide and records the moderation action.
+     *
+     * <p>Writes the {@code admin_actions} row and mutates the hashtag in the same transaction, as
+     * every other action on this surface does.
+     *
+     * @param actorId administrator taking the action
+     * @param hashtagId hashtag to pin
+     * @param note optional free-text note stored on the audit row
+     * @return the recorded moderation action
+     */
+    AdminActionResponse pinHashtag(UUID actorId, UUID hashtagId, String note);
+
+    /**
+     * Removes a platform-wide pin and records the moderation action.
+     *
+     * @param actorId administrator taking the action
+     * @param hashtagId hashtag to unpin
+     * @param note optional free-text note stored on the audit row
+     * @return the recorded moderation action
+     */
+    AdminActionResponse unpinHashtag(UUID actorId, UUID hashtagId, String note);
 }

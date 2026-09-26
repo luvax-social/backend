@@ -61,6 +61,23 @@ public interface StoryService {
     List<StoryFeedItemResponse> getStoryFeed(UUID viewerId);
 
     /**
+     * Active stories from suggested accounts the viewer does not follow.
+     *
+     * <p>Widens discovery, never visibility. A private account never appears, and every exclusion
+     * {@code listUserStories} applies to a direct profile visit applies here too: a block in either
+     * direction, a dismissed suggestion, an account that opted out of being suggested, and both of
+     * the story's own tombstones.
+     *
+     * <p>Ordered by suggestion rank rather than recency, because the reason an account appears here
+     * is that it was suggested.
+     *
+     * @param viewerId the account discovering
+     * @param limit maximum authors, bounded by the implementation
+     * @return tray entries in suggestion rank order, empty when nothing qualifies
+     */
+    List<StoryFeedItemResponse> discoverStories(UUID viewerId, int limit);
+
+    /**
      * Soft-deletes a story owned by the requester.
      *
      * <p>Expired-but-live stories remain deletable so they can become cleanup-job targets.

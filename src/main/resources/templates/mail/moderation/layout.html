@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en" th:fragment="page(headline, statement)">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${headline}">Notice</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #FFFFFF; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #0F0F0F; line-height: 1.6;">
+<div style="max-width: 560px; margin: 0 auto; padding: 48px 24px;">
+
+    <span th:text="${appName}" style="display: block; font-size: 16px; font-weight: 700; color: #0F0F0F; margin-bottom: 40px;">Luvax</span>
+
+    <h2 th:text="${headline}" style="font-size: 22px; font-weight: 600; color: #0F0F0F; margin: 0 0 16px;">Notice</h2>
+
+    <p style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0 0 16px;">Hello <span th:text="${toName}">User</span>,</p>
+
+    <p th:replace="${statement}" style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0 0 16px;">Statement.</p>
+
+    <p style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0 0 16px;">This happened on <span th:text="${occurredAt}">1 January 2026</span>.</p>
+
+    <!-- The only place the reason is ever stated. admin_actions.reason is written for colleagues and
+         never reaches a recipient, so every variant says exactly this and nothing more specific. -->
+    <p style="font-size: 15px; color: #4B4B4B; line-height: 1.6; margin: 0;" th:if="${showStandardsLine}">This decision was made because the account or content did not meet our community standards.</p>
+
+    <!-- The appeal link. Present only for the six punitive actions; a reinstatement and a support
+         ticket reply carry none. Every variant renders through this layout, so adding it here was
+         an edit to this block alone and no content template changed. -->
+    <p style="margin: 24px 0 0;" th:if="${appealUrl}">
+        <a th:href="${appealUrl}" style="display: inline-block; padding: 12px 20px; background-color: #0F0F0F; color: #FFFFFF; text-decoration: none; border-radius: 6px; font-size: 15px;">Contest this decision</a>
+    </p>
+    <p style="font-size: 13px; color: #8C8C8C; line-height: 1.6; margin: 12px 0 0;" th:if="${appealUrl}">This link works once and expires in 30 days. You do not need to sign in to use it.</p>
+
+    <hr style="border: none; border-top: 1px solid #E8E8E8; margin: 36px 0;">
+
+    <p style="font-size: 12px; color: #8C8C8C; line-height: 1.6; margin: 0;">You received this email because you have an account on <span th:text="${appName}">Luvax</span>.</p>
+
+</div>
+</body>
+</html>

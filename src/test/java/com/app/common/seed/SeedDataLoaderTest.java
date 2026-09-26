@@ -22,6 +22,7 @@ class SeedDataLoaderTest {
         assertThat(content.conversations()).hasSize(1);
         assertThat(content.moderationCases()).hasSize(1);
         assertThat(content.mediaManifest()).hasSize(2);
+        assertThat(content.supportTicketPools().requestsByCategory()).containsKey("bug_report");
     }
 
     @Test
@@ -62,5 +63,15 @@ class SeedDataLoaderTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("participant")
                 .hasMessageContaining("ghost_user");
+    }
+
+    @Test
+    void load_badgeNamesUnknownAccount_throwsIllegalStateException() {
+        SeedDataLoader loader = new SeedDataLoader("seed-fixtures/broken-badge");
+
+        assertThatThrownBy(loader::load)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("badges.json")
+                .hasMessageContaining("nobody_at_all");
     }
 }

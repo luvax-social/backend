@@ -35,13 +35,15 @@ spring:
         stringtype: unspecified
   flyway:
     enabled: true
-    # The migration set is a contiguous V01-V57 sequence with no gaps; out-of-order would only
+    # The migration set is a contiguous V01-V111 sequence with no gaps; out-of-order would only
     # suppress Flyway's own check against an out-of-order apply, which has no branch-merge
     # workflow here to justify disabling.
     out-of-order: false
     locations: classpath:db/migration
     postgresql:
-      # Required for V57, which builds indexes with CREATE INDEX CONCURRENTLY.
+      # Required for the sixteen migrations that build indexes with CREATE INDEX CONCURRENTLY:
+      # V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109, V110.
+      # V57 was the first, and is the one the behaviour below was observed on.
       #
       # With the default (true), Flyway holds its schema-history lock inside an open transaction on
       # a second connection for the whole migration run. CREATE INDEX CONCURRENTLY waits for every
@@ -68,11 +70,14 @@ spring:
     publisher-returns: ${SPRING_RABBITMQ_PUBLISHER_RETURNS:true}
     template:
       mandatory: ${SPRING_RABBITMQ_TEMPLATE_MANDATORY:true}
+      observation-enabled: true
     listener:
       simple:
         acknowledge-mode: manual
+        observation-enabled: true
       direct:
         acknowledge-mode: manual
+        observation-enabled: true
   security:
     oauth2:
       client:
@@ -103,6 +108,14 @@ app:
     # SeedRunner's own @ConditionalOnProperty(name = "SEED_DATA") is what decides whether the seed
     # pipeline runs at all; this only guards what it does once running.
     require-local-datasource: ${SEED_REQUIRE_LOCAL_DATASOURCE:true}
+  retention:
+    enabled: ${RETENTION_ENABLED:true}
+    initial-delay: ${RETENTION_INITIAL_DELAY:PT10M}
+    fixed-delay: ${RETENTION_FIXED_DELAY:PT1H}
+    batch-size: ${RETENTION_BATCH_SIZE:5000}
+    max-batches-per-run: ${RETENTION_MAX_BATCHES_PER_RUN:100}
+    outbox-published: ${RETENTION_OUTBOX_PUBLISHED:P7D}
+    processed-messages: ${RETENTION_PROCESSED_MESSAGES:P14D}
   outbox:
     publisher:
       enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
@@ -116,6 +129,9 @@ app:
         - ${OUTBOX_PUBLISHER_RETRY_BACKOFF_1:PT10S}
         - ${OUTBOX_PUBLISHER_RETRY_BACKOFF_2:PT30S}
         - ${OUTBOX_PUBLISHER_RETRY_BACKOFF_3:PT60S}
+    metrics:
+      enabled: ${OUTBOX_METRICS_ENABLED:true}
+      sample-interval: ${OUTBOX_METRICS_SAMPLE_INTERVAL:PT30S}
   messaging:
     consumer:
       max-attempts: ${RABBIT_CONSUMER_MAX_ATTEMPTS:3}
@@ -125,6 +141,14 @@ app:
         - ${RABBIT_CONSUMER_RETRY_BACKOFF_3:PT60S}
   security:
     cookie-signing-secret: ${APP_COOKIE_SIGNING_SECRET}
+    # The ingress CIDRs whose X-Forwarded-For IpExtractor is allowed to believe. Bound here as a
+    # defaulted placeholder rather than as a literal in each profile: application-prod.yml carried
+    # a bare [] instead, and a profile document outranks the .env file application.yaml imports,
+    # so setting APP_SECURITY_TRUSTED_PROXY_CIDRS the way every other deployment variable in this
+    # repository is set had no effect at all. A real operating-system environment variable did
+    # outrank it, which is why the only symptom was the IpExtractor startup warning. Empty by
+    # default, which fails closed: no proxy is trusted until one is named.
+    trusted-proxy-cidrs: ${APP_SECURITY_TRUSTED_PROXY_CIDRS:}
     refresh-cookie:
       name: ${REFRESH_COOKIE_NAME:luvax_refresh}
       path: ${REFRESH_COOKIE_PATH:/api/v1/auth}
@@ -145,16 +169,19 @@ app:
   mail:
     consumer:
       enabled: ${MAIL_CONSUMER_ENABLED:false}
-    # Deliberately literal, not an environment placeholder. An APP_MAIL_TRANSPORT environment
-    # variable still outranks this, and MailTransportGuard is what refuses to boot if that
-    # override selected the non-network noop transport outside the dev profile.
-    # The dev profile resolves this from APP_MAIL_TRANSPORT instead (application-dev.yml); this
-    # base literal is what prod inherits unmodified.
-    transport: resend
+    # Resolved from the environment in every profile, defaulting to the network transport.
+    # A real operating-system environment variable always outranked the literal that stood here,
+    # but the .env file application.yaml imports does not, so the documented way to select a
+    # transport locally was inert outside dev and MailTransportGuard only ever observed resend.
+    # The guard, not this default, is what refuses the non-network noop transport outside dev.
+    transport: ${APP_MAIL_TRANSPORT:resend}
     resend:
       # Defaulted to empty so a developer running the noop transport needs no Resend credential.
       # ResendMailConfig rejects a blank key, so selecting resend without one still fails at startup.
       api-key: ${RESEND_API_KEY:}
+      # The only HTTP bound that can be imposed on the Resend SDK from outside it; see
+      # ResendProperties for why the SDK's own connect and read timeouts are not configurable.
+      call-timeout: ${RESEND_CALL_TIMEOUT:20s}
     from-address: ${MAIL_FROM_ADDRESS}
     from-name: ${MAIL_FROM_NAME}
     app-name: ${MAIL_APP_NAME}
@@ -162,6 +189,12 @@ app:
     verify-email-path: ${MAIL_VERIFY_EMAIL_PATH:/verify-email}
     frontend-base-url: ${FRONTEND_BASE_URL}
   notification:
+    # How long a like, story-view or follow group accepts new actors, from its first actor.
+    aggregation-window: ${NOTIFICATION_AGGREGATION_WINDOW:PT24H}
+    # The pause that separates two visits to the feed; the "new" section resets only after it.
+    seen-session-gap: ${NOTIFICATION_SEEN_SESSION_GAP:PT30M}
+    # Rows rewritten per transaction when a verified badge is granted or revoked.
+    verified-resync-batch-size: ${NOTIFICATION_VERIFIED_RESYNC_BATCH_SIZE:500}
     consumer:
       enabled: ${NOTIFICATION_CONSUMER_ENABLED:false}
     live:
@@ -207,6 +240,10 @@ app:
   post:
     consumer:
       enabled: ${POST_CONSUMER_ENABLED:false}
+    # PostNotificationConsumer: post likes into like notifications. Separate from the index-sync
+    # consumer above because the seed profile must hold this one off while keeping that one.
+    notification-consumer:
+      enabled: ${POST_NOTIFICATION_CONSUMER_ENABLED:false}
     seed:
       enabled: ${POST_SEED_ENABLED:true}
     live:
@@ -222,6 +259,31 @@ app:
   admin:
     consumer:
       enabled: ${ADMIN_CONSUMER_ENABLED:false}
+    moderation-mail:
+      consumer:
+        enabled: ${MODERATION_MAIL_CONSUMER_ENABLED:false}
+
+  # Cloudflare Turnstile. Promoted out of app.support.turnstile because the login, register,
+  # forgot-password, reset-password, resend-verification and report surfaces now verify against the
+  # same credentials and the same siteverify implementation. The environment variable names are
+  # unchanged, so no deployment has to be touched.
+  turnstile:
+    # Empty by default, and TurnstileVerifier reports UNAVAILABLE with a blank secret, so a
+    # deployment that forgets to set TURNSTILE_SECRET_KEY fails the public form closed rather than
+    # silently admitting every submission. The dev profile defaults it to Cloudflare's test key.
+    secret-key: ${TURNSTILE_SECRET_KEY:}
+    verify-url: ${TURNSTILE_VERIFY_URL:https://challenges.cloudflare.com/turnstile/v0/siteverify}
+    # Bounds on the siteverify call. Cloudflare is a hard dependency of the public entry path, so
+    # the timeouts are short: a slow verifier must fail the submission quickly rather than hold a
+    # request thread.
+    connect-timeout: ${TURNSTILE_CONNECT_TIMEOUT:3s}
+    read-timeout: ${TURNSTILE_READ_TIMEOUT:5s}
+    auth:
+      # Operator kill switch for the auth and report surfaces only; the public support form is not
+      # governed by it and stays on unconditionally. Exists so authentication can be restored
+      # without a redeploy if Cloudflare fails in a way the fail-open policy does not cover, such as
+      # answering promptly and wrongly with success: false.
+      enabled: ${TURNSTILE_AUTH_ENABLED:true}
 
   # Platform statistics collection and roll-up.
   #
@@ -247,8 +309,6 @@ app:
       fixed-delay: ${STORY_CLEANUP_FIXED_DELAY:PT1H}
   message:
     idempotency-ttl-hours: ${MESSAGE_IDEMPOTENCY_TTL_HOURS:24}
-    consumer:
-      enabled: ${MESSAGE_CONSUMER_ENABLED:false}
     live:
       enabled: ${MESSAGE_LIVE_ENABLED:false}
   gorse:
@@ -263,11 +323,83 @@ app:
     read-set-window: ${RECOMMENDATION_READ_SET_WINDOW:P90D}
     read-set-max-rows: ${RECOMMENDATION_READ_SET_MAX_ROWS:2000}
     top-up-overfetch-multiplier: ${RECOMMENDATION_TOPUP_OVERFETCH_MULTIPLIER:3}
+    affinity:
+      enabled: ${AFFINITY_JOB_ENABLED:true}
+      # 90 days matches the read-set window above and the span the seeded dataset covers. It is
+      # also the bound that makes the user_events read prune to the two or three partitions it
+      # covers instead of scanning all twenty-four.
+      window: ${AFFINITY_WINDOW:P90D}
+      # Three half-lives across the window: the far edge still contributes about an eighth rather
+      # than falling off a cliff, while last week clearly outranks last month. A 7-day half-life
+      # would make the 90-day window pointless; 60 days would barely separate the two ends.
+      half-life: ${AFFINITY_HALF_LIFE:P30D}
+      top-limit: ${AFFINITY_TOP_LIMIT:50}
+      interval: ${AFFINITY_INTERVAL:PT12H}
+      initial-delay: ${AFFINITY_INITIAL_DELAY:PT2M}
   websocket:
     revocation:
       interval: ${WEBSOCKET_REVOCATION_INTERVAL:PT30S}
   rate-limit:
     endpoint-rules:
+      # Authenticated ticket creation and the caller's own ticket reads. Every other support
+      # path already carried a per-caller Redis rule; this sub-tree carried only the JVM-wide
+      # Resilience4j backstop, which is a global circuit rather than a per-caller bound, so one
+      # abusive caller could exhaust it for everybody. The literal collection route takes the
+      # exact-match fast path and gets its own bucket; the sub-tree pattern covers
+      # /tickets/{ticketId}. An hour-long window, matching the other support rules rather than
+      # the minute-long auth convention, because opening a ticket is a human action already
+      # bounded upstream by the one-open-ticket guard.
+      "[/api/v1/support/tickets]":
+        max-attempts: 10
+        window-seconds: 3600
+      "[/api/v1/support/tickets/**]":
+        max-attempts: 10
+        window-seconds: 3600
+      # The public support form. Three per hour keyed on the caller's IP, which is the hourly half
+      # of the bound; the daily half of ten is enforced in SupportTicketServiceImpl on the same
+      # Redis primitive, keyed on the submitted address, because a rule here carries one window.
+      #
+      # Deployment prerequisite: IpExtractor trusts X-Forwarded-For only when the direct peer
+      # matches app.security.trusted-proxy-cidrs, which is empty by default. Behind an
+      # unconfigured reverse proxy every caller presents the proxy's address and shares one
+      # bucket, which turns this rule into a global cap of three per hour.
+      "[/api/v1/support/public/tickets]":
+        max-attempts: 3
+        window-seconds: 3600
+      # The appeal link. Generous, because a legitimate appellant may fumble the form more than
+      # once and the token itself is single-use, so the token is the real control here.
+      "[/api/v1/support/appeal]":
+        max-attempts: 10
+        window-seconds: 3600
+      # Reading whether an appeal link is still valid, which the landing screen does on
+      # mount. Generous relative to the appeal itself: a reader may open the link, reload it
+      # and come back to a restored tab, and none of that redeems anything.
+      # One appeal, read by the appellant who filed it and holds no session. Same band as
+      # appeal/validate: both are anonymous reads behind a 32-byte random token, and this one is
+      # followed repeatedly over the life of an appeal rather than once.
+      # Replacement appeal links. The hardest bound in the support tree, because a single request
+      # causes mail to be sent to an address the caller chooses. Three an hour is enough for
+      # somebody who mistyped their address once; it is not enough to mail a list.
+      "[/api/v1/support/appeal/resend]":
+        max-attempts: 3
+        window-seconds: 3600
+      "[/api/v1/support/appeal/status]":
+        max-attempts: 30
+        window-seconds: 3600
+      "[/api/v1/support/appeal/validate]":
+        max-attempts: 30
+        window-seconds: 3600
+      "[/api/v1/support/public/confirm]":
+        max-attempts: 20
+        window-seconds: 3600
+      # The public form's category list. The only anonymous support route that previously carried
+      # no per-client rule at all: the highTraffic limiter on the handler is a JVM-wide overload
+      # backstop, not a per-caller budget. Generous, because the form legitimately loads this once
+      # or twice per submission and the rows are cached in process, so a caller inside this bound
+      # does not reach PostgreSQL at all.
+      "[/api/v1/support/public/categories]":
+        max-attempts: 60
+        window-seconds: 3600
       "[/api/v1/auth/login]":
         max-attempts: 10
         window-seconds: 900
@@ -292,6 +424,12 @@ app:
       "[/api/v1/auth/verify-email/resend]":
         max-attempts: 3
         window-seconds: 3600
+      # Present in dev and prod but absent here until now, so a deployment running on the base
+      # profile alone left the code-redemption endpoint with no per-caller rule at all. The budget
+      # matches both profiles.
+      "[/api/v1/auth/oauth2/exchange]":
+        max-attempts: 10
+        window-seconds: 60
       "[/api/v1/posts]":
         max-attempts: 30
         window-seconds: 60
@@ -345,22 +483,89 @@ app:
       "[/api/v1/admin/hashtags/search]":
         max-attempts: 60
         window-seconds: 60
+      # Single indexed row read behind the /tags/{name} deep link, so it is cheap, but it is the
+      # entry point a shared URL lands on and must not fall through to a broad default.
+      "[/api/v1/hashtags/name/*]":
+        max-attempts: 60
+        window-seconds: 60
+      # One Elasticsearch query per call plus a PostgreSQL hydration of the page, so it costs
+      # meaningfully more than the name lookup above and is budgeted lower.
+      "[/api/v1/hashtags/*/posts]":
+        max-attempts: 40
+        window-seconds: 60
+      # Cached in Redis for ten minutes per caller and page, so the budget covers cache misses
+      # and tab switching rather than the fusion cost itself.
+      "[/api/v1/hashtags/trending/for-you]":
+        max-attempts: 60
+        window-seconds: 60
+      "[/api/v1/admin/hashtags/*/pin]":
+        max-attempts: 30
+        window-seconds: 60
 
 management:
+  server:
+    # Actuator moves off the application port entirely; ManagementSecurityConfig guards this one.
+    port: ${MANAGEMENT_SERVER_PORT:8081}
   endpoints:
     web:
       exposure:
         # micrometer-registry-prometheus is on the classpath but Spring Boot exposes only health
         # over HTTP by default, so /actuator/prometheus returned 404 and nothing could scrape the
-        # application. Widened deliberately to these three; the ADMIN gate in SecurityConfig still
-        # covers every other actuator endpoint.
+        # application. Widened deliberately to these three; ManagementSecurityConfig permits only
+        # health and prometheus on the management port, and denies everything else there.
         include: health,info,prometheus
+  tracing:
+    sampling:
+      # Every request is sampled; Phase 1 has no traffic volume that makes this expensive.
+      probability: 1.0
+    export:
+      otlp:
+        enabled: ${OTLP_EXPORT_ENABLED:false}
+  logging:
+    export:
+      otlp:
+        enabled: ${OTLP_EXPORT_ENABLED:false}
+  opentelemetry:
+    resource-attributes:
+      "[service.name]": luvax-backend
+      "[deployment.environment]": ${spring.profiles.active}
+      "[deployment.environment.name]": ${spring.profiles.active}
+    tracing:
+      export:
+        otlp:
+          # Always defined: Boot only builds the OTLP exporter when this is set, and a blank
+          # default would build one with an empty URL. Whether spans actually leave the process is
+          # decided by OTLP_EXPORT_ENABLED alone.
+          endpoint: ${OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  otlp:
+    metrics:
+      export:
+        # The starter's micrometer-registry-otlp would otherwise push metrics too;
+        # Prometheus scrapes instead.
+        enabled: false
+  observations:
+    enable:
+      spring:
+        security: false
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
   health:
     elasticsearch:
       enabled: true
   endpoint:
     health:
       show-details: when-authorized
+
+jdbc:
+  includes: CONNECTION,QUERY
+  datasource-proxy:
+    include-parameter-values: false
 
 server:
   # Forward-headers-strategy removed; IpExtractor + trusted-proxy-cidrs is the only model.

@@ -39,4 +39,8 @@ public record HashtagAdminResponse(
                         nullable = true)
                 UUID statusBy,
         @Schema(description = "UTC timestamp when the hashtag was first created")
-                OffsetDateTime createdAt) {}
+                OffsetDateTime createdAt,
+        @Schema(description = "When an administrator pinned this hashtag; null when not pinned")
+                OffsetDateTime pinnedAt,
+        @Schema(description = "Administrator who pinned the hashtag; null when not pinned")
+                UUID pinnedBy) {}

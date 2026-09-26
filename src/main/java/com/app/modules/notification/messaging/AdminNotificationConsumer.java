@@ -26,6 +26,7 @@ import com.app.common.messaging.exception.PermanentMessageException;
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.modules.admin.messaging.AdminEventTypes;
 import com.app.modules.notification.entity.enums.NotificationType;
+import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
 import com.rabbitmq.client.Channel;
 
@@ -114,13 +115,18 @@ public class AdminNotificationConsumer {
             return;
         }
         Map<String, Object> data = event.data();
+        // adminActionId links the notice to its audit row, which carries the reason and the
+        // appeal route. An event enqueued before the field existed leaves it null; the notice
+        // is still written and simply offers no appeal.
         notificationService.create(
-                null,
-                uuid(data.get("userId")),
-                NotificationType.WARNING,
-                ENTITY_TYPE,
-                uuid(data.get("warningId")),
-                null);
+                NotificationDraft.systemNotice(
+                        uuid(data.get("userId")),
+                        NotificationType.WARNING,
+                        ENTITY_TYPE,
+                        uuid(data.get("warningId")),
+                        null,
+                        null,
+                        uuid(data.get("adminActionId"))));
     }
 
     private void validateEnvelope(DomainEventEnvelope event) {

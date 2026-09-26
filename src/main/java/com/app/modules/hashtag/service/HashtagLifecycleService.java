@@ -78,4 +78,31 @@ public interface HashtagLifecycleService {
      */
     HashtagLifecycleResult changeStatus(
             UUID actorId, UUID hashtagId, HashtagStatus target, String note);
+
+    /**
+     * Pins a hashtag platform-wide so it leads the trending list.
+     *
+     * <p>Refused when the hashtag is banned or deleted: a pin promotes a term, and a term an
+     * administrator has taken out of circulation must not be promoted. Refused again when the
+     * hashtag is already pinned, because there is no state change to record.
+     *
+     * @param actorId administrator taking the action, recorded as the pinning administrator
+     * @param hashtagId hashtag to pin
+     * @return the resulting lifecycle state, for the caller's audit row
+     * @throws com.app.common.exception.AppException {@code HASHTAG_NOT_FOUND} when no row carries
+     *     the id, {@code HASHTAG_UNAVAILABLE} when it is banned or deleted, or {@code
+     *     ADMIN_INVALID_TRANSITION} when it is already pinned
+     */
+    HashtagLifecycleResult pin(UUID actorId, UUID hashtagId);
+
+    /**
+     * Removes a platform-wide pin.
+     *
+     * @param actorId administrator taking the action
+     * @param hashtagId hashtag to unpin
+     * @return the resulting lifecycle state, for the caller's audit row
+     * @throws com.app.common.exception.AppException {@code HASHTAG_NOT_FOUND} when no row carries
+     *     the id, or {@code ADMIN_INVALID_TRANSITION} when it is not pinned
+     */
+    HashtagLifecycleResult unpin(UUID actorId, UUID hashtagId);
 }

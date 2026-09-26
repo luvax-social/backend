@@ -56,14 +56,16 @@ public enum PlatformMetric {
             "comments_total",
             Kind.GAUGE,
             "SELECT '' AS dimension, count(*) AS value FROM comments"
-                    + " WHERE created_at < ? AND deleted_at IS NULL"),
+                    + " WHERE created_at < ? AND deleted_at IS NULL"
+                    + " AND admin_removed_at IS NULL"),
     // Bounded by expiry as well as by creation, because a story that has run out is no longer on
     // the platform in any sense a dashboard means by "stories".
     STORIES_TOTAL(
             "stories_total",
             Kind.GAUGE,
             "SELECT '' AS dimension, count(*) AS value FROM stories"
-                    + " WHERE created_at < ? AND deleted_at IS NULL AND expires_at > ?"),
+                    + " WHERE created_at < ? AND deleted_at IS NULL"
+                    + " AND admin_removed_at IS NULL AND expires_at > ?"),
     REPORTS_BY_STATUS(
             "reports_by_status",
             Kind.GAUGE,

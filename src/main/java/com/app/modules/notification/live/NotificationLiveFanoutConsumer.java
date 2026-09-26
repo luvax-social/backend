@@ -1,6 +1,9 @@
 package com.app.modules.notification.live;
 
+import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -13,32 +16,27 @@ import org.springframework.stereotype.Component;
 
 import com.app.common.messaging.DomainEventMessageParser;
 import com.app.common.outbox.model.DomainEventEnvelope;
-import com.app.common.response.UserSummaryResponse;
-import com.app.modules.notification.dto.response.NotificationResponse;
-import com.app.modules.notification.entity.Notification;
-import com.app.modules.notification.mapper.NotificationMapper;
-import com.app.modules.notification.repository.NotificationRepository;
-import com.app.modules.social.repository.BlockRepository;
-import com.app.modules.users.service.UserSummaryService;
+import com.app.modules.notification.dto.response.NotificationItemResponse;
+import com.app.modules.notification.dto.response.NotificationKeyResponse;
+import com.app.modules.notification.dto.response.NotificationLiveEnvelope;
+import com.app.modules.notification.entity.enums.NotificationType;
+import com.app.modules.notification.messaging.NotificationEventTypes;
+import com.app.modules.notification.service.NotificationService;
 
 /**
- * Pushes live notification events received on this instance's fanout queue to local STOMP
- * subscribers, mirroring {@code CommentLiveFanoutConsumer}.
+ * Turns notification outbox events received on this instance's fanout queue into typed {@link
+ * NotificationLiveEnvelope}s for the recipient's STOMP topic, mirroring {@code
+ * CommentLiveFanoutConsumer}.
  *
- * <p>Delivery is best-effort: the SimpleBroker routes each message to the sessions subscribed to
- * the recipient's destination on this instance. Failures are logged and dropped; the REST list
- * stays authoritative and a missed push is recovered on the next {@code GET /notifications}.
+ * <p>Delivery is best effort: the SimpleBroker routes each envelope to the sessions subscribed to
+ * the recipient's destination on this instance. Failures are logged and dropped; the REST feed
+ * stays authoritative and a client refetches after a reconnect.
  *
- * <p>Reads the notification row back at push time rather than carrying it in the outbox payload:
- * {@code created_at} is database-defaulted and still null on the entity at the point {@code
- * NotificationServiceImpl.create} enqueues the event, and the outbox payload contract is
- * identifiers only, not the full response shape.
- *
- * <p>Stealth block enforcement: unlike the comment fan-out, a notification has exactly one
- * subscriber (the recipient), so a single {@code existsBetween} check before publishing is
- * sufficient - no per-session interceptor is needed. Most notification types cannot be generated
- * across a block in the first place because the actor could never see the recipient's content to
- * act on it; the check here is a backstop for the one path that can, an unrelated-post mention.
+ * <p>An upserted row is hydrated at push time through {@link NotificationService#findItem}, the
+ * same pipeline a page uses, so a push can never show more than a page would: a row hidden by a
+ * block or an account's status, or deleted meanwhile, sends nothing. Every envelope carries the
+ * state after the event, recomputed with one bounded count, so the badge is replaced from the push
+ * and never adjusted client-side.
  */
 @Component
 @ConditionalOnProperty(prefix = "app.notification.live", name = "enabled", havingValue = "true")
@@ -47,25 +45,16 @@ public class NotificationLiveFanoutConsumer {
     private static final Logger log = LoggerFactory.getLogger(NotificationLiveFanoutConsumer.class);
 
     private final DomainEventMessageParser parser;
-    private final NotificationRepository notificationRepository;
-    private final NotificationMapper notificationMapper;
+    private final NotificationService notificationService;
     private final SimpMessagingTemplate messagingTemplate;
-    private final UserSummaryService userSummaryService;
-    private final BlockRepository blockRepository;
 
     public NotificationLiveFanoutConsumer(
             DomainEventMessageParser parser,
-            NotificationRepository notificationRepository,
-            NotificationMapper notificationMapper,
-            SimpMessagingTemplate messagingTemplate,
-            UserSummaryService userSummaryService,
-            BlockRepository blockRepository) {
+            NotificationService notificationService,
+            SimpMessagingTemplate messagingTemplate) {
         this.parser = parser;
-        this.notificationRepository = notificationRepository;
-        this.notificationMapper = notificationMapper;
+        this.notificationService = notificationService;
         this.messagingTemplate = messagingTemplate;
-        this.userSummaryService = userSummaryService;
-        this.blockRepository = blockRepository;
     }
 
     @RabbitListener(
@@ -74,28 +63,91 @@ public class NotificationLiveFanoutConsumer {
     public void consume(Message message) {
         try {
             DomainEventEnvelope event = parser.parse(message);
-            Object recipientIdValue = event.data().get("recipientId");
-            if (recipientIdValue == null) {
+            Map<String, Object> data = event.data() == null ? Map.of() : event.data();
+            Object recipientValue = data.get("recipientId");
+            if (recipientValue == null) {
                 return;
             }
-            UUID recipientId = UUID.fromString(recipientIdValue.toString());
-            Notification notification =
-                    notificationRepository.findById(event.aggregateId()).orElse(null);
-            if (notification == null) {
-                return;
-            }
-            UUID actorId = notification.getActorId();
-            if (actorId != null && blockRepository.existsBetween(actorId, recipientId)) {
-                return;
-            }
-            UserSummaryResponse actor =
-                    actorId == null
-                            ? null
-                            : userSummaryService.loadSummaries(List.of(actorId)).get(actorId);
-            NotificationResponse response = notificationMapper.toResponse(notification, actor);
-            messagingTemplate.convertAndSend("/topic/notifications." + recipientId, response);
+            UUID recipientId = UUID.fromString(recipientValue.toString());
+            toEnvelope(event, data, recipientId)
+                    .ifPresent(
+                            envelope ->
+                                    messagingTemplate.convertAndSend(
+                                            "/topic/notifications." + recipientId, envelope));
         } catch (RuntimeException ex) {
             log.warn("Failed to push live notification event: {}", ex.getMessage());
         }
+    }
+
+    private Optional<NotificationLiveEnvelope> toEnvelope(
+            DomainEventEnvelope event, Map<String, Object> data, UUID recipientId) {
+        return switch (event.eventType()) {
+            case NotificationEventTypes.NOTIFICATION_UPSERTED_V1 ->
+                    notificationService
+                            .findItem(recipientId, event.aggregateId())
+                            .map(item -> upserted(item, recipientId));
+            case NotificationEventTypes.NOTIFICATION_READ_STATE_CHANGED_V1 ->
+                    Optional.of(
+                            new NotificationLiveEnvelope(
+                                    NotificationLiveEnvelope.READ_STATE,
+                                    null,
+                                    ids(data),
+                                    upTo(data),
+                                    readAt(data),
+                                    notificationService.getState(recipientId)));
+            case NotificationEventTypes.NOTIFICATION_DELETED_V1 ->
+                    Optional.of(
+                            new NotificationLiveEnvelope(
+                                    NotificationLiveEnvelope.DELETED,
+                                    null,
+                                    ids(data),
+                                    null,
+                                    null,
+                                    notificationService.getState(recipientId)));
+            case NotificationEventTypes.NOTIFICATION_SEEN_V1 ->
+                    Optional.of(
+                            new NotificationLiveEnvelope(
+                                    NotificationLiveEnvelope.SEEN,
+                                    null,
+                                    null,
+                                    null,
+                                    null,
+                                    notificationService.getState(recipientId)));
+            default -> Optional.empty();
+        };
+    }
+
+    // A pending follow request is never a feed row, so its arrival is a state change only: the
+    // badge and the pinned entry move, and no list may insert it.
+    private NotificationLiveEnvelope upserted(NotificationItemResponse item, UUID recipientId) {
+        boolean request = item.type() == NotificationType.FOLLOW_REQUEST;
+        return new NotificationLiveEnvelope(
+                request ? NotificationLiveEnvelope.REQUESTS : NotificationLiveEnvelope.UPSERTED,
+                request ? null : item,
+                null,
+                null,
+                null,
+                notificationService.getState(recipientId));
+    }
+
+    private static List<UUID> ids(Map<String, Object> data) {
+        if (!(data.get("ids") instanceof List<?> values)) {
+            return null;
+        }
+        return values.stream().map(value -> UUID.fromString(value.toString())).toList();
+    }
+
+    private static NotificationKeyResponse upTo(Map<String, Object> data) {
+        if (!(data.get("upTo") instanceof Map<?, ?> bound)) {
+            return null;
+        }
+        return new NotificationKeyResponse(
+                OffsetDateTime.parse(bound.get("activityAt").toString()),
+                UUID.fromString(bound.get("id").toString()));
+    }
+
+    private static OffsetDateTime readAt(Map<String, Object> data) {
+        Object value = data.get("readAt");
+        return value == null ? null : OffsetDateTime.parse(value.toString());
     }
 }

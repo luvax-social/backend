@@ -24,6 +24,7 @@ import com.app.common.messaging.DomainEventMessageParser;
 import com.app.common.messaging.config.ConsumerRetryProperties;
 import com.app.common.messaging.exception.PermanentMessageException;
 import com.app.common.outbox.model.DomainEventEnvelope;
+import com.app.modules.mail.util.MailSuppression;
 import com.rabbitmq.client.Channel;
 
 /**
@@ -96,6 +97,17 @@ public class AuthMailEventConsumer {
         } catch (PermanentMessageException ex) {
             routeToDlqOrRequeue(message, channel, deliveryTag, ex);
         } catch (RuntimeException ex) {
+            if (MailSuppression.isRecipientSuppressed(ex)) {
+                // A configuration decision, not a failure, so it is acked rather than
+                // dead-lettered. Dead-lettering it fills the DLQ with choices the operator already
+                // made: on any machine running the dev allowlist that is every verification,
+                // password reset and email-change message addressed to a real domain. The
+                // moderation lane has always treated this as SKIPPED; this is the same decision,
+                // taken in the same place.
+                log.info("Suppressed auth mail event: recipient outside the configured allowlist");
+                ack(channel, deliveryTag);
+                return;
+            }
             routeToDlqOrRequeue(message, channel, deliveryTag, ex);
         }
     }

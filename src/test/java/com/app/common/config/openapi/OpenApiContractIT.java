@@ -65,6 +65,11 @@ class OpenApiContractIT {
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry r) {
+        // These tests drive login, register and report submission as setup, not as the
+        // subject under test. The kill switch keeps them off the network: the dev profile
+        // defaults the secret to Cloudflare's test key, and a real siteverify call would
+        // make the suite depend on an external service being reachable.
+        r.add("TURNSTILE_AUTH_ENABLED", () -> false);
         r.add("spring.data.redis.host", redis::getHost);
         r.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         r.add("spring.data.redis.password", () -> "");
@@ -510,9 +515,11 @@ class OpenApiContractIT {
                 List.of(
                         new Expectation("PostResponse", "locationName"),
                         new Expectation("PostResponse", "latitude"),
-                        new Expectation("NotificationResponse", "entityId"),
-                        new Expectation("NotificationResponse", "entityType"),
-                        new Expectation("NotificationResponse", "message"),
+                        new Expectation("NotificationItemResponse", "readAt"),
+                        new Expectation("NotificationItemResponse", "preview"),
+                        new Expectation("NotificationPageResponse", "head"),
+                        new Expectation("NotificationStateResponse", "seen"),
+                        new Expectation("NotificationTargetResponse", "postId"),
                         new Expectation("ConversationResponse", "lastMessageAt"),
                         new Expectation("CommentResponse", "parentId"),
                         new Expectation("CommentResponse", "rootId"),

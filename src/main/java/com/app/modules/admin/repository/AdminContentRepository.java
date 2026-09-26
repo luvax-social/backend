@@ -171,7 +171,9 @@ public class AdminContentRepository {
                 .sql(
                         """
 						SELECT c.id, c.user_id, u.username, c.post_id, c.parent_id, c.content,
-							c.moderation_status, c.deleted_at, c.like_count, c.created_at
+							c.moderation_status,
+							c.deleted_at IS NOT NULL OR c.admin_removed_at IS NOT NULL AS deleted,
+							c.like_count, c.created_at
 						FROM comments c
 						LEFT JOIN users u ON u.id = c.user_id
 						WHERE c.user_id = :userId
@@ -196,7 +198,7 @@ public class AdminContentRepository {
                                         rs.getObject("parent_id", UUID.class),
                                         rs.getString("content"),
                                         rs.getString("moderation_status"),
-                                        rs.getObject("deleted_at") != null,
+                                        rs.getBoolean("deleted"),
                                         rs.getInt("like_count"),
                                         rs.getObject("created_at", OffsetDateTime.class)))
                 .list();

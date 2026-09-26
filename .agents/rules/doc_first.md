@@ -23,7 +23,7 @@ Read all three before writing the first line of implementation:
 
 1. `docs/modules/GLOBAL_RULES.md`
 2. `docs/modules/{module}/DATA_RULES.md`
-3. `.claude/rules/STRUCT.md`
+3. `.agents/rules/struct.md`
 
 ## 3. Missing Documentation
 

@@ -23,4 +23,9 @@ public record UserSettingsResponse(
                 boolean allowStoryReplies,
         @Schema(description = "Allow message requests from non-followers", example = "true")
                 boolean allowMessageRequests,
+        @Schema(
+                        description =
+                                "Whether this account may be offered in other people's suggestions",
+                        example = "true")
+                boolean suggestible,
         @Schema(description = "Last updated timestamp") OffsetDateTime updatedAt) {}

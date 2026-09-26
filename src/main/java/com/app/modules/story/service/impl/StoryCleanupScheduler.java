@@ -32,7 +32,11 @@ public class StoryCleanupScheduler {
             fixedDelayString = "${app.story.cleanup.fixed-delay:PT1H}")
     @Transactional
     public void purgeSoftDeletedExpiredStories() {
-        int purged = storyRepository.purgeSoftDeletedExpired();
+        // One clock domain: expires_at is written from the JVM, so the cutoff comes from the JVM
+        // too rather than from the database's own NOW().
+        int purged =
+                storyRepository.purgeSoftDeletedExpired(
+                        java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC));
         if (purged > 0) {
             log.info("StoryCleanupScheduler: hard-deleted {} soft-deleted expired stories", purged);
         }

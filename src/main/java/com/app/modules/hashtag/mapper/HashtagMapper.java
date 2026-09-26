@@ -4,9 +4,7 @@ import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
 import com.app.modules.hashtag.dto.response.HashtagResponse;
-import com.app.modules.hashtag.dto.response.HashtagTrendingResponse;
 import com.app.modules.hashtag.entity.Hashtag;
-import com.app.modules.hashtag.entity.HashtagTrending;
 import com.app.modules.hashtag.search.HashtagDocument;
 
 /** Maps hashtag entities and search documents to and from API DTOs. */
@@ -14,19 +12,6 @@ import com.app.modules.hashtag.search.HashtagDocument;
 public interface HashtagMapper {
 
     HashtagResponse toResponse(Hashtag hashtag);
-
-    /**
-     * Flattens the embedded composite key onto the response and injects the separately resolved
-     * hashtag name.
-     *
-     * @param trending the trending snapshot row carrying the composite key
-     * @param hashtagName the resolved hashtag name, not stored on the trending row
-     * @return the trending response with key fields and name populated
-     */
-    @Mapping(source = "trending.id.hashtagId", target = "hashtagId")
-    @Mapping(source = "trending.id.periodStart", target = "periodStart")
-    @Mapping(source = "hashtagName", target = "name")
-    HashtagTrendingResponse toTrendingResponse(HashtagTrending trending, String hashtagName);
 
     /**
      * Projects the entity to its Elasticsearch document, converting the UUID id to its string form.

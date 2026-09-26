@@ -279,4 +279,32 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
      */
     @Query("SELECT p.likeCount FROM Post p WHERE p.id = :postId")
     int findLikeCount(@Param("postId") UUID postId);
+
+    /**
+     * Published posts carrying a hashtag, newest first, as the PostgreSQL degradation path for the
+     * posts-by-hashtag read when the {@code elasticsearchSearch} circuit breaker is open.
+     *
+     * <p>Carries no hashtag status predicate by design. Banning a term hides the term, never the
+     * posts that used it, so a status filter must never reach a query that selects posts - see
+     * {@code hashtag/DATA_RULES.md} section 3D. The lifecycle gate lives one layer up, where an
+     * unavailable hashtag is refused outright instead of silently narrowing this result.
+     *
+     * <p>The join is served by {@code idx_post_hashtags_tag (hashtag_id, post_id)}; the {@code
+     * (created_at, id)} ordering matches every other recent-posts read so a shared tiebreaker keeps
+     * rows that share a {@code created_at} from being dropped between pages.
+     *
+     * @param hashtagId hashtag whose posts are listed
+     * @param pageable offset and limit carrier; supply {@link
+     *     com.app.common.pagination.OffsetPageable} so the exact cursor offset is preserved
+     * @return published, non-deleted posts ordered by the {@code (created_at, id)} tuple descending
+     */
+    @Query(
+            value =
+                    "SELECT p.* FROM posts p "
+                            + "JOIN post_hashtags ph ON ph.post_id = p.id "
+                            + "WHERE ph.hashtag_id = :hashtagId AND p.status = 'published' "
+                            + "AND p.deleted_at IS NULL "
+                            + "ORDER BY p.created_at DESC, p.id DESC",
+            nativeQuery = true)
+    List<Post> findPublishedByHashtagId(@Param("hashtagId") UUID hashtagId, Pageable pageable);
 }

@@ -4,10 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
+import static org.mockito.Mockito.when;
 
+import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 
 import com.app.common.enums.ApiErrorCode;
@@ -16,10 +22,19 @@ import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.admin.service.AdminAuthorizationService.Outcome;
 import com.app.modules.users.entity.User;
 import com.app.modules.users.enums.UserRole;
+import com.app.modules.users.repository.UserRepository;
 
+@ExtendWith(MockitoExtension.class)
 class AdminAuthorizationServiceImplTest {
 
-    private final AdminAuthorizationServiceImpl policy = new AdminAuthorizationServiceImpl();
+    @Mock private UserRepository userRepository;
+
+    private AdminAuthorizationServiceImpl policy;
+
+    @BeforeEach
+    void setUp() {
+        policy = new AdminAuthorizationServiceImpl(userRepository);
+    }
 
     private static final UUID ACTOR = UUID.randomUUID();
     private static final UUID TARGET = UUID.randomUUID();
@@ -361,6 +376,75 @@ class AdminAuthorizationServiceImplTest {
     private static User targetUser(UUID id, UserRole role) {
         User user = new User();
         user.setId(id);
+        user.setRole(role);
+        return user;
+    }
+
+    @Test
+    void evaluateAdministratorAction_admin_isAllowed() {
+        assertThat(policy.evaluateAdministratorAction(UserRole.ADMIN)).isEqualTo(Outcome.ALLOWED);
+    }
+
+    @Test
+    void evaluateAdministratorAction_moderator_isActorNotAdmin() {
+        assertThat(policy.evaluateAdministratorAction(UserRole.MODERATOR))
+                .isEqualTo(Outcome.ACTOR_NOT_ADMIN);
+    }
+
+    @Test
+    void evaluateAdministratorAction_user_isActorNotAdmin() {
+        assertThat(policy.evaluateAdministratorAction(UserRole.USER))
+                .isEqualTo(Outcome.ACTOR_NOT_ADMIN);
+    }
+
+    @Test
+    void assertActorIsAdministrator_admin_passes() {
+        when(userRepository.findByIdAndDeletedAtIsNull(ACTOR))
+                .thenReturn(Optional.of(userWithRole(UserRole.ADMIN)));
+
+        assertThatCode(() -> policy.assertActorIsAdministrator(ACTOR)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void assertActorIsAdministrator_moderator_throwsForbidden() {
+        when(userRepository.findByIdAndDeletedAtIsNull(ACTOR))
+                .thenReturn(Optional.of(userWithRole(UserRole.MODERATOR)));
+
+        AppException thrown =
+                catchThrowableOfType(
+                        () -> policy.assertActorIsAdministrator(ACTOR), AppException.class);
+
+        assertThat(thrown.getErrorCode()).isEqualTo(ApiErrorCode.FORBIDDEN);
+    }
+
+    @Test
+    void assertActorIsAdministrator_plainUser_throwsForbidden() {
+        when(userRepository.findByIdAndDeletedAtIsNull(ACTOR))
+                .thenReturn(Optional.of(userWithRole(UserRole.USER)));
+
+        AppException thrown =
+                catchThrowableOfType(
+                        () -> policy.assertActorIsAdministrator(ACTOR), AppException.class);
+
+        assertThat(thrown.getErrorCode()).isEqualTo(ApiErrorCode.FORBIDDEN);
+    }
+
+    // A soft-deleted account and a demoted one are answered identically on purpose, so the
+    // endpoint cannot be used to tell one from the other.
+    @Test
+    void assertActorIsAdministrator_deletedAccount_throwsForbidden() {
+        when(userRepository.findByIdAndDeletedAtIsNull(ACTOR)).thenReturn(Optional.empty());
+
+        AppException thrown =
+                catchThrowableOfType(
+                        () -> policy.assertActorIsAdministrator(ACTOR), AppException.class);
+
+        assertThat(thrown.getErrorCode()).isEqualTo(ApiErrorCode.FORBIDDEN);
+    }
+
+    private static User userWithRole(UserRole role) {
+        User user = new User();
+        user.setId(ACTOR);
         user.setRole(role);
         return user;
     }

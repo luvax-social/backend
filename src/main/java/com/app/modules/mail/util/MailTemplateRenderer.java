@@ -8,6 +8,8 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 import com.app.modules.mail.enums.MailTemplate;
+import com.app.modules.mail.enums.ModerationMailTemplate;
+import com.app.modules.mail.enums.SupportMailTemplate;
 
 /**
  * Renders Thymeleaf email templates into HTML strings.
@@ -32,8 +34,34 @@ public class MailTemplateRenderer {
      * @return rendered HTML string
      */
     public String render(MailTemplate template, Map<String, Object> variables) {
+        return process(template.getTemplatePath(), variables);
+    }
+
+    /**
+     * Renders a moderation notice template with the supplied variables.
+     *
+     * @param template the moderation template descriptor holding the Thymeleaf path
+     * @param variables key-value pairs bound as Thymeleaf context variables
+     * @return rendered HTML string
+     */
+    public String render(ModerationMailTemplate template, Map<String, Object> variables) {
+        return process(template.getTemplatePath(), variables);
+    }
+
+    /**
+     * Renders a support template with the supplied variables.
+     *
+     * @param template the support template descriptor holding the Thymeleaf path
+     * @param variables key-value pairs bound as Thymeleaf context variables
+     * @return rendered HTML string
+     */
+    public String render(SupportMailTemplate template, Map<String, Object> variables) {
+        return process(template.getTemplatePath(), variables);
+    }
+
+    private String process(String templatePath, Map<String, Object> variables) {
         Context context = new Context(Locale.ENGLISH);
         context.setVariables(variables);
-        return templateEngine.process(template.getTemplatePath(), context);
+        return templateEngine.process(templatePath, context);
     }
 }
