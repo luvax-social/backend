@@ -35,6 +35,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
@@ -64,7 +65,8 @@ class UserEventRecordingIT {
     private static final String PASSWORD = "SeedPass123!";
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

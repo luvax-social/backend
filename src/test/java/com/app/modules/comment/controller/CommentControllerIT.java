@@ -33,6 +33,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -53,7 +54,8 @@ import tools.jackson.databind.ObjectMapper;
 class CommentControllerIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

@@ -37,6 +37,7 @@ import com.app.common.exception.AppException;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.users.dto.response.PublicUserProfileResponse;
 import com.app.modules.users.service.UserService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves username identity is case-insensitive while stored casing is preserved for display, that
@@ -59,7 +60,8 @@ import com.app.modules.users.service.UserService;
 class UsernameLookupIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

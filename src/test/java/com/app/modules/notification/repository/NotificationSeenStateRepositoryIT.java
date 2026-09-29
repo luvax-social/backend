@@ -25,6 +25,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.notification.repository.NotificationFeedRepository.Key;
 import com.app.modules.notification.repository.NotificationSeenStateRepository.SeenState;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * The seen watermark against PostgreSQL: monotonic advance, the clamp, session rotation, stability
@@ -44,7 +45,8 @@ import com.app.modules.notification.repository.NotificationSeenStateRepository.S
 class NotificationSeenStateRepositoryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private static final Duration GAP = Duration.ofMinutes(30);
 

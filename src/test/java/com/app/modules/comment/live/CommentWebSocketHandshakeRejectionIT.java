@@ -86,7 +86,8 @@ class CommentWebSocketHandshakeRejectionIT {
     private static final String JWT_AUDIENCE = "ws-rejection-it";
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

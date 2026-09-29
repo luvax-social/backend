@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.hashtag.entity.Hashtag;
 import com.app.modules.hashtag.enums.HashtagStatus;
+import com.app.testsupport.TestContainerImages;
 
 @DataJpaTest(
         properties = {
@@ -31,7 +32,8 @@ import com.app.modules.hashtag.enums.HashtagStatus;
 class HashtagRepositoryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Autowired private HashtagRepository hashtagRepository;
     @Autowired private HashtagTrendingRepository hashtagTrendingRepository;

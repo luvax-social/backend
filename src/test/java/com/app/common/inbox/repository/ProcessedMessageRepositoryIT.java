@@ -17,6 +17,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.app.testsupport.TestContainerImages;
+
 @DataJpaTest(
         properties = {
             "spring.docker.compose.enabled=false",
@@ -26,7 +28,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class ProcessedMessageRepositoryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Autowired private ProcessedMessageRepository processedMessageRepository;
     @Autowired private JdbcTemplate jdbcTemplate;

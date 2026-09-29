@@ -19,6 +19,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.app.testsupport.TestContainerImages;
+
 /**
  * Every people-you-may-know exclusion, applied at read time against a real database.
  *
@@ -37,7 +39,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class SuggestionReadFilterIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private final UserSuggestionRepository userSuggestionRepository;
     private final SuggestionDismissalRepository suggestionDismissalRepository;

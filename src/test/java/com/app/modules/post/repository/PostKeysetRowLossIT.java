@@ -24,6 +24,7 @@ import com.app.modules.post.entity.Post;
 import com.app.modules.post.entity.PostEditHistory;
 import com.app.modules.post.entity.PostLike;
 import com.app.modules.post.entity.PostSave;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Reproduces and guards against keyset row loss when rows share a boundary sort timestamp. A cursor
@@ -42,7 +43,8 @@ import com.app.modules.post.entity.PostSave;
 class PostKeysetRowLossIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private static final OffsetDateTime SHARED_INSTANT =
             OffsetDateTime.of(2026, 1, 1, 12, 0, 0, 0, ZoneOffset.UTC);

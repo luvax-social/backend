@@ -29,6 +29,7 @@ import com.app.modules.users.entity.User;
 import com.app.modules.users.enums.UserRole;
 import com.app.modules.users.enums.UserStatus;
 import com.app.modules.users.repository.UserRepository;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Guards the {@code updated_at} invariant on the four tables carrying a {@code trg_*_updated_at}
@@ -56,7 +57,8 @@ import com.app.modules.users.repository.UserRepository;
 class UpdatedAtSingleWriterIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private final UserRepository userRepository;
     private final PostRepository postRepository;

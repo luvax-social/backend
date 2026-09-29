@@ -26,6 +26,7 @@ import com.app.common.seed.reset.SeedResetService;
 import com.app.common.seed.time.SeedTimeline;
 import com.app.common.seed.writer.UserSeedWriter;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves {@link UserSeedWriter#write(SeedContent, SeedTimeline)} writes the full 90-row {@code
@@ -43,7 +44,8 @@ import com.app.modules.mail.service.MailService;
 class UserSeedWriterIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

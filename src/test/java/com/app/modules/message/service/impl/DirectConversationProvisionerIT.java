@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.message.service.DirectConversationProvisioner;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Provisioning, idempotency and teardown for the conversation implied by a mutual follow.
@@ -40,7 +41,8 @@ import com.app.modules.message.service.DirectConversationProvisioner;
 class DirectConversationProvisionerIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private final DirectConversationProvisioner provisioner;
     private final ConversationRepository conversationRepository;

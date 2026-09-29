@@ -17,6 +17,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 import com.resend.Resend;
 
 @SpringBootTest(
@@ -30,7 +31,8 @@ import com.resend.Resend;
 class ApplicationTests {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

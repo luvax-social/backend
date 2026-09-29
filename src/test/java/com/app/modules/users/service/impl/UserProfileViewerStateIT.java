@@ -26,6 +26,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.users.dto.response.PublicUserProfileResponse;
 import com.app.modules.users.service.UserService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves the anonymous caller short-circuits to zero relationship queries with every flag present
@@ -46,7 +47,8 @@ import com.app.modules.users.service.UserService;
 class UserProfileViewerStateIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

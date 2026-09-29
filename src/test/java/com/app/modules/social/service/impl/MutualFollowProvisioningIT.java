@@ -26,6 +26,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.social.service.SocialService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves a conversation appears the moment two people follow each other back, disappears if the
@@ -45,7 +46,8 @@ import com.app.modules.social.service.SocialService;
 class MutualFollowProvisioningIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

@@ -26,6 +26,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.auth.service.WebSocketTicketService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves the post WebSocket endpoint exists and is reachable when it is the only live tier enabled,
@@ -56,7 +57,8 @@ import com.app.modules.auth.service.WebSocketTicketService;
 class PostOnlyWebSocketConfigIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

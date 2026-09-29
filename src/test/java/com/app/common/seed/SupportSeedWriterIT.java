@@ -36,6 +36,7 @@ import com.app.common.seed.writer.StorySeedWriter;
 import com.app.common.seed.writer.SupportSeedWriter;
 import com.app.common.seed.writer.UserSeedWriter;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves {@link SupportSeedWriter} against a real Flyway-migrated schema, chained after every
@@ -52,7 +53,8 @@ import com.app.modules.mail.service.MailService;
 class SupportSeedWriterIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

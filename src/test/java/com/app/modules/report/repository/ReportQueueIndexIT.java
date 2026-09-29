@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.report.enums.ReportStatus;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Guards the two halves of the moderator queue's plan, both of which are silent when they break.
@@ -46,7 +47,8 @@ import com.app.modules.report.enums.ReportStatus;
 class ReportQueueIndexIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry registry) {

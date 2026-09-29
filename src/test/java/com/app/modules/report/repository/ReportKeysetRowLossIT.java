@@ -20,6 +20,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.report.entity.Report;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Guards against keyset row loss when reports share a boundary {@code created_at}. Pages with a
@@ -39,7 +40,8 @@ import com.app.modules.report.entity.Report;
 class ReportKeysetRowLossIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private static final OffsetDateTime SHARED_INSTANT =
             OffsetDateTime.of(2026, 1, 1, 12, 0, 0, 0, ZoneOffset.UTC);

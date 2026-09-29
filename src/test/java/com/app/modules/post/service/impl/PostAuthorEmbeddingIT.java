@@ -35,6 +35,7 @@ import com.app.modules.post.service.PostLikeService;
 import com.app.modules.post.service.PostService;
 import com.app.modules.post.validation.PostTypeFilter;
 import com.app.modules.users.service.impl.UserSummaryServiceImpl;
+import com.app.testsupport.TestContainerImages;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -51,7 +52,8 @@ import com.app.modules.users.service.impl.UserSummaryServiceImpl;
 class PostAuthorEmbeddingIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

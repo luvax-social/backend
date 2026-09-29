@@ -65,6 +65,7 @@ import com.app.modules.auth.service.OAuth2ExchangeCodeService;
 import com.app.modules.auth.service.TokenService;
 import com.app.modules.users.enums.UserStatus;
 import com.app.modules.users.repository.UserRepository;
+import com.app.testsupport.TestContainerImages;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 @SpringBootTest(
@@ -87,7 +88,8 @@ class AuthControllerIT {
     private static final String TEST_JWT_AUDIENCE = "App";
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

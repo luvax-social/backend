@@ -17,6 +17,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.app.testsupport.TestContainerImages;
+
 /**
  * Migrates a database holding every pre-overhaul notification shape from V114 through the
  * notification overhaul migrations and asserts the backfill, the aggregation, the archive and the
@@ -30,7 +32,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class NotificationOverhaulMigrationIT {
 
     @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private static final OffsetDateTime DAY_ONE =
             OffsetDateTime.of(2026, 3, 10, 9, 0, 0, 0, ZoneOffset.UTC);

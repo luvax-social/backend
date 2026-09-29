@@ -32,6 +32,7 @@ import com.app.modules.post.dto.response.SavedPostResponse;
 import com.app.modules.post.service.PostSaveService;
 import com.app.modules.post.service.PostService;
 import com.app.modules.post.validation.PostTypeFilter;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves the viewer's like/save state is resolved with a constant query count across page size, and
@@ -52,7 +53,8 @@ import com.app.modules.post.validation.PostTypeFilter;
 class PostViewerStateIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =
