@@ -780,6 +780,7 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Two integration tests that exercise the production profile or the seed reset path failed to start their context because their Postgres credentials were never supplied to the beans that read them directly, unrelated to and pre-existing before this change.
 
 ### Removed
+- The `post_interaction_scores` and `user_similarity` tables, which never had a writer or a reader; the migration refuses to drop them if either holds a row, and the reference schema is regenerated without them and without the tables the analytics move already dropped.
 - The PostgreSQL user_events table, its monthly partitions and the daily job that created them, replaced by the ClickHouse store.
 - The platform statistics roll-up job, the PostgreSQL `platform_stats` table and the `STATS_FINE_RETENTION`, `STATS_DAILY_RETENTION` and `STATS_ROLLUP_CRON` settings; every half-hour bucket is now kept.
 - `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/{id}/read`, and the `actor`, `entityType`, `entityId`, `postId` and `message` fields of notification list items; this is a breaking change that ships together with the matching frontend.

@@ -97,15 +97,12 @@ SELECT 'COLUMN|'||c.relname||'|'||a.attname||'|'||format_type(a.atttypid,a.attty
 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
 JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
 LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
-WHERE n.nspname='public' AND c.relkind IN ('r','p') AND c.relname<>'flyway_schema_history'
-  AND c.relname !~ '^user_events_[0-9]{4}_[0-9]{2}$' ORDER BY 1;
+WHERE n.nspname='public' AND c.relkind IN ('r','p') AND c.relname<>'flyway_schema_history' ORDER BY 1;
 SELECT 'CONSTRAINT|'||rel.relname||'|'||pg_get_constraintdef(con.oid)
 FROM pg_constraint con JOIN pg_class rel ON rel.oid=con.conrelid JOIN pg_namespace n ON n.oid=rel.relnamespace
-WHERE n.nspname='public' AND rel.relname<>'flyway_schema_history'
-  AND rel.relname !~ '^user_events_[0-9]{4}_[0-9]{2}$' ORDER BY 1;
+WHERE n.nspname='public' AND rel.relname<>'flyway_schema_history' ORDER BY 1;
 SELECT 'INDEX|'||tablename||'|'||regexp_replace(indexdef,' INDEX [a-z_0-9]+ ',' INDEX ')
-FROM pg_indexes WHERE schemaname='public' AND tablename<>'flyway_schema_history'
-  AND tablename !~ '^user_events_[0-9]{4}_[0-9]{2}$' ORDER BY 1;
+FROM pg_indexes WHERE schemaname='public' AND tablename<>'flyway_schema_history' ORDER BY 1;
 SELECT 'ENUM|'||t.typname||'|'||e.enumlabel||'|'||e.enumsortorder
 FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid JOIN pg_namespace n ON n.oid=t.typnamespace
 WHERE n.nspname='public' ORDER BY t.typname, e.enumsortorder;
