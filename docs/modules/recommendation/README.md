@@ -15,8 +15,9 @@ The verified Gorse API contract and its deployment live in [`gorse/README.md`](.
 | Capability | Entry point |
 |---|---|
 | Personalized ranked feed | `GET /api/v1/recommendations/feed` |
-| Engagement capture (like, save, comment) | `recommendation.feedback.queue` consumer |
-| Behavioral event log | `user_events` table (append-only, month-partitioned) |
+| Engagement capture (like, save, comment, share, comment like, view) | `recommendation.feedback.queue` consumer |
+| Behavioral event log | ClickHouse `luvax_analytics.user_events` (append-only, monthly partitions, 12-month retention) |
+| Rebuilding Gorse from the canonical data | The operator-triggered rebuild (section 7) |
 | Graceful degradation when the recommender is down | popularity ranking, then the chronological following feed |
 
 The pre-existing chronological feed at `GET /api/v1/posts/feed` is untouched.
@@ -67,12 +68,16 @@ flowchart LR
     D --> E["RabbitMQ social.events"]
     E -->|post.liked.v1| F["recommendation.feedback.queue"]
     F --> G[RecommendationFeedbackConsumer]
-    G --> H[("user_events")]
-    G --> I["Gorse POST /api/feedback"]
+    G -->|1. wait_for_async_insert=1| H[("ClickHouse user_events")]
+    G -->|2. after the row is durable| I["Gorse POST /api/feedback"]
 ```
 
-`user_events` is the canonical record.
-Gorse holds only derived state, so it can always be rebuilt from PostgreSQL by re-pushing (see §7).
+`user_events` in ClickHouse is the canonical record, and it is written before Gorse, so Gorse never holds feedback without a durable record.
+Gorse holds only derived state, so it can always be rebuilt from PostgreSQL and ClickHouse by the rebuild tool (see §7).
+The consumer stores the exact Gorse feedback type and value it sent in `feedback_type` and `feedback_value`, which is what lets a rebuild reproduce the live pipeline's accumulated values.
+
+The behavioral events that are not engagement (`session_start`, `search`, `profile_view`) are written by `UserEventRecorder` straight to ClickHouse and never reach Gorse.
+Server-side events that must not reach Gorse can travel through `recommendation.user-event.imported.v1` and `UserEventImportConsumer`.
 
 ---
 
@@ -84,19 +89,25 @@ src/main/java/com/app/modules/recommendation/
 ├── controller/RecommendationController.java   # auth, rate limiting, response envelope
 ├── client/
 │   ├── GorseClient.java                       # REST contract
+│   ├── GorsePurger.java                       # truncates Gorse's store; seed reset and rebuild share it
 │   ├── impl/GorseClientImpl.java              # RestClient calls, no fallback logic
 │   └── dto/                                   # Gorse wire records (PascalCase JSON)
 ├── config/
 │   ├── GorseProperties.java                   # app.gorse.* binding
 │   └── GorseClientConfig.java                 # RestClient bean, default headers, timeouts
-├── consumer/RecommendationFeedbackConsumer.java
+├── consumer/
+│   ├── RecommendationFeedbackConsumer.java    # ClickHouse row, then Gorse feedback
+│   └── UserEventImportConsumer.java           # imported events, never sent to Gorse
 ├── messaging/RecommendationRabbitBindingConfig.java
-├── repository/UserEventJdbcRepository.java    # append-only writer, plain JDBC
+├── rebuild/                                   # operator-triggered Gorse rebuild (section 7)
+├── repository/
+│   ├── UserEventAnalyticsRepository.java      # every ClickHouse read and write of user_events
+│   └── UserHashtagAffinityRepository.java     # affinity upsert over the staged ClickHouse signals
 └── service/
     ├── RecommendationFeedService.java
+    ├── UserEventRecorder.java                 # fire-and-forget analytics writes
     └── impl/
         ├── RecommendationFeedServiceImpl.java # orchestration, cursor, fallback chain
-        ├── UserEventsPartitionJob.java        # monthly partition maintenance
         └── feed/RecommendationSource.java     # candidate source + circuit breaker
 ```
 
@@ -131,18 +142,20 @@ A cursor that does not match this shape is treated as a chronological-feed curso
 Gorse classifies feedback by **type**, not by numeric weight.
 `like`, `save`, and `comment` are configured as positive types; `read` is configured as the read type, in `gorse/config/config.toml`.
 
-| App event | Gorse `FeedbackType` | `user_events.event_type` |
-|---|---|---|
-| `post.liked.v1` | `like` | `post_like` |
-| `post.saved.v1` | `save` | `post_save` |
-| `comment.created.v1` | `comment` | `post_comment` |
-| `post.viewed.v1` | `read` | `post_view` |
+| App event | Gorse `FeedbackType` | Value | `user_events.event_type` |
+|---|---|---|---|
+| `post.liked.v1` | `like` | 1.0 | `post_like` |
+| `post.saved.v1` | `save` | 1.0 | `post_save` |
+| `comment.created.v1` | `comment` | 1.0 | `post_comment` |
+| `post.shared.v1` | `share` | 1.0 | `post_share` |
+| `comment.liked.v1` | `like` | 0.5, attributed to the parent post | `comment_like` |
+| `post.viewed.v1` | `read` | dwell seconds, or 1.0 | `post_view` |
 
 `post.viewed.v1` is published by `POST /api/v1/posts/{postId}/view` (post module) and is the only read-class signal; a view by the post's own owner is accepted but not recorded, so it never reaches this pipeline.
 
 Deliberately excluded:
 
-- `comment.liked.v1` — its payload carries no `postId`, so it cannot be mapped to an item without a cross-module lookup.
+- Story views, which are recorded in `user_events` only.
 - `user.followed.v1` — a user-to-user edge, not user-to-item feedback.
 - Unlike and unsave — withdrawal of positive feedback is not propagated.
 
@@ -158,8 +171,17 @@ Deliberately excluded:
 | `app.gorse.read-timeout` | `GORSE_READ_TIMEOUT` | `PT3S` | |
 | `app.gorse.recommend-multiplier` | `GORSE_RECOMMEND_MULTIPLIER` | `2` | Candidate over-fetch factor to absorb filtering |
 | `app.recommendation.consumer.enabled` | `RECOMMENDATION_CONSUMER_ENABLED` | `false` | Enabled in the `dev` and `prod` profiles |
+| `app.recommendation.consumer.concurrency` | `RECOMMENDATION_CONSUMER_CONCURRENCY` | `4` | Feedback consumer threads; each write waits for its ClickHouse part to be flushed and synced |
+| `app.recommendation.read-set-window` | `RECOMMENDATION_READ_SET_WINDOW` | `P90D` | How far back the exhaustion topup reads |
+| `app.recommendation.read-set-max-rows` | `RECOMMENDATION_READ_SET_MAX_ROWS` | `2000` | Cap on the read-set |
+| `app.recommendation.gorse-rebuild.requests-per-second` | `GORSE_REBUILD_REQUESTS_PER_SECOND` | `5` | Rate limit of the rebuild's Gorse calls |
+| `app.recommendation.gorse-rebuild.user-batch-size` | `GORSE_REBUILD_USER_BATCH_SIZE` | `500` | Users per rebuild batch |
+| `app.recommendation.gorse-rebuild.item-batch-size` | `GORSE_REBUILD_ITEM_BATCH_SIZE` | `500` | Posts per rebuild batch |
+| `app.recommendation.gorse-rebuild.feedback-batch-size` | `GORSE_REBUILD_FEEDBACK_BATCH_SIZE` | `1000` | Feedback tuples per rebuild request |
+| (read from the environment, like `SEED_DATA`) | `GORSE_REBUILD`, `GORSE_REBUILD_TOKEN` | unset | Trigger and name of a rebuild run (section 7) |
 
 Circuit breaker instance `gorse` is defined in `src/main/resources/resilience/circuitbreaker/resilience4j-{dev,prod}.yml`.
+The `clickhouse` breaker and the `app.analytics.*` keys that govern the ClickHouse side are described in `.claude/rules/struct.md` (Analytics - ClickHouse), and the `gorseRebuild` rate limiter is in `resilience/ratelimiter/resilience4j-{dev,prod}.yml`.
 
 ---
 
@@ -195,19 +217,40 @@ python gorse/seed/seed.py verify --api-key "$GORSE_API_KEY"
 Every seeded account uses the password `Password123!`, with the email address listed for it in `src/main/resources/seed/users.json`.
 The two demo accounts are `demo_an` (football, travel) and `demo_binh` (cooking, fashion).
 
-### Rebuild Gorse from PostgreSQL
+### Rebuild Gorse
 
 Gorse holds only derived state.
-If its database is lost or its dataset drifts from the real `posts`/`users` tables, there is no single existing command that re-syncs it from the live application database.
+If its database is lost, or its dataset drifts from the real `posts` and `users` tables, the rebuild tool re-syncs it from PostgreSQL and ClickHouse.
+Its design and phases are in [DATA_RULES.md](DATA_RULES.md), section 3E.
 
-`python gorse/seed/seed.py push --api-key "$GORSE_API_KEY"` does **not** do this, despite the name.
-It pushes that script's own synthetic 8-topic demo dataset (built entirely in memory by `build_dataset()`), unrelated to whatever is actually in the application's PostgreSQL database.
-Running it again is safe and idempotent for that demo dataset, but it will not repair a drifted catalogue - verified in `.workspace/reports/recommendation/for_you_diagnosis.md` and `FIX_NOTES.md`, where this distinction was the difference between a rebuild that worked and one that silently did nothing.
+`python gorse/seed/seed.py push` does **not** do this, despite the name.
+It pushes that script's own synthetic 8-topic demo dataset, unrelated to whatever is in the application's database.
 
-Two ways to actually resync from the canonical source:
+**Before you start**
+- The backend must be running with ClickHouse reachable: the tool reads the feedback from ClickHouse and `PREFLIGHT` fails if the analytics schema is not ready.
+- The application's PostgreSQL role must hold `TRUNCATE` on the seven tables of the `gorse` database (`documents`, `feedback`, `items`, `message`, `time_series_points`, `users`, `values`).
+  If it does not, the run ends `FAILED` in `PREFLIGHT` with `Gorse's store cannot be purged: role <role> lacks the TRUNCATE privilege on gorse.public.<table>` and changes nothing.
+- Note the feed as three test accounts see it, and Gorse's item, user and feedback totals, so the result can be compared.
 
-1. **A full `SeedRunner` reseed** (`SPRING_PROFILES_ACTIVE=dev,seed SEED_DATA=true`, see `src/main/resources/seed/README.md`). `SeedResetService.reset()` truncates Gorse's sibling Postgres database first, then `SeedOutboxEmitter.emitFullVolume()` replays `post.index.upsert.v1` for every post through the real outbox and `PostIndexSyncConsumer`, so Gorse ends up holding exactly what the freshly-reseeded `posts` table holds, with real item timestamps. This also regenerates every other seedable table - it is a full reset, not a Gorse-only repair.
-2. **A one-off push of the current tables**, when the rest of the database must not be touched: truncate Gorse's `items`/`users`/`feedback`/`documents`/`values`/`time_series_points`/`message` tables (the same list `SeedResetService.purgeGorse()` truncates), then POST the current `posts` (as items, `IsHidden` = status != published, `Labels` = hashtag names, `Timestamp` = real `created_at`), `users`, and `post_likes`/`post_saves`/non-deleted `comments`/`post_view` `user_events` rows (as feedback) to Gorse's REST API, mirroring the exact wire shapes `GorseClientImpl` and `PostIndexSyncConsumer` already use. No such script is checked into the repository; it was written as a disposable one-off for this repair (`.workspace/scripts/` on the machine it ran on) rather than committed, because it is not something the application, a scheduled job, or ordinary developer workflow should ever need to run again if `PostIndexSyncConsumer` stays enabled and every future `posts` reset goes through `SeedRunner`.
+**Run it**
+1. Set `GORSE_REBUILD=true` and `GORSE_REBUILD_TOKEN=<name for this run>` (a date and a counter, for example) on the backend and restart it.
+   The token is required; without it the runner logs `GORSE_REBUILD is set but GORSE_REBUILD_TOKEN is empty` and does nothing.
+2. Follow the `[gorse-rebuild] token=<token>` log lines, or the `luvax_gorse_rebuild_phase` gauge, until the phase reaches 7 and the log shows `phase=DONE users=<n> items=<n> feedback=<n> feedbackSkipped=<n>`.
+3. Unset both variables and restart.
+4. After one `fit_period`, check the same three feeds: every id resolves to a published post, and Gorse's item count matches the catalogue.
+
+**What the status means**
+
+| Run status | Meaning | What to do |
+|---|---|---|
+| `RUNNING` | In progress, or the process died mid-run | Restart with the same token; it resumes from its phase and checkpoint |
+| `FAILED` | A phase failed (Gorse unreachable, preflight refused, a 4xx) | Fix the cause and restart with the same token |
+| `FAILED_VERIFICATION` | The final comparison found a difference; the log names the counts and up to 20 ids | Investigate; the run is final, so a retry needs a new token |
+| `DONE` | Finished and verified | Nothing; a restart with the same token logs `already finished` and does nothing |
+
+While the rebuild runs, the feedback listener is suspended so no live feedback interleaves; its messages wait in `recommendation.feedback.queue` and are applied afterwards on top of the rebuilt state.
+
+**Alternative for a development database**: a full `SeedRunner` reseed (`SPRING_PROFILES_ACTIVE=dev,seed SEED_DATA=true`, see `src/main/resources/seed/README.md`) truncates Gorse's store through `GorsePurger` and replays every post through the real outbox, but it also regenerates every other seedable table.
 
 ---
 
@@ -219,12 +262,17 @@ The read path degrades in three steps and never returns an error because the rec
 2. The popularity ranking is also unavailable → the chronological following feed serves the page, with `rankingScore` null.
 3. Only genuine client-side faults (4xx from Gorse) surface as errors, because masking them would hide a bug.
 
-On the write path, a failed Gorse push is retried with backoff and then dead-lettered to `recommendation.feedback.dlq`.
-A 4xx response skips retries and dead-letters immediately.
-No feedback is lost in either case: the `user_events` row is the canonical record, and DLQ replay is manual.
+The read-set that backs the exhaustion topup comes from ClickHouse; if that read fails, the topup is skipped and Gorse's own results are served alone, without touching the `gorse` breaker.
+
+On the write path, the consumer writes ClickHouse first and then Gorse.
+A failed Gorse push is retried with backoff and then dead-lettered to `recommendation.feedback.dlq`, and a 4xx response skips retries and dead-letters immediately.
+No feedback is lost in either case: the ClickHouse row is the canonical record, and DLQ replay is manual.
+An actor that no longer exists is dead-lettered once, because ClickHouse has no foreign key to refuse the row.
+
+A ClickHouse outage is handled differently, so it cannot drain the queue into the DLQ: the consumer nacks with requeue, and once the `clickhouse` circuit breaker opens `AnalyticsIngestionController` stops the listener containers, so the messages wait ready in `recommendation.feedback.queue` until the breaker half-opens and the listeners start again.
 
 Duplicate message delivery is absorbed by the shared inbox (`processed_messages`).
-Because `ProcessedMessageService.processOnce` is transactional, a failed handler rolls back both the inbox marker and the `user_events` insert, so the retry re-runs cleanly.
+Because `ProcessedMessageService.processOnce` is transactional, a failed handler rolls back the inbox marker, and the retry re-runs cleanly: the ClickHouse insert is not part of that transaction, but the retry inserts an identical row (same id, same values), which the engine folds away.
 
 ---
 
@@ -237,7 +285,7 @@ These are accepted trade-offs, not defects.
 - **Pagination is not snapshotted.** A training run between two page requests can reorder items, so a post may repeat or be skipped across pages.
 - **Deduplication is per-request only.** Items already shown on an earlier page can reappear later.
 - **A mid-pagination fallback reuses the offset.** If Gorse fails while the reader is deep in the list, the same numeric offset is applied to the popularity list, skipping its head. Only reachable when the recommender fails mid-scroll.
-- **Recommendations can lag behind an out-of-band data reset.** Gorse's item/user/feedback store is derived state kept in sync by `PostIndexSyncConsumer` (`post.index.upsert.v1` / `post.index.delete.v1`, the same events that drive the Elasticsearch sync) as posts are created, updated, hidden on removal, and restored. That consumer relies on the outbox, so it only sees writes that go through the application. If PostgreSQL's `posts` table is ever reset or reseeded by a path that does not replay through the outbox, Gorse keeps whatever items it already had - which can drift entirely out of overlap with the current `posts` table without any error, because every Gorse call still succeeds; the candidates just fail to resolve to a live post. See §7 "Rebuild Gorse from PostgreSQL" - `gorse/seed/seed.py push` is **not** that rebuild tool, despite its name; it pushes that script's own synthetic demo dataset, not real application data. A real resync currently requires either a full `SeedRunner` reseed (which replays `post.index.upsert.v1` for every post) or an equivalent one-off push of the current `posts`/`users`/engagement tables through Gorse's REST API.
+- **Recommendations can lag behind an out-of-band data reset.** Gorse's item, user and feedback store is derived state kept in sync by `PostIndexSyncConsumer` (`post.index.upsert.v1` / `post.index.delete.v1`, the same events that drive the Elasticsearch sync) as posts are created, updated, hidden on removal and restored. That consumer relies on the outbox, so it only sees writes that go through the application. If PostgreSQL's `posts` table is reset by a path that does not replay through the outbox, Gorse keeps whatever items it already had, which can drift entirely out of overlap with the current `posts` table without any error, because every Gorse call still succeeds and the candidates just fail to resolve to a live post. The Gorse rebuild tool (section 7) is the repair, and it verifies the catalogue against PostgreSQL in both directions before it reports `DONE`.
 - **No negative feedback.** There is no "not interested" signal, and unlike/unsave do not retract prior positive feedback.
 
 ---
@@ -268,5 +316,5 @@ Trending is positive feedback count divided by item age raised to a fractional p
 
 **Repeat suppression.**
 Posts a user has already read are not excluded permanently.
-Replacement is enabled, so a read post returns at reduced weight once the candidate pool is exhausted.
+Gorse's own replacement is disabled (`enable_replacement = false`, measured and rejected in `gorse/config/config.toml`), so Gorse excludes read items outright, and `RecommendationSource` backfills from trending, unread candidates first and read ones only at the tail, once Gorse's list runs short.
 That is deliberate on a catalogue of roughly seven hundred published posts: impression-level read marking exhausts it within a handful of sessions, and permanent exclusion would leave every recommendation surface blank.
