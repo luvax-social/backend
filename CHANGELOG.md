@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
+- A rollback script, `scripts/rollback/phase2_postgres_rollback.sql`, restores the PostgreSQL schema from V133 to V126 and forgets V127 to V133, so the release that moved analytics to ClickHouse can be abandoned; a test proves the result matches a V126 database, that a second run changes nothing and that the migrations then apply again.
 - `GORSE_REBUILD_REQUESTS_PER_SECOND`, `GORSE_REBUILD_USER_BATCH_SIZE`, `GORSE_REBUILD_ITEM_BATCH_SIZE` and `GORSE_REBUILD_FEEDBACK_BATCH_SIZE` configuration properties.
 - An operator-triggered Gorse rebuild (`GORSE_REBUILD`, `GORSE_REBUILD_TOKEN`) purges Gorse's store, pushes every account and every post as an item (hidden when unpublished or deleted), replays the feedback the live pipeline accumulated from ClickHouse, and fails loudly if the catalogue then differs from PostgreSQL; a run is checkpointed in `gorse_rebuild_runs`, resumes after a crash with the same token, never repeats once finished, and pauses the feedback consumer while it runs.
 - RECOMMENDATION_CONSUMER_CONCURRENCY sets the number of recommendation feedback consumer threads (default 4), and a feedback message is returned to its queue while ClickHouse is unavailable instead of being retried or dead-lettered.
