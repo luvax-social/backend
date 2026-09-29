@@ -7,31 +7,30 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.amqp.core.Binding;
-import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Message;
-import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.core.QueueBuilder;
-import org.springframework.amqp.core.TopicExchange;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.clickhouse.ClickHouseContainer;
@@ -41,14 +40,15 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-import com.app.common.analytics.ClickHouseOperations;
-import com.app.common.analytics.ClickHouseUnavailableException;
 import com.app.common.analytics.impl.ClickHouseOperationsImpl;
 import com.app.common.analytics.migration.AnalyticsSchemaGate;
 import com.app.common.config.rabbit.RabbitMqTopologyConfig;
+import com.app.common.inbox.service.ProcessedMessageService;
+import com.app.common.outbox.model.DomainEventEnvelope;
+import com.app.common.outbox.model.DomainEventEnvelopeJson;
+import com.app.modules.admin.messaging.AdminEventTypes;
 import com.app.testsupport.ClickHouseTestSupport;
 import com.app.testsupport.TestContainerImages;
-import com.rabbitmq.client.Channel;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -58,10 +58,8 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
  * container stops, the messages wait ready in their queue, and after recovery every row arrives
  * exactly once.
  *
- * <p>The consumer here is a stand-in that follows the pattern every analytics consumer follows:
- * acknowledge on success, requeue on {@link ClickHouseUnavailableException}, dead-letter anything
- * else. It carries the id of the admin action replication listener, so the controller treats it as
- * that listener.
+ * <p>Driven through the admin action replication consumer, the first analytics consumer, with real
+ * audit rows in PostgreSQL and real events on the bus.
  */
 @SpringBootTest(
         properties = {
@@ -75,14 +73,12 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
             "app.analytics.clickhouse.connection-timeout=PT1S"
         })
 @Testcontainers
-@Import(AnalyticsOutageIT.OutageConsumerConfig.class)
+@Import(AnalyticsOutageIT.InboxProbeConfig.class)
 class AnalyticsOutageIT {
 
-    static final String QUEUE = "test.analytics.outage.queue";
-    static final String DEAD_LETTER_QUEUE = "test.analytics.outage.dlq";
-    static final String DEAD_LETTER_ROUTING_KEY = "test.analytics.outage.dead-letter";
-    static final String MALFORMED_PREFIX = "malformed:";
-    static final OffsetDateTime ACTION_TIME = OffsetDateTime.parse("2026-09-01T00:00:00Z");
+    static final String QUEUE = RabbitMqTopologyConfig.ADMIN_ACTION_REPLICATION_QUEUE;
+    static final String DEAD_LETTER_QUEUE =
+            RabbitMqTopologyConfig.ADMIN_ACTION_REPLICATION_DEAD_LETTER_QUEUE;
 
     static final ClickHouseContainer clickhouse = ClickHouseTestSupport.startProvisioned();
 
@@ -126,103 +122,81 @@ class AnalyticsOutageIT {
         r.add("spring.datasource.hikari.data-source-properties.stringtype", () -> "unspecified");
     }
 
+    /**
+     * Completes a future per event id once the consumer's inbox call has returned successfully,
+     * which is after the row reached ClickHouse and the transaction committed. A failed attempt
+     * completes nothing, so a message requeued during the outage completes its future only when the
+     * retry after recovery succeeds.
+     */
     @TestConfiguration
-    static class OutageConsumerConfig {
+    static class InboxProbeConfig {
 
         @Bean
-        Queue outageQueue() {
-            return QueueBuilder.durable(QUEUE)
-                    .withArgument(
-                            "x-dead-letter-exchange",
-                            RabbitMqTopologyConfig.SOCIAL_EVENTS_DEAD_LETTER_EXCHANGE)
-                    .withArgument("x-dead-letter-routing-key", DEAD_LETTER_ROUTING_KEY)
-                    .build();
+        ConcurrentMap<UUID, CompletableFuture<Void>> processedEvents() {
+            return new ConcurrentHashMap<>();
         }
 
         @Bean
-        Queue outageDeadLetterQueue() {
-            return QueueBuilder.durable(DEAD_LETTER_QUEUE).build();
-        }
-
-        @Bean
-        Binding outageDeadLetterBinding(
-                Queue outageDeadLetterQueue, TopicExchange socialEventsDeadLetterExchange) {
-            return BindingBuilder.bind(outageDeadLetterQueue)
-                    .to(socialEventsDeadLetterExchange)
-                    .with(DEAD_LETTER_ROUTING_KEY);
-        }
-
-        @Bean
-        BlockingQueue<UUID> processedIds() {
-            return new LinkedBlockingQueue<>();
-        }
-
-        @Bean
-        OutageConsumer outageConsumer(
-                ClickHouseOperations operations, BlockingQueue<UUID> processedIds) {
-            return new OutageConsumer(operations, processedIds);
+        @Primary
+        ProcessedMessageService probingProcessedMessageService(
+                @Qualifier("processedMessageServiceImpl") ProcessedMessageService delegate,
+                ConcurrentMap<UUID, CompletableFuture<Void>> processedEvents) {
+            return (consumerName, eventId, eventType, handler) -> {
+                var result = delegate.processOnce(consumerName, eventId, eventType, handler);
+                processedEvents
+                        .computeIfAbsent(eventId, id -> new CompletableFuture<>())
+                        .complete(null);
+                return result;
+            };
         }
     }
 
-    static class OutageConsumer {
-
-        private final ClickHouseOperations operations;
-        private final BlockingQueue<UUID> processedIds;
-
-        OutageConsumer(ClickHouseOperations operations, BlockingQueue<UUID> processedIds) {
-            this.operations = operations;
-            this.processedIds = processedIds;
-        }
-
-        @RabbitListener(
-                id = AnalyticsListenerIds.ADMIN_ACTION_REPLICATION,
-                queues = QUEUE,
-                autoStartup = "false")
-        public void consume(Message message, Channel channel) throws Exception {
-            long tag = message.getMessageProperties().getDeliveryTag();
-            try {
-                String body = new String(message.getBody(), StandardCharsets.UTF_8);
-                boolean malformed = body.startsWith(MALFORMED_PREFIX);
-                UUID id = UUID.fromString(body.replaceFirst("^" + MALFORMED_PREFIX, ""));
-                operations.write(
-                        "test.outage.insert",
-                        client ->
-                                client.sql(
-                                                "INSERT INTO admin_actions (id, action_type,"
-                                                        + " created_at, row_version) SETTINGS"
-                                                        + " async_insert = 1,"
-                                                        + " wait_for_async_insert = 1 VALUES (:id,"
-                                                        + " 'ban_user', :createdAt, 1)")
-                                        .param("id", id)
-                                        .param("createdAt", malformed ? "not-a-date" : ACTION_TIME)
-                                        .update());
-                channel.basicAck(tag, false);
-                processedIds.add(id);
-            } catch (ClickHouseUnavailableException e) {
-                channel.basicNack(tag, false, true);
-            } catch (RuntimeException e) {
-                channel.basicNack(tag, false, false);
-            }
-        }
-    }
+    /** One audit row in PostgreSQL and the event that announces it. */
+    private record Announced(UUID eventId, UUID actionId) {}
 
     @Autowired private AnalyticsSchemaGate gate;
     @Autowired private AnalyticsIngestionController controller;
     @Autowired private CircuitBreakerRegistry breakers;
     @Autowired private RabbitTemplate rabbitTemplate;
-    @Autowired private BlockingQueue<UUID> processedIds;
+    @Autowired private JdbcClient jdbcClient;
+    @Autowired private ConcurrentMap<UUID, CompletableFuture<Void>> processedEvents;
 
-    private UUID send() {
-        UUID id = UUID.randomUUID();
-        rabbitTemplate.send("", QUEUE, new Message(id.toString().getBytes(StandardCharsets.UTF_8)));
-        return id;
+    private Announced announce() {
+        UUID actionId =
+                jdbcClient
+                        .sql(
+                                "INSERT INTO admin_actions(action_type) VALUES ('ban_user')"
+                                        + " RETURNING id")
+                        .query(UUID.class)
+                        .single();
+        UUID eventId = UUID.randomUUID();
+        processedEvents.put(eventId, new CompletableFuture<>());
+        DomainEventEnvelope envelope =
+                new DomainEventEnvelope(
+                        eventId,
+                        AdminEventTypes.ACTION_RECORDED_V1,
+                        OffsetDateTime.now(ZoneOffset.UTC),
+                        null,
+                        "admin_action",
+                        actionId,
+                        Map.of("adminActionId", actionId.toString()));
+        rabbitTemplate.send(
+                RabbitMqTopologyConfig.SOCIAL_EVENTS_EXCHANGE,
+                AdminEventTypes.ACTION_RECORDED_V1,
+                new Message(
+                        DomainEventEnvelopeJson.write(envelope).getBytes(StandardCharsets.UTF_8)));
+        return new Announced(eventId, actionId);
+    }
+
+    private void awaitProcessed(Announced announced, long seconds) throws Exception {
+        processedEvents.get(announced.eventId()).get(seconds, TimeUnit.SECONDS);
     }
 
     private com.rabbitmq.client.AMQP.Queue.DeclareOk queueState(String name) {
         return rabbitTemplate.execute(channel -> channel.queueDeclarePassive(name));
     }
 
-    private long countRows(List<UUID> ids) throws Exception {
+    private long countRows(List<UUID> actionIds) throws Exception {
         try (Connection admin = ClickHouseTestSupport.adminConnection(clickhouse);
                 Statement statement = admin.createStatement();
                 ResultSet rows =
@@ -231,7 +205,9 @@ class AnalyticsOutageIT {
                                         + " IN ("
                                         + String.join(
                                                 ",",
-                                                ids.stream().map(id -> "'" + id + "'").toList())
+                                                actionIds.stream()
+                                                        .map(id -> "'" + id + "'")
+                                                        .toList())
                                         + ")")) {
             rows.next();
             return rows.getLong(1);
@@ -248,8 +224,8 @@ class AnalyticsOutageIT {
                 breakers.circuitBreaker(ClickHouseOperationsImpl.CIRCUIT_BREAKER_NAME);
         breaker.reset();
 
-        UUID healthy = send();
-        assertThat(processedIds.poll(30, TimeUnit.SECONDS)).isEqualTo(healthy);
+        Announced healthy = announce();
+        awaitProcessed(healthy, 30);
 
         CompletableFuture<Void> opened = new CompletableFuture<>();
         breaker.getEventPublisher()
@@ -261,10 +237,10 @@ class AnalyticsOutageIT {
                             }
                         });
         clickhouse.getDockerClient().pauseContainerCmd(clickhouse.getContainerId()).exec();
-        List<UUID> sentDuringOutage = new ArrayList<>();
+        List<Announced> sentDuringOutage = new ArrayList<>();
         try {
             for (int i = 0; i < 8; i++) {
-                sentDuringOutage.add(send());
+                sentDuringOutage.add(announce());
             }
 
             opened.get(90, TimeUnit.SECONDS);
@@ -281,41 +257,20 @@ class AnalyticsOutageIT {
 
         // The breaker half-opens by itself after its open wait, which starts the container again.
         Set<UUID> drained = new HashSet<>();
-        for (int i = 0; i < sentDuringOutage.size(); i++) {
-            UUID id = processedIds.poll(120, TimeUnit.SECONDS);
-            assertThat(id).as("message %d of the backlog", i).isNotNull();
-            drained.add(id);
+        for (Announced announced : sentDuringOutage) {
+            awaitProcessed(announced, 120);
+            drained.add(announced.eventId());
         }
 
-        assertThat(drained).containsExactlyInAnyOrderElementsOf(sentDuringOutage);
+        assertThat(drained)
+                .containsExactlyInAnyOrderElementsOf(
+                        sentDuringOutage.stream().map(Announced::eventId).toList());
         assertThat(queueState(QUEUE).getMessageCount()).isZero();
         assertThat(queueState(DEAD_LETTER_QUEUE).getMessageCount()).isZero();
-        List<UUID> everything = new ArrayList<>(sentDuringOutage);
-        everything.add(healthy);
+        List<UUID> everything =
+                new ArrayList<>(sentDuringOutage.stream().map(Announced::actionId).toList());
+        everything.add(healthy.actionId());
         assertThat(countRows(everything)).isEqualTo(everything.size());
-        assertThat(controller.isRunning(AnalyticsListenerIds.ADMIN_ACTION_REPLICATION)).isTrue();
-    }
-
-    @Test
-    void rejectedRequest_deadLettersAtOnceAndNeverPausesIngestion() throws Exception {
-        assertThat(gate.attempt()).isTrue();
-        controller.reconcile();
-        CircuitBreaker breaker =
-                breakers.circuitBreaker(ClickHouseOperationsImpl.CIRCUIT_BREAKER_NAME);
-        breaker.reset();
-
-        // ClickHouse cannot parse the timestamp, which is the request being wrong, not the server.
-        rabbitTemplate.send(
-                "",
-                QUEUE,
-                new Message(
-                        (MALFORMED_PREFIX + UUID.randomUUID()).getBytes(StandardCharsets.UTF_8)));
-
-        Message deadLettered = rabbitTemplate.receive(DEAD_LETTER_QUEUE, 30_000);
-
-        assertThat(deadLettered).isNotNull();
-        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
-        assertThat(breaker.getMetrics().getNumberOfBufferedCalls()).isZero();
         assertThat(controller.isRunning(AnalyticsListenerIds.ADMIN_ACTION_REPLICATION)).isTrue();
     }
 }

@@ -29,7 +29,8 @@ import com.app.modules.admin.repository.AdminActionRepository;
  * each of the nine calling paths means one insertion point instead of nine, inside the same
  * transaction as both the audit row and the state change, so a notice can never be sent for an
  * action that rolled back and an action can never commit without its notice enqueued. Which actions
- * mail is decided in one place by {@link ModerationMailTemplates}.
+ * mail is decided in one place by {@link ModerationMailTemplates}. The ClickHouse replication event
+ * is raised here for the same reason.
  */
 @Component
 public class AdminActionRecorder {
@@ -94,7 +95,22 @@ public class AdminActionRecorder {
         AdminActionResponse response =
                 adminActionMapper.toResponse(adminActionRepository.insert(action));
         enqueueModerationNotice(response, actionType, targetUserId, metadata);
+        enqueueReplication(response);
         return response;
+    }
+
+    // The audit log is replicated to ClickHouse for listing and dashboards. Enqueuing here, in the
+    // same transaction as the insert, means a committed audit row always reaches the replica and a
+    // rolled-back one never does. The event names the row and nothing else; the consumer reads
+    // the current row back from PostgreSQL.
+    private void enqueueReplication(AdminActionResponse response) {
+        outboxService.enqueue(
+                AdminEventTypes.ACTION_RECORDED_V1,
+                AdminEventTypes.ACTION_RECORDED_V1,
+                "admin_action",
+                response.id(),
+                response.adminId(),
+                Map.of("adminActionId", response.id().toString()));
     }
 
     // The payload carries identifiers and the one date a template needs, and nothing else. The

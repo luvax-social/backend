@@ -65,6 +65,12 @@ public class RabbitMqTopologyConfig {
     public static final String RECOMMENDATION_FEEDBACK_DEAD_LETTER_ROUTING_KEY =
             "recommendation.feedback.dead-letter";
 
+    public static final String ADMIN_ACTION_REPLICATION_QUEUE = "admin.action.replication.queue";
+    public static final String ADMIN_ACTION_REPLICATION_DEAD_LETTER_QUEUE =
+            "admin.action.replication.dlq";
+    public static final String ADMIN_ACTION_REPLICATION_DEAD_LETTER_ROUTING_KEY =
+            "admin.action.replication.dead-letter";
+
     /**
      * Idle lifetime of a per-instance live fanout queue: removed by the broker after this long with
      * no consumer, so a queue left by an instance that died before its listener attached does not
@@ -301,6 +307,33 @@ public class RabbitMqTopologyConfig {
                         "x-dead-letter-routing-key",
                         RECOMMENDATION_FEEDBACK_DEAD_LETTER_ROUTING_KEY)
                 .build();
+    }
+
+    // The replication consumer nacks a rejected message without requeue, so the queue carries the
+    // dead-letter arguments and the broker routes the rejection itself. An outage is different: the
+    // consumer requeues, and the ingestion controller stops it, so messages wait here instead.
+    @Bean
+    Queue adminActionReplicationQueue() {
+        return QueueBuilder.durable(ADMIN_ACTION_REPLICATION_QUEUE)
+                .withArgument("x-dead-letter-exchange", SOCIAL_EVENTS_DEAD_LETTER_EXCHANGE)
+                .withArgument(
+                        "x-dead-letter-routing-key",
+                        ADMIN_ACTION_REPLICATION_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    Queue adminActionReplicationDeadLetterQueue() {
+        return QueueBuilder.durable(ADMIN_ACTION_REPLICATION_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    Binding adminActionReplicationDeadLetterBinding(
+            Queue adminActionReplicationDeadLetterQueue,
+            TopicExchange socialEventsDeadLetterExchange) {
+        return BindingBuilder.bind(adminActionReplicationDeadLetterQueue)
+                .to(socialEventsDeadLetterExchange)
+                .with(ADMIN_ACTION_REPLICATION_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean
