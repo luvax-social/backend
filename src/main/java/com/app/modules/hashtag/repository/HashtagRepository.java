@@ -112,6 +112,23 @@ public interface HashtagRepository extends JpaRepository<Hashtag, UUID>, Hashtag
     List<String> findNamesByPostId(@Param("postId") UUID postId);
 
     /**
+     * Returns the hashtag names of many posts in one statement, ordered by name within each post.
+     *
+     * <p>The same rule as {@link #findNamesByPostId}, with no status filter, because the
+     * recommender labels an item with every tag it carries. Posts without a hashtag are absent.
+     *
+     * @param postIds the posts to look up
+     * @return one association per post and hashtag, ordered by hashtag name
+     */
+    @Query(
+            value =
+                    "SELECT ph.post_id AS postId, h.id AS hashtagId, h.name AS name"
+                            + " FROM hashtags h JOIN post_hashtags ph ON ph.hashtag_id = h.id"
+                            + " WHERE ph.post_id IN (:postIds) ORDER BY h.name",
+            nativeQuery = true)
+    List<PostHashtagNameProjection> findNamesByPostIds(@Param("postIds") Collection<UUID> postIds);
+
+    /**
      * Returns scalar index projections for the given hashtag ids.
      *
      * <p>Selects columns directly rather than loading managed entities so the trigger-updated

@@ -1,6 +1,7 @@
 package com.app.modules.recommendation.client;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.app.modules.recommendation.client.dto.GorseFeedback;
@@ -134,4 +135,17 @@ public interface GorseClient {
      * @return the page and the cursor of the next one; the cursor is empty after the last page
      */
     GorseItemPage listItems(String cursor, int n);
+
+    /**
+     * Reads one feedback tuple back from Gorse, for the rebuild's verification.
+     *
+     * <p>Answers empty for a tuple Gorse does not hold, which the single-tuple REST endpoint cannot
+     * do on v0.5.11 (it closes the connection instead), so it reads the user's list of that type.
+     *
+     * @param feedbackType the Gorse feedback type
+     * @param userId the user
+     * @param itemId the item
+     * @return the stored tuple with its value, or empty when Gorse holds none
+     */
+    Optional<GorseFeedback> getFeedback(String feedbackType, String userId, String itemId);
 }

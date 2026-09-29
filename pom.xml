@@ -361,6 +361,11 @@
                              imported file, because a system property outranks spring.config.import,
                              so tests never seed while local development keeps SEED_DATA=true. -->
                         <SEED_DATA>false</SEED_DATA>
+                        <!-- The operator-triggered Gorse rebuild is started by an environment toggle, and
+                             application.yaml imports the developer's .env, so a local
+                             GORSE_REBUILD=true would purge and refill whatever Gorse the test context
+                             reaches. Pinned off for the same reason as SEED_DATA. -->
+                        <GORSE_REBUILD>false</GORSE_REBUILD>
                         <!-- application-dev.yml defaults app.mail.transport to resend via APP_MAIL_TRANSPORT,
                              matching production, so local mail reaches the real provider unless a developer
                              opts out. Without this pin, every @SpringBootTest/*IT in the suite would inherit

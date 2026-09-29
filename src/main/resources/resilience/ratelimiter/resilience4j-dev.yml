@@ -1,6 +1,13 @@
 resilience4j:
   ratelimiter:
     instances:
+      # Paces every Gorse call of the operator-triggered rebuild, so pushing a whole dataset cannot
+      # starve the live recommendation traffic that shares Gorse.
+      gorseRebuild:
+        limitForPeriod: ${app.recommendation.gorse-rebuild.requests-per-second}
+        limitRefreshPeriod: 1s
+        timeoutDuration: 30s
+        registerHealthIndicator: false
       # These JVM-wide instances serve as coarse overload backstops only.
       # Per-client rate limiting is handled by the Redis sliding-window limiter in
       # AuthRateLimitFilter (configured via app.rate-limit.endpoint-rules).

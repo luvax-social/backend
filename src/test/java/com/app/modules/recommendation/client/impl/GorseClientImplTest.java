@@ -9,6 +9,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -220,6 +221,40 @@ class GorseClientImplTest {
 
         client.hideItem("item-1");
 
+        server.verify();
+    }
+
+    @Test
+    void getFeedback_tupleHeld_readsTheUsersListOfThatTypeAndPicksTheItemIgnoringExtraFields() {
+        server.expect(requestTo("http://gorse.test/api/user/user-1/feedback/read"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-API-Key", API_KEY))
+                .andRespond(
+                        withSuccess(
+                                "[{\"FeedbackType\":\"read\",\"UserId\":\"user-1\","
+                                        + "\"ItemId\":\"other\",\"Value\":1,"
+                                        + "\"Timestamp\":\"2026-01-02T00:00:00Z\","
+                                        + "\"Updated\":\"2026-01-02T00:00:00Z\","
+                                        + "\"Comment\":\"\"},"
+                                        + "{\"FeedbackType\":\"read\",\"UserId\":\"user-1\","
+                                        + "\"ItemId\":\"item-1\",\"Value\":3.5,"
+                                        + "\"Timestamp\":\"2026-01-02T00:00:00Z\","
+                                        + "\"Updated\":\"2026-01-02T00:00:00Z\","
+                                        + "\"Comment\":\"\"}]",
+                                MediaType.APPLICATION_JSON));
+
+        Optional<GorseFeedback> held = client.getFeedback("read", "user-1", "item-1");
+
+        assertThat(held).get().extracting(GorseFeedback::value).isEqualTo(3.5);
+        server.verify();
+    }
+
+    @Test
+    void getFeedback_unknownUserOrTuple_isEmptyRatherThanAFailure() {
+        server.expect(requestTo("http://gorse.test/api/user/nobody/feedback/like"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        assertThat(client.getFeedback("like", "nobody", "item-1")).isEmpty();
         server.verify();
     }
 }

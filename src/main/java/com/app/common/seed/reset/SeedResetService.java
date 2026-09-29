@@ -1,17 +1,13 @@
 package com.app.common.seed.reset;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.IndexOperations;
@@ -21,6 +17,8 @@ import org.springframework.stereotype.Service;
 import com.app.common.analytics.AnalyticsStoreTruncator;
 import com.app.modules.hashtag.search.HashtagDocument;
 import com.app.modules.post.search.PostDocument;
+import com.app.modules.recommendation.client.GorsePurgeException;
+import com.app.modules.recommendation.client.GorsePurger;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,22 +41,14 @@ import lombok.extern.slf4j.Slf4j;
  * not domain data), {@code notification_type_configs}/{@code moderation_action_configs}/ {@code
  * report_reason_configs} (enum display metadata owned by Flyway, V18), {@code system_settings}
  * (operational config, not seed content), {@code feature_flags} (operational toggles, not seed
- * content). A future contributor adding a new reference/config table should add it here.
+ * content), {@code gorse_rebuild_runs} (a record of operator actions, not seed content). A future
+ * contributor adding a new reference/config table should add it here.
  */
 @Slf4j
 @Service
 @Profile("seed & (dev | prod)")
 @RequiredArgsConstructor
 public class SeedResetService {
-
-    // Matches the last path segment of a PostgreSQL JDBC URL, e.g. ".../luvax" or
-    // ".../luvax?stringtype=unspecified", so the Gorse sibling database's own URL can be derived
-    // without a second configured datasource.
-    private static final Pattern JDBC_URL_DATABASE_NAME = Pattern.compile("/([^/?]+)(\\?.*)?$");
-    private static final String GORSE_DATABASE_NAME = "gorse";
-    private static final String[] GORSE_TABLES = {
-        "feedback", "items", "users", "documents", "values", "time_series_points", "message"
-    };
 
     private final JdbcTemplate jdbc;
     // An ObjectProvider, not a direct ConnectionFactory, because plenty of dev-profile test
@@ -75,11 +65,7 @@ public class SeedResetService {
     // An ObjectProvider because the truncator exists only when app.analytics.enabled is true.
     private final ObjectProvider<AnalyticsStoreTruncator> analyticsTruncatorProvider;
 
-    @Value("${spring.datasource.username}")
-    private String datasourceUsername;
-
-    @Value("${spring.datasource.password}")
-    private String datasourcePassword;
+    private final GorsePurger gorsePurger;
 
     // Verified against a live `\dt` on 2026-08-25: every name below matches the running schema
     // exactly, no renames since database/schema.sql was last regenerated.
@@ -247,43 +233,13 @@ public class SeedResetService {
         }
     }
 
-    // Gorse's GorseClient has no bulk-delete operation - upsertUsers/upsertItems/insertFeedback are
-    // the only write paths the production client exposes, and Gorse's own REST API's /api/purge
-    // endpoint (confirmed by direct request) does not accept this deployment's configured
-    // credentials. Gorse's actual storage is Postgres, though: GORSE_DATA_STORE in
-    // docker-compose.yaml points gorse-in-one at a sibling database named "gorse" on the same
-    // Postgres server the application uses. Truncating that database's own tables directly is the
-    // same operation Gorse's own purge would perform, reached the way the application's own reset
-    // reaches its tables, on a plain one-shot JDBC connection since no DataSource bean for a
-    // second database is configured.
+    // The truncation itself lives in GorsePurger, shared with the operator-triggered rebuild, which
+    // treats a failure as fatal. A reset only warns, as it always has: Gorse is a derived store and
+    // a seed run against a stack without one should still complete.
     private void purgeGorse() {
-        // Derived from the live connection's own URL, never from the spring.datasource.url
-        // property. Testcontainers' @ServiceConnection contributes a ConnectionDetails bean and
-        // does not override that property, so in an integration-test context the property still
-        // names the developer's real local database while the actual connection points at the
-        // container. Reading the property here truncated the developer's real Gorse store every
-        // time the seed integration tests ran.
-        String applicationUrl;
-        try (Connection appConnection = jdbc.getDataSource().getConnection()) {
-            applicationUrl = appConnection.getMetaData().getURL();
-        } catch (SQLException | NullPointerException e) {
-            log.warn(
-                    "[seed] reset: could not resolve the live datasource URL, skipping Gorse purge");
-            return;
-        }
-        String gorseUrl =
-                JDBC_URL_DATABASE_NAME
-                        .matcher(applicationUrl)
-                        .replaceFirst("/" + GORSE_DATABASE_NAME);
-        try (Connection connection =
-                        DriverManager.getConnection(
-                                gorseUrl, datasourceUsername, datasourcePassword);
-                Statement statement = connection.createStatement()) {
-            for (String table : GORSE_TABLES) {
-                statement.execute("TRUNCATE TABLE " + table + " CASCADE");
-            }
-            log.info("[seed] reset: {} Gorse tables truncated", GORSE_TABLES.length);
-        } catch (SQLException e) {
+        try {
+            gorsePurger.purge();
+        } catch (GorsePurgeException e) {
             log.warn("[seed] reset: could not purge Gorse's database: {}", e.getMessage());
         }
     }

@@ -2,6 +2,7 @@ package com.app.modules.recommendation.client.impl;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.core.ParameterizedTypeReference;
@@ -19,6 +20,9 @@ import com.app.modules.recommendation.client.dto.GorseUser;
 public class GorseClientImpl implements GorseClient {
 
     private static final ParameterizedTypeReference<List<GorseScore>> SCORE_LIST =
+            new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<List<GorseFeedback>> FEEDBACK_LIST =
             new ParameterizedTypeReference<>() {};
 
     private final RestClient gorseRestClient;
@@ -136,5 +140,23 @@ public class GorseClientImpl implements GorseClient {
                         .retrieve()
                         .body(GorseItemPage.class);
         return body == null ? new GorseItemPage("", List.of()) : body;
+    }
+
+    @Override
+    public Optional<GorseFeedback> getFeedback(String feedbackType, String userId, String itemId) {
+        // The user's own list of this type rather than GET /api/feedback/{type}/{user}/{item}: on
+        // v0.5.11 that single-tuple endpoint panics on a tuple Gorse does not hold and closes the
+        // connection with no reply, which is indistinguishable from an outage. The list endpoint
+        // answers 200 with an empty array for an unknown user or an empty type.
+        List<GorseFeedback> body =
+                gorseRestClient
+                        .get()
+                        .uri("/api/user/{user}/feedback/{type}", userId, feedbackType)
+                        .retrieve()
+                        .body(FEEDBACK_LIST);
+        if (body == null) {
+            return Optional.empty();
+        }
+        return body.stream().filter(feedback -> itemId.equals(feedback.itemId())).findFirst();
     }
 }

@@ -152,6 +152,25 @@ class SeedResetServiceIT {
     }
 
     @Test
+    void reset_keepsTheRecordOfGorseRebuildRuns() {
+        jdbcTemplate.update(
+                "INSERT INTO gorse_rebuild_runs (token, status, phase) VALUES"
+                        + " ('seed_reset_it_run', 'DONE', 'DONE')");
+        try {
+            seedResetService.reset();
+
+            assertThat(
+                            jdbcTemplate.queryForObject(
+                                    "SELECT COUNT(*) FROM gorse_rebuild_runs WHERE token ="
+                                            + " 'seed_reset_it_run'",
+                                    Integer.class))
+                    .isEqualTo(1);
+        } finally {
+            jdbcTemplate.update("DELETE FROM gorse_rebuild_runs WHERE token = 'seed_reset_it_run'");
+        }
+    }
+
+    @Test
     void reset_purgesQueuedMessagesLeftOverFromAPriorRun() {
         rabbitTemplate.send(
                 RabbitMqTopologyConfig.MAIL_QUEUE,

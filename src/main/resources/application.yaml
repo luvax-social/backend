@@ -357,6 +357,13 @@ app:
     read-set-window: ${RECOMMENDATION_READ_SET_WINDOW:P90D}
     read-set-max-rows: ${RECOMMENDATION_READ_SET_MAX_ROWS:2000}
     top-up-overfetch-multiplier: ${RECOMMENDATION_TOPUP_OVERFETCH_MULTIPLIER:3}
+    # Pacing of the operator-triggered Gorse rebuild (GORSE_REBUILD, GORSE_REBUILD_TOKEN). None of
+    # these values changes what the rebuild produces, only how fast it pushes it.
+    gorse-rebuild:
+      requests-per-second: ${GORSE_REBUILD_REQUESTS_PER_SECOND:5}
+      user-batch-size: ${GORSE_REBUILD_USER_BATCH_SIZE:500}
+      item-batch-size: ${GORSE_REBUILD_ITEM_BATCH_SIZE:500}
+      feedback-batch-size: ${GORSE_REBUILD_FEEDBACK_BATCH_SIZE:1000}
     affinity:
       enabled: ${AFFINITY_JOB_ENABLED:true}
       # 90 days matches the read-set window above and the span the seeded dataset covers. It is
