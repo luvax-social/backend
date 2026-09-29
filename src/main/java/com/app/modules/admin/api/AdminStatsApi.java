@@ -26,11 +26,12 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 /**
  * OpenAPI contract for the administrative statistics surface.
  *
- * <p>Both operations read stored aggregates. Nothing here counts a whole table at request time: at
- * production size a single {@code COUNT(*)} over accounts is seconds of work, and posts and
- * comments are larger again. A background job absorbs that cost every half hour, where seconds do
- * not matter, and the snapshot carries the time it was computed so a client can show staleness
- * rather than imply the numbers are live.
+ * <p>Both operations read stored aggregates from the analytics store. Nothing here counts a whole
+ * table at request time: at production size a single {@code COUNT(*)} over accounts is seconds of
+ * work, and posts and comments are larger again. A background job absorbs that cost every half
+ * hour, where seconds do not matter, and the snapshot carries the time it was computed so a client
+ * can show staleness rather than imply the numbers are live. When the analytics store is down both
+ * operations answer 503 {@code ANALYTICS_UNAVAILABLE}.
  *
  * <p>Two kinds of metric are stored and they aggregate differently. Gauges are absolute snapshots
  * bounded by the end of their bucket; flows are direct counts of what happened inside the bucket. A
@@ -71,6 +72,13 @@ public interface AdminStatsApi {
                 content =
                         @Content(
                                 mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "503",
+                description = "Analytics store unavailable (ANALYTICS_UNAVAILABLE)",
+                content =
+                        @Content(
+                                mediaType = "application/json",
                                 schema = @Schema(implementation = ApiResponse.class)))
     })
     @AuthenticationRequiredResponse
@@ -85,11 +93,12 @@ public interface AdminStatsApi {
                             + " the last 24 hours; supplying exactly one is refused rather than"
                             + " silently defaulting the other. Bucket width is decided by the"
                             + " server when granularity is omitted and stated in the response"
-                            + " either way: fine buckets inside the fine retention window,"
-                            + " rolled-up daily rows beyond it. Requesting half_hour for a window"
-                            + " that reaches further back is refused rather than answered with an"
-                            + " empty series, because those rows were rolled up and deleted and an"
-                            + " empty chart would read as a quiet period. Both metric and"
+                            + " either way: half-hour points for a window starting inside the last"
+                            + " 30 days, daily points beyond it. A daily point is computed when the"
+                            + " series is read: the sum of the day's buckets for a flow, the last"
+                            + " bucket of the day for a gauge. The day in progress is not"
+                            + " returned. Requesting half_hour for a window that starts further"
+                            + " back is refused rather than answered at day width. Both metric and"
                             + " granularity are closed sets the document enumerates.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -100,8 +109,8 @@ public interface AdminStatsApi {
                 description =
                         "Metric or granularity outside its enumerated set, only one bound"
                                 + " supplied, 'to' not after 'from', a window longer than one"
-                                + " year, or half_hour requested for a window reaching past the"
-                                + " fine retention horizon",
+                                + " year, or half_hour requested for a window starting before the"
+                                + " half-hour horizon",
                 content =
                         @Content(
                                 mediaType = "application/json",
@@ -116,6 +125,13 @@ public interface AdminStatsApi {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "429",
                 description = "Rate limit exceeded",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "503",
+                description = "Analytics store unavailable (ANALYTICS_UNAVAILABLE)",
                 content =
                         @Content(
                                 mediaType = "application/json",

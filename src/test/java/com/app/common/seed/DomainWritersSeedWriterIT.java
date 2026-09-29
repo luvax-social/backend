@@ -414,24 +414,29 @@ class DomainWritersSeedWriterIT {
         assertThat(suspendedUntil.toInstant()).isAfter(REFERENCE_NOW);
     }
 
+    // Platform statistics reach ClickHouse through the outbox, so the seed's own output is one
+    // collected-bucket event per half-hour bucket: 90 days of them, all distinct, every one ending
+    // no later than the reference time.
     private void assertAnalyticsBucketsClosedBeforeReferenceNow() {
-        Integer dailyBuckets =
+        Integer events =
                 jdbcTemplate.queryForObject(
-                        "SELECT COUNT(DISTINCT bucket_start) FROM platform_stats WHERE"
-                                + " granularity = 'day'",
+                        "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
+                                + " 'admin.platform-stats.collected.v1'",
                         Integer.class);
-        assertThat(dailyBuckets).isEqualTo(90);
-        Integer halfHourBuckets =
+        assertThat(events).isEqualTo(90 * 48);
+        Integer distinctBuckets =
                 jdbcTemplate.queryForObject(
-                        "SELECT COUNT(DISTINCT bucket_start) FROM platform_stats WHERE"
-                                + " granularity = 'half_hour'",
+                        "SELECT COUNT(DISTINCT aggregate_id) FROM outbox_events WHERE event_type ="
+                                + " 'admin.platform-stats.collected.v1'",
                         Integer.class);
-        assertThat(halfHourBuckets).isEqualTo(30 * 48);
+        assertThat(distinctBuckets).isEqualTo(90 * 48);
 
         Integer openBuckets =
                 jdbcTemplate.queryForObject(
-                        "SELECT COUNT(*) FROM platform_stats WHERE granularity = 'day' AND"
-                                + " bucket_start + INTERVAL '1 day' > ?",
+                        "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
+                                + " 'admin.platform-stats.collected.v1'"
+                                + " AND (payload->'data'->>'bucketStart')::timestamptz"
+                                + " + INTERVAL '30 minutes' > ?",
                         Integer.class,
                         java.sql.Timestamp.from(REFERENCE_NOW));
         assertThat(openBuckets).isZero();

@@ -285,22 +285,20 @@ app:
       # answering promptly and wrongly with success: false.
       enabled: ${TURNSTILE_AUTH_ENABLED:true}
 
-  # Platform statistics collection and roll-up.
+  # Platform statistics collection.
   #
   # A single application instance is assumed. There is no distributed scheduler lock in this
-  # codebase, so two instances would each run both jobs; the composite primary key on
-  # platform_stats with ON CONFLICT DO UPDATE keeps that harmless rather than duplicative, but it
-  # is an assumption to revisit before scaling out.
+  # codebase, so two instances would each collect every bucket; both describe the same bucket and
+  # the analytics store keeps the one computed last, which makes that harmless rather than
+  # duplicative, but it is an assumption to revisit before scaling out.
   #
-  # There is no backfill. A bucket that was never collected can never be collected later, and a
-  # daily row deleted by retention is gone, so fine-retention and daily-retention are the real
-  # limits of what can ever be charted.
+  # There is no backfill. A bucket that was never collected can never be collected later. Every
+  # half-hour bucket is kept for good; half-hour-horizon only bounds how far back a series may be
+  # requested at half-hour width.
   stats:
     enabled: ${STATS_ENABLED:true}
     interval: ${STATS_INTERVAL:PT30M}
-    fine-retention: ${STATS_FINE_RETENTION:P30D}
-    daily-retention: ${STATS_DAILY_RETENTION:P365D}
-    rollup-cron: ${STATS_ROLLUP_CRON:0 20 3 * * *}
+    half-hour-horizon: ${STATS_HALF_HOUR_HORIZON:P30D}
   story:
     consumer:
       enabled: ${STORY_CONSUMER_ENABLED:false}

@@ -60,7 +60,7 @@
 #   a database somebody is working in, while giving end-to-end scripts one place to reset from
 #   instead of each carrying its own block that drifts as tables are added.
 #
-#   Cleared: user_events, platform_stats, user_strikes, user_warnings, notifications, reports,
+#   Cleared: user_events, user_strikes, user_warnings, notifications, reports,
 #   admin_actions, post_hashtags, hashtag_trending, hashtags, post_edit_history, posts,
 #   outbox_events, processed_messages. Accounts, credentials and the follow graph are left alone,
 #   since the seed recreates them idempotently anyway and deleting an account would cascade far
@@ -145,7 +145,6 @@ if [[ "$RESET" == true ]]; then
     psql_exec <<'SQL'
 BEGIN;
 DELETE FROM user_events;
-DELETE FROM platform_stats;
 DELETE FROM user_strikes;
 DELETE FROM user_warnings;
 DELETE FROM notifications;

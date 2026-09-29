@@ -48,5 +48,14 @@ public final class AdminEventTypes {
      */
     public static final String ACTION_CHANGED_V1 = "admin.action.changed.v1";
 
+    /**
+     * Emitted once per collected statistics bucket, in the transaction that read the source tables,
+     * carrying every metric row of the bucket for the ClickHouse {@code platform_stats} table.
+     *
+     * <p>A re-collection of the same bucket emits it again with a later {@code computedAt}, which
+     * replaces the earlier rows when ClickHouse merges.
+     */
+    public static final String PLATFORM_STATS_COLLECTED_V1 = "admin.platform-stats.collected.v1";
+
     private AdminEventTypes() {}
 }

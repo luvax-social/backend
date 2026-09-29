@@ -21,14 +21,18 @@ public interface AdminStatsService {
     /**
      * Returns the newest stored snapshot without computing any of it.
      *
-     * <p>Reads the most recent collected bucket. It deliberately issues no aggregate over {@code
-     * users}, {@code posts} or {@code comments}: at production size each of those is a scan of
-     * millions of index entries and takes seconds, which the collection job absorbs where seconds
-     * do not matter. The only figure computed at request time is the most-used hashtag list, which
-     * an index serves as a scan with a limit and which is flagged as live in the response.
+     * <p>Reads the most recent collected bucket from the analytics store. It deliberately issues no
+     * aggregate over {@code users}, {@code posts} or {@code comments}: at production size each of
+     * those is a scan of millions of index entries and takes seconds, which the collection job
+     * absorbs where seconds do not matter. The only figure computed at request time is the
+     * most-used hashtag list, which an index serves as a scan with a limit and which is flagged as
+     * live in the response.
      *
      * @return the newest snapshot, with null timestamps and empty breakdowns when nothing has been
      *     collected yet
+     * @throws com.app.common.exception.AppException {@code ANALYTICS_UNAVAILABLE} when the
+     *     analytics store cannot answer, for the whole response including the live hashtag list, so
+     *     a caller never receives half a snapshot
      */
     AdminStatsCurrentResponse getCurrent(UUID actorId);
 
@@ -36,13 +40,14 @@ public interface AdminStatsService {
      * Returns one metric's stored series over a window.
      *
      * <p>Granularity may be requested or left to the server. Left to the server, a window whose
-     * lower bound is inside the fine retention horizon is served from fine buckets and one reaching
-     * further back from the rolled-up daily rows, because fine buckets do not survive past that
-     * horizon. Whichever way it was decided, the choice is stated in the response.
+     * lower bound is inside the half-hour horizon is served as half-hour points and one reaching
+     * further back as daily points. There is no stored daily grain: a daily point of a flow is the
+     * sum of that UTC day's buckets, and a daily point of a gauge is the state in the day's last
+     * bucket. The day still in progress is never returned, because it is not complete. Whichever
+     * way the width was decided, the choice is stated in the response.
      *
-     * <p>Requesting fine buckets for a window that reaches past the horizon is refused rather than
-     * answered with an empty series: the rows were rolled up and deleted, and an empty chart is
-     * indistinguishable from a stretch in which nothing happened.
+     * <p>Requesting half-hour points for a window that starts before the horizon is refused rather
+     * than answered at day width, because the response would then contradict the request.
      *
      * @param metric metric to read
      * @param granularity bucket width to read at, or null to let the server choose from the window
@@ -52,10 +57,10 @@ public interface AdminStatsService {
      * @return the series, with the granularity that was used
      * @throws com.app.common.exception.AppException {@code BAD_REQUEST} when exactly one bound is
      *     supplied, when {@code to} is not after {@code from}, when the window exceeds {@link
-     *     #MAX_TIMESERIES_WINDOW}, or when fine buckets are requested for a window that reaches
-     *     past the fine retention horizon. An unknown metric or granularity never reaches here:
-     *     both parameters are typed, so Spring MVC refuses the conversion and answers 400 before
-     *     the request is dispatched.
+     *     #MAX_TIMESERIES_WINDOW}, or when half-hour points are requested for a window that starts
+     *     before the horizon; {@code ANALYTICS_UNAVAILABLE} when the analytics store cannot answer.
+     *     An unknown metric or granularity never reaches here: both parameters are typed, so Spring
+     *     MVC refuses the conversion and answers 400 before the request is dispatched.
      */
     AdminStatsTimeseriesResponse getTimeseries(
             UUID actorId,

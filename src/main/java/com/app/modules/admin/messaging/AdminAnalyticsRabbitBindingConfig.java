@@ -8,7 +8,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Binds the events that feed the ClickHouse analytics tier to their own queues.
+ * Binds the events that feed the ClickHouse analytics tier to their own queues: the audit-log
+ * replication events and the collected statistics buckets.
  *
  * <p>Both audit events, the one the recorder raises and the one the {@code admin_actions} update
  * trigger writes, land on the same queue because the consumer treats them identically: it reads the
@@ -31,5 +32,13 @@ public class AdminAnalyticsRabbitBindingConfig {
         return BindingBuilder.bind(adminActionReplicationQueue)
                 .to(socialEventsExchange)
                 .with(AdminEventTypes.ACTION_CHANGED_V1);
+    }
+
+    @Bean
+    Binding platformStatsCollectedBinding(
+            Queue platformStatsQueue, TopicExchange socialEventsExchange) {
+        return BindingBuilder.bind(platformStatsQueue)
+                .to(socialEventsExchange)
+                .with(AdminEventTypes.PLATFORM_STATS_COLLECTED_V1);
     }
 }

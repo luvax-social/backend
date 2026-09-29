@@ -126,7 +126,6 @@ public class SeedResetService {
         "media_assets",
         "processed_messages",
         "outbox_events",
-        "platform_stats",
         "users"
     };
 

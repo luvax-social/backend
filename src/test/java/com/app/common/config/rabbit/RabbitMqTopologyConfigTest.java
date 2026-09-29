@@ -58,7 +58,9 @@ class RabbitMqTopologyConfigTest {
                                     RabbitMqTopologyConfig.ADMIN_NOTIFICATION_DEAD_LETTER_QUEUE,
                                     RabbitMqTopologyConfig.ADMIN_ACTION_REPLICATION_QUEUE,
                                     RabbitMqTopologyConfig
-                                            .ADMIN_ACTION_REPLICATION_DEAD_LETTER_QUEUE);
+                                            .ADMIN_ACTION_REPLICATION_DEAD_LETTER_QUEUE,
+                                    RabbitMqTopologyConfig.PLATFORM_STATS_QUEUE,
+                                    RabbitMqTopologyConfig.PLATFORM_STATS_DEAD_LETTER_QUEUE);
                     assertThat(queueNames)
                             .doesNotContain(
                                     RabbitMqTopologyConfig.AUDIT_LOG_QUEUE,
@@ -134,10 +136,11 @@ class RabbitMqTopologyConfigTest {
                     // Active bindings: mail, moderation.mail, notification, hashtag.index,
                     // post.index, comment.notification, story.notification,
                     // recommendation.feedback, post.notification, admin.notification and
-                    // admin.action.replication dead-letter bindings plus the comment live, message
+                    // admin.action.replication and admin.platform-stats dead-letter bindings plus
+                    // the comment live, message
                     // live, notification live,
                     // and post live exchange-to-exchange bindings.
-                    assertThat(context.getBeansOfType(Binding.class)).hasSize(15);
+                    assertThat(context.getBeansOfType(Binding.class)).hasSize(16);
                 });
     }
 

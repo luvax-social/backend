@@ -82,8 +82,7 @@ public class SeedRunner {
                     new EnumColumn("notifications", "type", "notification_type"),
                     new EnumColumn("notifications", "category", "notification_category"),
                     new EnumColumn("admin_actions", "action_type", "admin_action_type"),
-                    new EnumColumn("user_events", "event_type", "event_type"),
-                    new EnumColumn("platform_stats", "granularity", "stat_granularity"));
+                    new EnumColumn("user_events", "event_type", "event_type"));
 
     private static final int MIN_ROWS_PER_ENUM_VALUE = 5;
 
@@ -418,7 +417,6 @@ public class SeedRunner {
                         "hashtags",
                         "support_tickets",
                         "verification_requests",
-                        "platform_stats",
                         "user_events",
                         "outbox_events");
         StringBuilder summary = new StringBuilder("[seed] row count summary:");

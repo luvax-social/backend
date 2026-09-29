@@ -7,11 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- Platform statistics are stored in ClickHouse and written through the outbox; `GET /api/v1/admin/stats/current` and `/timeseries` answer 503 `ANALYTICS_UNAVAILABLE` while the analytics store is down.
+- Daily statistics are computed from the half-hour buckets when a series is read, summing a flow and taking a gauge from the last bucket of the day, and the day in progress is never returned; a gauge dimension missing from the last bucket now reads as zero instead of keeping an earlier value.
+- The development seed writes 90 days of half-hour statistics buckets through the outbox, so the seeded series reaches ClickHouse through the same consumer as live collection.
 - The moderation audit log listing is now read from the ClickHouse replica and falls back to PostgreSQL when the replica is unavailable, under one cursor contract, so a page sequence continues across a switch; a new action can take a few seconds to appear in the list while the detail view still shows it at once.
 - Integration tests now run against PostgreSQL 18, the production major, through one shared image constant instead of PostgreSQL 16 named in each test class.
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
+- `STATS_HALF_HOUR_HORIZON` configuration property, the furthest back a statistics series may be requested at half-hour width (default 30 days).
 - The moderation audit log is now replicated to ClickHouse through the outbox: each new audit row raises an event in its own transaction, and a database trigger raises one when PostgreSQL itself rewrites a row because an account it referenced was deleted, so the replica always converges on the newest state.
 - Analytics ingestion pauses while ClickHouse is unavailable: the analytics consumers stop when the `clickhouse` circuit breaker opens, so their messages wait in RabbitMQ instead of dead-lettering, and start again when it half-opens. `luvax_analytics_schema_ready`, `luvax_analytics_ingestion_running`, `luvax_analytics_user_events_dropped_total` and `luvax_analytics_audit_log_fallback_total` report its state.
 - ClickHouse connections enforce their socket timeout even after the pool has validated them, so a server that stops answering fails calls after the bound instead of blocking their callers.
@@ -766,6 +770,7 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Two integration tests that exercise the production profile or the seed reset path failed to start their context because their Postgres credentials were never supplied to the beans that read them directly, unrelated to and pre-existing before this change.
 
 ### Removed
+- The platform statistics roll-up job, the PostgreSQL `platform_stats` table and the `STATS_FINE_RETENTION`, `STATS_DAILY_RETENTION` and `STATS_ROLLUP_CRON` settings; every half-hour bucket is now kept.
 - `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/{id}/read`, and the `actor`, `entityType`, `entityId`, `postId` and `message` fields of notification list items; this is a breaking change that ships together with the matching frontend.
 - Direct messages no longer produce activity notifications; the retired `message.notification.queue` and its dead-letter queue are deleted from the broker at startup, and `MESSAGE_CONSUMER_ENABLED` is gone.
 - The redundant `is_read` notification column, whose value is fully carried by `read_at`, and three notification indexes superseded by the new feed indexes.

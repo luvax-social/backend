@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.app.common.outbox.entity.OutboxEvent;
 import com.app.common.outbox.service.OutboxService;
+import com.app.modules.admin.messaging.AdminEventTypes;
+import com.app.modules.admin.messaging.PlatformStatsCollectedEvent;
 import com.app.modules.comment.consumer.CommentNotificationConsumer;
 import com.app.modules.post.consumer.PostNotificationConsumer;
 
@@ -52,6 +54,7 @@ public class SeedOutboxBatchWriter {
     private static final String POST_VIEWED_V1 = "post.viewed.v1";
     private static final String POST_SHARED_V1 = "post.shared.v1";
     private static final String COMMENT_CREATED_V1 = "comment.created.v1";
+    private static final long HALF_HOUR_SECONDS = 1800L;
 
     private final OutboxService outboxService;
     private final JdbcTemplate jdbc;
@@ -99,6 +102,32 @@ public class SeedOutboxBatchWriter {
     @Transactional
     void emitShareBatch(List<SeedOutboxEmitter.ShareRow> batch) {
         batch.forEach(this::enqueueShare);
+    }
+
+    /**
+     * Enqueues one collected-bucket event per platform statistics bucket, in a single transaction.
+     * Public because {@code AnalyticsSeedWriter} calls it from another package, and it must go
+     * through this bean's proxy so that {@code OutboxService.enqueue} finds a transaction.
+     */
+    @Transactional
+    public void emitPlatformStatsBatch(List<PlatformStatsCollectedEvent.Bucket> batch) {
+        batch.forEach(this::enqueuePlatformStats);
+    }
+
+    // The same shape PlatformStatsCollectionServiceImpl enqueues, built through the same event
+    // class, so the consumer cannot tell a seeded bucket from a collected one.
+    private void enqueuePlatformStats(PlatformStatsCollectedEvent.Bucket bucket) {
+        outboxService.enqueue(
+                AdminEventTypes.PLATFORM_STATS_COLLECTED_V1,
+                AdminEventTypes.PLATFORM_STATS_COLLECTED_V1,
+                PlatformStatsCollectedEvent.AGGREGATE_TYPE,
+                PlatformStatsCollectedEvent.aggregateId(bucket.bucketStart()),
+                null,
+                PlatformStatsCollectedEvent.payload(
+                        bucket.bucketStart(),
+                        HALF_HOUR_SECONDS,
+                        bucket.computedAt(),
+                        bucket.rows()));
     }
 
     // Payload shape mirrors MessageServiceImpl's own post.shared.v1 enqueue: the aggregate is the

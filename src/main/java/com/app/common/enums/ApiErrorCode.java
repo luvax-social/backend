@@ -88,6 +88,9 @@ public enum ApiErrorCode {
     MEDIA_OBJECT_METADATA_MISMATCH("MEDIA_OBJECT_METADATA_MISMATCH", "Submitted metadata does not match the uploaded object", HttpStatus.UNPROCESSABLE_ENTITY),
     MEDIA_STORAGE_UNAVAILABLE("MEDIA_STORAGE_UNAVAILABLE", "Media object storage is temporarily unavailable. Please try again later.", HttpStatus.SERVICE_UNAVAILABLE),
 
+    // Analytics
+    ANALYTICS_UNAVAILABLE("ANALYTICS_UNAVAILABLE", "Analytics are temporarily unavailable. Please try again in a minute.", HttpStatus.SERVICE_UNAVAILABLE),
+
     // Hashtag
     HASHTAG_NOT_FOUND("HASHTAG_NOT_FOUND", "Hashtag not found", HttpStatus.NOT_FOUND),
     HASHTAG_ALREADY_EXISTS("HASHTAG_ALREADY_EXISTS", "Hashtag already exists", HttpStatus.CONFLICT),
