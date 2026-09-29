@@ -76,6 +76,12 @@ public class RabbitMqTopologyConfig {
     public static final String PLATFORM_STATS_DEAD_LETTER_ROUTING_KEY =
             "admin.platform-stats.dead-letter";
 
+    public static final String USER_EVENT_IMPORT_QUEUE = "recommendation.user-event.import.queue";
+    public static final String USER_EVENT_IMPORT_DEAD_LETTER_QUEUE =
+            "recommendation.user-event.import.dlq";
+    public static final String USER_EVENT_IMPORT_DEAD_LETTER_ROUTING_KEY =
+            "recommendation.user-event.import.dead-letter";
+
     /**
      * Idle lifetime of a per-instance live fanout queue: removed by the broker after this long with
      * no consumer, so a queue left by an instance that died before its listener attached does not
@@ -363,6 +369,31 @@ public class RabbitMqTopologyConfig {
         return BindingBuilder.bind(platformStatsDeadLetterQueue)
                 .to(socialEventsDeadLetterExchange)
                 .with(PLATFORM_STATS_DEAD_LETTER_ROUTING_KEY);
+    }
+
+    // Same arrangement as the audit replication queue: a rejected import dead-letters through the
+    // queue's own arguments, and an outage requeues while the ingestion controller stops the
+    // listener, so imports wait here rather than reaching the dead-letter queue.
+    @Bean
+    Queue userEventImportQueue() {
+        return QueueBuilder.durable(USER_EVENT_IMPORT_QUEUE)
+                .withArgument("x-dead-letter-exchange", SOCIAL_EVENTS_DEAD_LETTER_EXCHANGE)
+                .withArgument(
+                        "x-dead-letter-routing-key", USER_EVENT_IMPORT_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    Queue userEventImportDeadLetterQueue() {
+        return QueueBuilder.durable(USER_EVENT_IMPORT_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    Binding userEventImportDeadLetterBinding(
+            Queue userEventImportDeadLetterQueue, TopicExchange socialEventsDeadLetterExchange) {
+        return BindingBuilder.bind(userEventImportDeadLetterQueue)
+                .to(socialEventsDeadLetterExchange)
+                .with(USER_EVENT_IMPORT_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean

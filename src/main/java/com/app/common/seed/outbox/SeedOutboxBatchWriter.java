@@ -1,5 +1,6 @@
 package com.app.common.seed.outbox;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,9 @@ import com.app.modules.admin.messaging.AdminEventTypes;
 import com.app.modules.admin.messaging.PlatformStatsCollectedEvent;
 import com.app.modules.comment.consumer.CommentNotificationConsumer;
 import com.app.modules.post.consumer.PostNotificationConsumer;
+import com.app.modules.recommendation.enums.UserEventType;
+import com.app.modules.recommendation.messaging.RecommendationEventTypes;
+import com.app.modules.recommendation.messaging.UserEventImportedEvent;
 
 import lombok.RequiredArgsConstructor;
 
@@ -102,6 +106,57 @@ public class SeedOutboxBatchWriter {
     @Transactional
     void emitShareBatch(List<SeedOutboxEmitter.ShareRow> batch) {
         batch.forEach(this::enqueueShare);
+    }
+
+    /**
+     * One behavioural event to import, with the identifier it keeps for its whole life.
+     *
+     * @param eventId identifier of the row and of the outbox event, so a repeat is absorbed
+     * @param userId account the event is attributed to
+     * @param eventType what happened
+     * @param entityType kind of thing acted on, null when none
+     * @param entityId thing acted on, null when none
+     * @param createdAt when the event happened
+     */
+    public record UserEventImport(
+            UUID eventId,
+            UUID userId,
+            UserEventType eventType,
+            String entityType,
+            UUID entityId,
+            Instant createdAt) {}
+
+    /**
+     * Enqueues one import event per behavioural event, in a single transaction, under the event's
+     * own identifier so that emitting the same event twice enqueues it once. Public because {@code
+     * AnalyticsSeedWriter} calls it from another package, and it must go through this bean's proxy
+     * so that {@code OutboxService.enqueueOnce} finds a transaction.
+     *
+     * @return how many events this call enqueued
+     */
+    @Transactional
+    public int emitUserEventImportBatch(List<UserEventImport> batch) {
+        int enqueued = 0;
+        for (UserEventImport row : batch) {
+            boolean added =
+                    outboxService.enqueueOnce(
+                            row.eventId(),
+                            RecommendationEventTypes.USER_EVENT_IMPORTED_V1,
+                            RecommendationEventTypes.USER_EVENT_IMPORTED_V1,
+                            UserEventImportedEvent.AGGREGATE_TYPE,
+                            row.userId(),
+                            row.userId(),
+                            UserEventImportedEvent.payload(
+                                    row.eventType(),
+                                    row.entityType(),
+                                    row.entityId(),
+                                    null,
+                                    row.createdAt()));
+            if (added) {
+                enqueued++;
+            }
+        }
+        return enqueued;
     }
 
     /**

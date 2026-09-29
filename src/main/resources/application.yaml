@@ -351,14 +351,16 @@ app:
   recommendation:
     consumer:
       enabled: ${RECOMMENDATION_CONSUMER_ENABLED:false}
+      # Feedback consumer threads. Each write waits for its part to be flushed and synced, which
+      # takes tens of milliseconds, and ordering does not matter to an append-only table.
+      concurrency: ${RECOMMENDATION_CONSUMER_CONCURRENCY:4}
     read-set-window: ${RECOMMENDATION_READ_SET_WINDOW:P90D}
     read-set-max-rows: ${RECOMMENDATION_READ_SET_MAX_ROWS:2000}
     top-up-overfetch-multiplier: ${RECOMMENDATION_TOPUP_OVERFETCH_MULTIPLIER:3}
     affinity:
       enabled: ${AFFINITY_JOB_ENABLED:true}
       # 90 days matches the read-set window above and the span the seeded dataset covers. It is
-      # also the bound that makes the user_events read prune to the two or three partitions it
-      # covers instead of scanning all twenty-four.
+      # also the bound that lets the ClickHouse read skip every monthly partition outside it.
       window: ${AFFINITY_WINDOW:P90D}
       # Three half-lives across the window: the far edge still contributes about an eighth rather
       # than falling off a cliff, while last week clearly outranks last month. A 7-day half-life

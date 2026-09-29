@@ -2,10 +2,8 @@ package com.app.common.seed.reset;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -130,22 +128,22 @@ public class SeedResetService {
     };
 
     /**
-     * Truncates every seedable table listed in {@link #TRUNCATE_ORDER}, plus every declared {@code
-     * user_events} partition, so a fresh seed run starts from an empty domain dataset.
+     * Truncates every seedable table listed in {@link #TRUNCATE_ORDER}, so a fresh seed run starts
+     * from an empty domain dataset.
      *
      * <p>Never truncates the config/reference tables documented in this class's Javadoc, and never
      * touches {@code flyway_schema_history}. FK checks are disabled only for the duration of the
      * wipe, since {@code TRUNCATE ... CASCADE} in dependency order would otherwise still fail on
      * tables with circular or forward references.
      *
-     * <p>The entire sequence (disabling FK checks, every {@code TRUNCATE}, partition discovery, and
-     * restoring FK checks) runs inside a single {@link
-     * org.springframework.jdbc.core.ConnectionCallback} so every statement is provably issued on
-     * the same physical connection. A pooled HikariCP connection only resets a small fixed set of
-     * session properties on return to the pool - {@code session_replication_role} is not one of
-     * them - so splitting this sequence across separate {@code JdbcTemplate} calls could let {@code
-     * 'origin'} land on a different connection than the one that set {@code 'replica'}, leaving a
-     * pooled connection permanently in trigger-disabled mode for whatever borrows it next.
+     * <p>The entire sequence (disabling FK checks, every {@code TRUNCATE}, and restoring FK checks)
+     * runs inside a single {@link org.springframework.jdbc.core.ConnectionCallback} so every
+     * statement is provably issued on the same physical connection. A pooled HikariCP connection
+     * only resets a small fixed set of session properties on return to the pool - {@code
+     * session_replication_role} is not one of them - so splitting this sequence across separate
+     * {@code JdbcTemplate} calls could let {@code 'origin'} land on a different connection than the
+     * one that set {@code 'replica'}, leaving a pooled connection permanently in trigger-disabled
+     * mode for whatever borrows it next.
      */
     public void reset() {
         // Purged first, and in this order, so a message already in flight when the purge starts
@@ -167,7 +165,6 @@ public class SeedResetService {
                             for (String table : TRUNCATE_ORDER) {
                                 statement.execute("TRUNCATE TABLE " + table + " CASCADE");
                             }
-                            truncateUserEventsPartitions(statement);
                         } finally {
                             statement.execute("SET session_replication_role = 'origin'");
                         }
@@ -273,23 +270,5 @@ public class SeedResetService {
         } catch (SQLException e) {
             log.warn("[seed] reset: could not purge Gorse's database: {}", e.getMessage());
         }
-    }
-
-    private void truncateUserEventsPartitions(Statement statement) throws SQLException {
-        List<String> partitions = new ArrayList<>();
-        try (ResultSet rs =
-                statement.executeQuery(
-                        "SELECT c.relname FROM pg_inherits i"
-                                + " JOIN pg_class c ON c.oid = i.inhrelid"
-                                + " JOIN pg_class p ON p.oid = i.inhparent"
-                                + " WHERE p.relname = 'user_events'")) {
-            while (rs.next()) {
-                partitions.add(rs.getString(1));
-            }
-        }
-        for (String partition : partitions) {
-            statement.execute("TRUNCATE TABLE " + partition);
-        }
-        statement.execute("TRUNCATE TABLE user_events_default");
     }
 }

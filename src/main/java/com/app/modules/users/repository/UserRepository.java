@@ -200,4 +200,17 @@ public interface UserRepository extends Repository<User, UUID> {
      */
     @Query("SELECT COUNT(u) > 0 FROM User u WHERE lower(u.username) = lower(:username)")
     boolean existsByUsername(@Param("username") String username);
+
+    /**
+     * Reports whether an account row with this identifier exists, soft-deleted or not.
+     *
+     * <p>Named for what it includes, because the unfiltered {@code existsById} is deliberately not
+     * part of this interface. Served by the primary key. The foreign key {@code user_events} used
+     * to carry answered the same question, and a soft-deleted account satisfied it just the same.
+     *
+     * @param id account identifier
+     * @return true when the row exists
+     */
+    @Query("SELECT COUNT(u) > 0 FROM User u WHERE u.id = :id")
+    boolean existsIncludingSoftDeleted(@Param("id") UUID id);
 }

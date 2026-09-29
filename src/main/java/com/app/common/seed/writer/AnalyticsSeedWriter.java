@@ -1,12 +1,11 @@
 package com.app.common.seed.writer;
 
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -19,12 +18,13 @@ import org.springframework.stereotype.Service;
 import com.app.common.seed.outbox.SeedOutboxBatchWriter;
 import com.app.common.seed.time.SeedTimeline;
 import com.app.modules.admin.messaging.PlatformStatsCollectedEvent;
+import com.app.modules.recommendation.enums.UserEventType;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Seeds platform statistics (90 days of half-hour buckets) and {@code user_events} (~10,000 rows
+ * Seeds platform statistics (90 days of half-hour buckets) and behavioural events (~10,000 rows
  * across the last 3 months).
  *
  * <p><b>Platform statistics</b>: each bucket is enqueued as one {@code
@@ -58,12 +58,18 @@ import lombok.extern.slf4j.Slf4j;
  * representation of that data, so the timeseries endpoint reads back empty for that one metric
  * specifically; every other {@code PlatformMetric} value is populated.
  *
- * <p><b>{@code user_events}</b>: every row's {@code created_at} comes from {@link
- * SeedTimeline#userEventCreatedAt}, bounded to the last 90 days - comfortably inside the partition
- * range {@code database/schema.sql} declares through 2026-09, so no row here can land in {@code
- * user_events_default}. {@code entity_id} references a real {@code posts}/{@code users}/{@code
+ * <p><b>Behavioural events</b>: each one is enqueued as one {@code
+ * recommendation.user-event.imported.v1} outbox event, under its own identifier, and reaches
+ * ClickHouse's {@code user_events} through the import consumer, which stores it without a Gorse
+ * feedback type so it is never replayed into the recommender. Every event's time comes from {@link
+ * SeedTimeline#userEventCreatedAt}, bounded to the last 90 days, comfortably inside the table's
+ * 12-month retention. {@code entity_id} references a real {@code posts}/{@code users}/{@code
  * hashtags}/{@code stories} row read back from the database for every event type that carries one,
- * so a downstream reader resolving {@code entity_id} never dereferences a dangling id.
+ * so a downstream reader resolving {@code entity_id} never dereferences a dangling id. Before
+ * anything is enqueued, every event type except {@code post_view} is asserted to appear at least
+ * {@value #MIN_EVENTS_PER_TYPE} times: that is the coverage {@code SeedRunner} used to check
+ * against the PostgreSQL table, which no longer exists. {@code post_view} is produced by the
+ * recommendation consumer draining {@code post.viewed.v1}, asynchronously after the run.
  */
 @Slf4j
 @Service
@@ -81,6 +87,10 @@ public class AnalyticsSeedWriter {
     private static final Duration HALF_HOUR = Duration.ofMinutes(30);
     private static final int USER_EVENT_TARGET = 10_000;
     private static final int USER_EVENT_LOOKBACK_DAYS = 90;
+    private static final int USER_EVENTS_PER_TRANSACTION = 300;
+
+    /** Fewest events of each produced type a seed run must contain. */
+    static final int MIN_EVENTS_PER_TYPE = 5;
 
     // Every key below is a com.app.modules.admin.enums.PlatformMetric wire key, verbatim - the
     // seed writer and the real StatsCollectionJob/AdminStatsService must agree on these or the
@@ -136,23 +146,18 @@ public class AnalyticsSeedWriter {
                     "profile_follow",
                     "profile_unfollow",
                     "message_send");
-    private static final List<String> PLATFORMS = List.of("ios", "android", "web");
-
-    private static final String INSERT_USER_EVENT_SQL =
-            "INSERT INTO user_events (id, user_id, session_id, event_type, entity_type, entity_id,"
-                    + " platform, created_at) VALUES (?, ?, ?, ?::event_type, ?, ?, ?, ?)";
 
     private final JdbcTemplate jdbc;
     private final SeedOutboxBatchWriter outboxBatchWriter;
 
     /**
      * Enqueues {@code BUCKET_DAYS * BUCKETS_PER_DAY} half-hour platform statistics buckets, and
-     * inserts roughly {@value #USER_EVENT_TARGET} {@code user_events} rows spread across the last
-     * {@value #USER_EVENT_LOOKBACK_DAYS} days.
+     * roughly {@value #USER_EVENT_TARGET} behavioural events spread across the last {@value
+     * #USER_EVENT_LOOKBACK_DAYS} days.
      *
      * <p>Must run last: the statistics gauge series anchors on the final row counts every earlier
-     * writer produced, and {@code user_events}'s entity references are read back from {@code
-     * posts}, {@code hashtags} and {@code stories}.
+     * writer produced, and the events' entity references are read back from {@code posts}, {@code
+     * hashtags} and {@code stories}.
      */
     public void write(SeedTimeline timeline) {
         Random random = new Random(ANALYTICS_RANDOM_SEED);
@@ -173,8 +178,8 @@ public class AnalyticsSeedWriter {
         int buckets = writeBuckets(finalCounts, timeline, random);
         log.info("[seed] platform_stats: {} half_hour bucket events enqueued", buckets);
 
-        int eventRows = writeUserEvents(timeline, random);
-        log.info("[seed] user_events: {} rows written", eventRows);
+        int events = writeUserEvents(timeline, random);
+        log.info("[seed] user_events: {} import events enqueued", events);
     }
 
     // The real final row counts every bucket's gauge ramps toward, dimensioned exactly the way
@@ -331,31 +336,80 @@ public class AnalyticsSeedWriter {
                             + " AnalyticsSeedWriter");
         }
 
-        List<Object[]> rows = new ArrayList<>();
+        List<SeedOutboxBatchWriter.UserEventImport> events =
+                generateUserEvents(timeline, random, userIds, postIds, hashtagIds, storyIds);
+        assertEveryProducedTypeCovered(events);
+
+        int enqueued = 0;
+        for (int from = 0; from < events.size(); from += USER_EVENTS_PER_TRANSACTION) {
+            int to = Math.min(from + USER_EVENTS_PER_TRANSACTION, events.size());
+            enqueued += outboxBatchWriter.emitUserEventImportBatch(events.subList(from, to));
+        }
+        return enqueued;
+    }
+
+    /**
+     * Draws {@value #USER_EVENT_TARGET} events. Each event's identifier is derived from its
+     * position, so a repeat of the emission maps to the same identifiers and is absorbed by {@code
+     * enqueueOnce} instead of doubling the events.
+     */
+    List<SeedOutboxBatchWriter.UserEventImport> generateUserEvents(
+            SeedTimeline timeline,
+            Random random,
+            List<UUID> userIds,
+            List<UUID> postIds,
+            List<UUID> hashtagIds,
+            List<UUID> storyIds) {
+        List<SeedOutboxBatchWriter.UserEventImport> events = new ArrayList<>(USER_EVENT_TARGET);
         for (int i = 0; i < USER_EVENT_TARGET; i++) {
             UUID userId = userIds.get(random.nextInt(userIds.size()));
             String eventType =
                     WEIGHTED_EVENT_TYPES.get(random.nextInt(WEIGHTED_EVENT_TYPES.size()));
-            String platform = PLATFORMS.get(random.nextInt(PLATFORMS.size()));
             Instant createdAt = timeline.userEventCreatedAt(USER_EVENT_LOOKBACK_DAYS);
 
             EntityRef entityRef =
                     resolveEntityRef(
                             eventType, postIds, hashtagIds, storyIds, userIds, userId, random);
-            rows.add(
-                    new Object[] {
-                        UUID.randomUUID(),
-                        userId,
-                        UUID.randomUUID(),
-                        eventType,
-                        entityRef == null ? null : entityRef.entityType(),
-                        entityRef == null ? null : entityRef.entityId(),
-                        platform,
-                        Timestamp.from(createdAt)
-                    });
+            events.add(
+                    new SeedOutboxBatchWriter.UserEventImport(
+                            UUID.nameUUIDFromBytes(
+                                    ("seed_user_event:" + i).getBytes(StandardCharsets.UTF_8)),
+                            userId,
+                            UserEventType.fromJson(eventType),
+                            entityRef == null ? null : entityRef.entityType(),
+                            entityRef == null ? null : entityRef.entityId(),
+                            createdAt));
         }
-        jdbc.batchUpdate(INSERT_USER_EVENT_SQL, rows, rows.size(), this::bindUserEventRow);
-        return rows.size();
+        return events;
+    }
+
+    /**
+     * Fails the run when any event type the seed produces has fewer than {@value
+     * #MIN_EVENTS_PER_TYPE} events. {@code post_view} is exempt: the recommendation consumer writes
+     * those, asynchronously, from {@code post.viewed.v1}.
+     */
+    static void assertEveryProducedTypeCovered(List<SeedOutboxBatchWriter.UserEventImport> events) {
+        Map<UserEventType, Integer> counts = new EnumMap<>(UserEventType.class);
+        for (SeedOutboxBatchWriter.UserEventImport event : events) {
+            counts.merge(event.eventType(), 1, Integer::sum);
+        }
+        List<String> uncovered = new ArrayList<>();
+        for (UserEventType type : UserEventType.values()) {
+            if (type == UserEventType.POST_VIEW) {
+                continue;
+            }
+            int count = counts.getOrDefault(type, 0);
+            if (count < MIN_EVENTS_PER_TYPE) {
+                uncovered.add(type.toJson() + "=" + count);
+            }
+        }
+        if (!uncovered.isEmpty()) {
+            throw new IllegalStateException(
+                    "AnalyticsSeedWriter: event types below "
+                            + MIN_EVENTS_PER_TYPE
+                            + " events: "
+                            + uncovered);
+        }
     }
 
     private record EntityRef(String entityType, UUID entityId) {}
@@ -420,24 +474,5 @@ public class AnalyticsSeedWriter {
 
     private List<UUID> fetchIds(String sql) {
         return jdbc.query(sql, (rs, rowNum) -> (UUID) rs.getObject("id"));
-    }
-
-    private void bindUserEventRow(PreparedStatement ps, Object[] row) throws SQLException {
-        ps.setObject(1, row[0]);
-        ps.setObject(2, row[1]);
-        ps.setObject(3, row[2]);
-        ps.setString(4, (String) row[3]);
-        if (row[4] == null) {
-            ps.setNull(5, java.sql.Types.VARCHAR);
-        } else {
-            ps.setString(5, (String) row[4]);
-        }
-        if (row[5] == null) {
-            ps.setNull(6, java.sql.Types.OTHER);
-        } else {
-            ps.setObject(6, row[5]);
-        }
-        ps.setString(7, (String) row[6]);
-        ps.setTimestamp(8, (Timestamp) row[7]);
     }
 }

@@ -11,6 +11,7 @@ import org.springframework.web.client.RestClient;
 import com.app.modules.recommendation.client.GorseClient;
 import com.app.modules.recommendation.client.dto.GorseFeedback;
 import com.app.modules.recommendation.client.dto.GorseItem;
+import com.app.modules.recommendation.client.dto.GorseItemPage;
 import com.app.modules.recommendation.client.dto.GorseScore;
 import com.app.modules.recommendation.client.dto.GorseUser;
 
@@ -112,5 +113,28 @@ public class GorseClientImpl implements GorseClient {
     @Override
     public void insertFeedback(List<GorseFeedback> feedback) {
         gorseRestClient.post().uri("/api/feedback").body(feedback).retrieve().toBodilessEntity();
+    }
+
+    @Override
+    public void upsertFeedback(List<GorseFeedback> feedback) {
+        gorseRestClient.put().uri("/api/feedback").body(feedback).retrieve().toBodilessEntity();
+    }
+
+    @Override
+    public GorseItemPage listItems(String cursor, int n) {
+        GorseItemPage body =
+                gorseRestClient
+                        .get()
+                        .uri(
+                                uri -> {
+                                    uri.path("/api/items").queryParam("n", n);
+                                    if (cursor != null && !cursor.isEmpty()) {
+                                        uri.queryParam("cursor", cursor);
+                                    }
+                                    return uri.build();
+                                })
+                        .retrieve()
+                        .body(GorseItemPage.class);
+        return body == null ? new GorseItemPage("", List.of()) : body;
     }
 }

@@ -40,6 +40,7 @@ import com.app.common.seed.writer.UserSeedWriter;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.notification.dto.response.UnseenCountResponse;
 import com.app.modules.notification.service.NotificationService;
+import com.app.modules.recommendation.enums.UserEventType;
 import com.app.testsupport.TestContainerImages;
 
 /**
@@ -144,7 +145,7 @@ class DomainWritersSeedWriterIT {
         assertModerationReportIds(reportIds);
         assertAdminActionNeverPrecedesReport();
         assertAnalyticsBucketsClosedBeforeReferenceNow();
-        assertUserEventsNeverInDefaultPartition();
+        assertUserEventsEnqueuedForImport();
         assertUserEventsCoverEveryEventTypeValue();
     }
 
@@ -442,53 +443,45 @@ class DomainWritersSeedWriterIT {
         assertThat(openBuckets).isZero();
     }
 
-    private void assertUserEventsNeverInDefaultPartition() {
-        Integer defaultPartitionCount =
+    // The behavioural events are no longer rows in PostgreSQL: each one is an import event in the
+    // outbox, keyed by its own identifier, that the import consumer stores in ClickHouse.
+    private void assertUserEventsEnqueuedForImport() {
+        Integer enqueued =
                 jdbcTemplate.queryForObject(
-                        "SELECT COUNT(*) FROM user_events_default", Integer.class);
-        assertThat(defaultPartitionCount).isZero();
-
-        Integer totalEvents =
-                jdbcTemplate.queryForObject("SELECT COUNT(*) FROM user_events", Integer.class);
-        assertThat(totalEvents).isGreaterThan(5_000);
+                        "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
+                                + " 'recommendation.user-event.imported.v1'",
+                        Integer.class);
+        assertThat(enqueued).isEqualTo(10_000);
+        Integer distinct =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(DISTINCT event_id) FROM outbox_events WHERE event_type ="
+                                + " 'recommendation.user-event.imported.v1'",
+                        Integer.class);
+        assertThat(distinct).isEqualTo(10_000);
+        Integer outsideRetention =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
+                                + " 'recommendation.user-event.imported.v1'"
+                                + " AND (payload->'data'->>'createdAt')::timestamptz < ?",
+                        Integer.class,
+                        java.sql.Timestamp.from(REFERENCE_NOW.minus(Duration.ofDays(91))));
+        assertThat(outsideRetention).isZero();
     }
 
-    // Reproduces SeedRunner.assertEnumCoverage()'s requirement for user_events.event_type: every
-    // event_type enum value (V01) must have at least 5 rows once a full seed run completes.
-    // AnalyticsSeedWriter is the only writer that populates user_events synchronously, so this is
-    // a direct proof that WEIGHTED_EVENT_TYPES and resolveEntityRef cover every value it owns.
-    // post_view is deliberately absent from that list and from this assertion: it is produced by
-    // the recommendation consumer draining post.viewed.v1, which happens asynchronously and does
-    // not run in this writers-only test. SeedRunner.assertEnumCoverage skips it for the same
-    // reason, and the drained system is where its coverage is asserted instead.
+    // Reproduces the coverage SeedRunner.assertEnumCoverage() used to require of the PostgreSQL
+    // table: every event type must have at least 5 events once a full seed run completes.
+    // AnalyticsSeedWriter is the only writer that produces them synchronously, so this is a direct
+    // proof that WEIGHTED_EVENT_TYPES and resolveEntityRef cover every value it owns. post_view is
+    // deliberately absent from that list and from this assertion: it is produced by the
+    // recommendation consumer draining post.viewed.v1, which happens asynchronously and does not
+    // run in this writers-only test.
     private void assertUserEventsCoverEveryEventTypeValue() {
-        List<String> allEventTypeValues =
-                List.of(
-                        "post_like",
-                        "post_unlike",
-                        "post_save",
-                        "post_unsave",
-                        "post_share",
-                        "post_comment",
-                        "story_view",
-                        "story_reply",
-                        "profile_view",
-                        "profile_follow",
-                        "profile_unfollow",
-                        "search",
-                        "hashtag_click",
-                        "comment_like",
-                        "comment_reply",
-                        "message_send",
-                        "session_start",
-                        "session_end",
-                        "app_open");
-
         Map<String, Integer> countsByEventType =
                 jdbcTemplate
                         .query(
-                                "SELECT event_type::text AS event_type, COUNT(*) AS row_count FROM"
-                                        + " user_events GROUP BY event_type",
+                                "SELECT payload->'data'->>'eventType' AS event_type, COUNT(*) AS"
+                                        + " row_count FROM outbox_events WHERE event_type ="
+                                        + " 'recommendation.user-event.imported.v1' GROUP BY 1",
                                 (rs, rowNum) ->
                                         Map.entry(
                                                 rs.getString("event_type"), rs.getInt("row_count")))
@@ -497,9 +490,12 @@ class DomainWritersSeedWriterIT {
                                 java.util.stream.Collectors.toMap(
                                         Map.Entry::getKey, Map.Entry::getValue));
 
-        for (String eventType : allEventTypeValues) {
-            assertThat(countsByEventType.getOrDefault(eventType, 0))
-                    .as("row count for event_type '%s'", eventType)
+        for (UserEventType type : UserEventType.values()) {
+            if (type == UserEventType.POST_VIEW) {
+                continue;
+            }
+            assertThat(countsByEventType.getOrDefault(type.toJson(), 0))
+                    .as("import events for event_type '%s'", type.toJson())
                     .isGreaterThanOrEqualTo(5);
         }
     }

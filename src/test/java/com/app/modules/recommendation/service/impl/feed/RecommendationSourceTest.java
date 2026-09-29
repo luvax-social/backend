@@ -18,11 +18,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.client.ResourceAccessException;
 
+import com.app.common.analytics.ClickHouseUnavailableException;
 import com.app.modules.recommendation.client.GorseClient;
 import com.app.modules.recommendation.client.dto.GorseScore;
 import com.app.modules.recommendation.config.RecommendationProperties;
 import com.app.modules.recommendation.enums.UserEventType;
-import com.app.modules.recommendation.repository.UserEventRepository;
+import com.app.modules.recommendation.repository.UserEventAnalyticsRepository;
 
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -31,7 +32,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 class RecommendationSourceTest {
 
     @Mock private GorseClient gorseClient;
-    @Mock private UserEventRepository userEventRepository;
+    @Mock private UserEventAnalyticsRepository userEventAnalyticsRepository;
 
     private RecommendationProperties properties;
     private RecommendationSource source;
@@ -42,7 +43,7 @@ class RecommendationSourceTest {
         properties = new RecommendationProperties();
         // Deterministic chunk sizing in tests: shortfall * 1 = shortfall.
         properties.setTopUpOverfetchMultiplier(1);
-        source = new RecommendationSource(gorseClient, userEventRepository, properties);
+        source = new RecommendationSource(gorseClient, userEventAnalyticsRepository, properties);
     }
 
     @Test
@@ -61,7 +62,7 @@ class RecommendationSourceTest {
                         List.of(
                                 new GorseScore(readTrendingItem.toString(), 8.0),
                                 new GorseScore(unreadTrendingItem.toString(), 7.0)));
-        when(userEventRepository.findRecentEntityIds(
+        when(userEventAnalyticsRepository.findRecentEntityIds(
                         eq(viewerId), eq(UserEventType.POST_VIEW), any(), any(), anyInt()))
                 .thenReturn(List.of(readTrendingItem));
 
@@ -92,7 +93,7 @@ class RecommendationSourceTest {
 
         assertThat(batch.scores()).hasSize(2);
         verify(gorseClient, never()).trending(anyInt(), anyInt());
-        verify(userEventRepository, never())
+        verify(userEventAnalyticsRepository, never())
                 .findRecentEntityIds(any(), any(), any(), any(), anyInt());
         assertThat(batch.trendingChunkFetched()).isZero();
     }
@@ -109,7 +110,7 @@ class RecommendationSourceTest {
                         List.of(
                                 new GorseScore(sharedId.toString(), 5.0),
                                 new GorseScore(onlyGorseItem.toString(), 4.0)));
-        when(userEventRepository.findRecentEntityIds(any(), any(), any(), any(), anyInt()))
+        when(userEventAnalyticsRepository.findRecentEntityIds(any(), any(), any(), any(), anyInt()))
                 .thenReturn(List.of());
 
         RecommendationSource.SourceBatch batch =
@@ -136,7 +137,7 @@ class RecommendationSourceTest {
                                 CircuitBreaker.ofDefaults("gorse")));
 
         verify(gorseClient, never()).trending(anyInt(), anyInt());
-        verify(userEventRepository, never())
+        verify(userEventAnalyticsRepository, never())
                 .findRecentEntityIds(any(), any(), any(), any(), anyInt());
         assertThat(batch.source()).isEqualTo(RecommendationSource.SOURCE_POPULAR);
     }
@@ -154,6 +155,29 @@ class RecommendationSourceTest {
 
         assertThat(batch.scores()).hasSize(1);
         assertThat(batch.source()).isEqualTo(RecommendationSource.SOURCE_GORSE);
+        assertThat(batch.trendingChunkFetched()).isZero();
+    }
+
+    @Test
+    void fetch_clickHouseUnavailableDuringTopup_degradesToGorseResultsAndNeverTouchesTheBreaker() {
+        UUID gorseItem = UUID.randomUUID();
+        when(gorseClient.recommend(viewerId, 3, 0))
+                .thenReturn(List.of(new GorseScore(gorseItem.toString(), 9.0)));
+        when(gorseClient.trending(anyInt(), anyInt()))
+                .thenReturn(List.of(new GorseScore(UUID.randomUUID().toString(), 5.0)));
+        when(userEventAnalyticsRepository.findRecentEntityIds(any(), any(), any(), any(), anyInt()))
+                .thenThrow(
+                        new ClickHouseUnavailableException(
+                                ClickHouseUnavailableException.Reason.CIRCUIT_OPEN,
+                                "circuit open"));
+
+        RecommendationSource.SourceBatch batch =
+                source.fetch(viewerId, RecommendationSource.SOURCE_GORSE, 3, 0, 0);
+
+        // The primary Gorse list is served as it is, and the source is still Gorse: nothing was
+        // thrown out of fetch(), so the gorse circuit breaker that wraps it records no failure.
+        assertThat(batch.source()).isEqualTo(RecommendationSource.SOURCE_GORSE);
+        assertThat(batch.scores()).extracting(GorseScore::id).containsExactly(gorseItem.toString());
         assertThat(batch.trendingChunkFetched()).isZero();
     }
 
@@ -180,7 +204,7 @@ class RecommendationSourceTest {
                         List.of(
                                 new GorseScore(earlierPageItem.toString(), 5.0),
                                 new GorseScore(freshTrendingItem.toString(), 4.0)));
-        when(userEventRepository.findRecentEntityIds(any(), any(), any(), any(), anyInt()))
+        when(userEventAnalyticsRepository.findRecentEntityIds(any(), any(), any(), any(), anyInt()))
                 .thenReturn(List.of());
 
         RecommendationSource.SourceBatch batch =
@@ -201,7 +225,7 @@ class RecommendationSourceTest {
 
         assertThat(batch.scores()).hasSize(1);
         verify(gorseClient, never()).trending(anyInt(), anyInt());
-        verify(userEventRepository, never())
+        verify(userEventAnalyticsRepository, never())
                 .findRecentEntityIds(any(), any(), any(), any(), anyInt());
     }
 }

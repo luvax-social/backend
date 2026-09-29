@@ -44,6 +44,12 @@ public class UserSummaryServiceImpl implements UserSummaryService {
         return result;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public boolean exists(UUID userId) {
+        return userId != null && userRepository.existsIncludingSoftDeleted(userId);
+    }
+
     private static UserSummaryResponse placeholder(UUID id) {
         return new UserSummaryResponse(id, null, DELETED_DISPLAY_NAME, null, false);
     }

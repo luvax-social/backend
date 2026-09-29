@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- The administrative activity log is read from ClickHouse and answers 503 ANALYTICS_UNAVAILABLE while ClickHouse cannot serve it, with its 30-day window and cursor unchanged.
+- The recommendation read-set and the behavioural event recorder now read and write ClickHouse: a ClickHouse failure degrades the For You topup to Gorse's results alone, and the recorder counts each dropped event by reason instead of only logging it.
 - Platform statistics are stored in ClickHouse and written through the outbox; `GET /api/v1/admin/stats/current` and `/timeseries` answer 503 `ANALYTICS_UNAVAILABLE` while the analytics store is down.
 - Daily statistics are computed from the half-hour buckets when a series is read, summing a flow and taking a gauge from the last bucket of the day, and the day in progress is never returned; a gauge dimension missing from the last bucket now reads as zero instead of keeping an earlier value.
 - The development seed writes 90 days of half-hour statistics buckets through the outbox, so the seeded series reaches ClickHouse through the same consumer as live collection.
@@ -15,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
+- RECOMMENDATION_CONSUMER_CONCURRENCY sets the number of recommendation feedback consumer threads (default 4), and a feedback message is returned to its queue while ClickHouse is unavailable instead of being retried or dead-lettered.
+- Behavioural events are stored in ClickHouse (luvax_analytics.user_events, kept 12 months), and the recommendation feedback consumer records each event there before it reaches Gorse, together with the feedback type and value it sent.
+- recommendation.user-event.imported.v1 stores a behavioural event in ClickHouse without sending it to Gorse, and the development seed imports its events that way; its queue, dead-letter queue and consumer start once the analytics schema is ready.
+- Hashtag affinity is now recomputed from the per-user contributions ClickHouse sums over the window, staged in PostgreSQL and joined to each post's hashtags, giving the same scores as the join over the former table.
 - `STATS_HALF_HOUR_HORIZON` configuration property, the furthest back a statistics series may be requested at half-hour width (default 30 days).
 - The moderation audit log is now replicated to ClickHouse through the outbox: each new audit row raises an event in its own transaction, and a database trigger raises one when PostgreSQL itself rewrites a row because an account it referenced was deleted, so the replica always converges on the newest state.
 - Analytics ingestion pauses while ClickHouse is unavailable: the analytics consumers stop when the `clickhouse` circuit breaker opens, so their messages wait in RabbitMQ instead of dead-lettering, and start again when it half-opens. `luvax_analytics_schema_ready`, `luvax_analytics_ingestion_running`, `luvax_analytics_user_events_dropped_total` and `luvax_analytics_audit_log_fallback_total` report its state.
@@ -770,6 +776,7 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Two integration tests that exercise the production profile or the seed reset path failed to start their context because their Postgres credentials were never supplied to the beans that read them directly, unrelated to and pre-existing before this change.
 
 ### Removed
+- The PostgreSQL user_events table, its monthly partitions and the daily job that created them, replaced by the ClickHouse store.
 - The platform statistics roll-up job, the PostgreSQL `platform_stats` table and the `STATS_FINE_RETENTION`, `STATS_DAILY_RETENTION` and `STATS_ROLLUP_CRON` settings; every half-hour bucket is now kept.
 - `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/{id}/read`, and the `actor`, `entityType`, `entityId`, `postId` and `message` fields of notification list items; this is a breaking change that ships together with the matching frontend.
 - Direct messages no longer produce activity notifications; the retired `message.notification.queue` and its dead-letter queue are deleted from the broker at startup, and `MESSAGE_CONSUMER_ENABLED` is gone.

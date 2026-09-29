@@ -1,6 +1,9 @@
 package com.app.common.analytics.ingest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -33,6 +36,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -47,6 +51,8 @@ import com.app.common.inbox.service.ProcessedMessageService;
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.common.outbox.model.DomainEventEnvelopeJson;
 import com.app.modules.admin.messaging.AdminEventTypes;
+import com.app.modules.post.messaging.PostEventTypes;
+import com.app.modules.recommendation.client.GorseClient;
 import com.app.testsupport.ClickHouseTestSupport;
 import com.app.testsupport.TestContainerImages;
 
@@ -58,8 +64,10 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
  * container stops, the messages wait ready in their queue, and after recovery every row arrives
  * exactly once.
  *
- * <p>Driven through the admin action replication consumer, the first analytics consumer, with real
- * audit rows in PostgreSQL and real events on the bus.
+ * <p>Driven through two consumers, the admin action replication consumer and the recommendation
+ * feedback consumer, with real audit rows and accounts in PostgreSQL and real events on the bus.
+ * The recommender is the only stand-in: the feedback consumer writes ClickHouse first and Gorse
+ * second, so a paused ClickHouse must never reach it.
  */
 @SpringBootTest(
         properties = {
@@ -67,6 +75,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
             "spring.docker.compose.enabled=false",
             "management.health.elasticsearch.enabled=false",
             "app.outbox.publisher.enabled=false",
+            "app.recommendation.consumer.enabled=true",
             // A paused server accepts the connection and never answers, so the socket timeout is
             // what turns the hang into a failure the breaker can count.
             "app.analytics.clickhouse.writer.socket-timeout=PT1S",
@@ -79,6 +88,9 @@ class AnalyticsOutageIT {
     static final String QUEUE = RabbitMqTopologyConfig.ADMIN_ACTION_REPLICATION_QUEUE;
     static final String DEAD_LETTER_QUEUE =
             RabbitMqTopologyConfig.ADMIN_ACTION_REPLICATION_DEAD_LETTER_QUEUE;
+    static final String FEEDBACK_QUEUE = RabbitMqTopologyConfig.RECOMMENDATION_FEEDBACK_QUEUE;
+    static final String FEEDBACK_DEAD_LETTER_QUEUE =
+            RabbitMqTopologyConfig.RECOMMENDATION_FEEDBACK_DEAD_LETTER_QUEUE;
 
     static final ClickHouseContainer clickhouse = ClickHouseTestSupport.startProvisioned();
 
@@ -143,9 +155,15 @@ class AnalyticsOutageIT {
                 ConcurrentMap<UUID, CompletableFuture<Void>> processedEvents) {
             return (consumerName, eventId, eventType, handler) -> {
                 var result = delegate.processOnce(consumerName, eventId, eventType, handler);
-                processedEvents
-                        .computeIfAbsent(eventId, id -> new CompletableFuture<>())
-                        .complete(null);
+                // Only the two consumers under test complete a future: an event such as
+                // post.liked.v1 is also routed to other queues, whose consumers must not release
+                // a waiting test early.
+                if (consumerName.equals("admin-action-replication-consumer")
+                        || consumerName.equals("recommendation-feedback-consumer")) {
+                    processedEvents
+                            .computeIfAbsent(eventId, id -> new CompletableFuture<>())
+                            .complete(null);
+                }
                 return result;
             };
         }
@@ -160,6 +178,8 @@ class AnalyticsOutageIT {
     @Autowired private RabbitTemplate rabbitTemplate;
     @Autowired private JdbcClient jdbcClient;
     @Autowired private ConcurrentMap<UUID, CompletableFuture<Void>> processedEvents;
+
+    @MockitoBean private GorseClient gorseClient;
 
     private Announced announce() {
         UUID actionId =
@@ -186,6 +206,56 @@ class AnalyticsOutageIT {
                 new Message(
                         DomainEventEnvelopeJson.write(envelope).getBytes(StandardCharsets.UTF_8)));
         return new Announced(eventId, actionId);
+    }
+
+    /** One engagement event by an existing account, and the post it names. */
+    private record Engaged(UUID eventId, UUID postId) {}
+
+    private UUID insertUser(String username) {
+        return jdbcClient
+                .sql(
+                        "INSERT INTO users(username, email, display_name) VALUES (:username,"
+                                + " :email, :displayName) RETURNING id")
+                .param("username", username)
+                .param("email", username + "@example.com")
+                .param("displayName", username)
+                .query(UUID.class)
+                .single();
+    }
+
+    private Engaged engage(UUID userId) {
+        UUID postId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        processedEvents.put(eventId, new CompletableFuture<>());
+        DomainEventEnvelope envelope =
+                new DomainEventEnvelope(
+                        eventId,
+                        PostEventTypes.POST_LIKED_V1,
+                        OffsetDateTime.now(ZoneOffset.UTC),
+                        userId,
+                        "post",
+                        postId,
+                        Map.of("postId", postId.toString()));
+        rabbitTemplate.send(
+                RabbitMqTopologyConfig.SOCIAL_EVENTS_EXCHANGE,
+                PostEventTypes.POST_LIKED_V1,
+                new Message(
+                        DomainEventEnvelopeJson.write(envelope).getBytes(StandardCharsets.UTF_8)));
+        return new Engaged(eventId, postId);
+    }
+
+    private long countLikes(UUID userId) throws Exception {
+        try (Connection admin = ClickHouseTestSupport.adminConnection(clickhouse);
+                Statement statement = admin.createStatement();
+                ResultSet rows =
+                        statement.executeQuery(
+                                "SELECT count() FROM luvax_analytics.user_events FINAL WHERE"
+                                        + " user_id = '"
+                                        + userId
+                                        + "' AND feedback_type = 'like'")) {
+            rows.next();
+            return rows.getLong(1);
+        }
     }
 
     private void awaitProcessed(Announced announced, long seconds) throws Exception {
@@ -272,5 +342,62 @@ class AnalyticsOutageIT {
         everything.add(healthy.actionId());
         assertThat(countRows(everything)).isEqualTo(everything.size());
         assertThat(controller.isRunning(AnalyticsListenerIds.ADMIN_ACTION_REPLICATION)).isTrue();
+    }
+
+    @Test
+    void outage_engagementEvents_neverReachGorseUntilClickHouseHasThemAndDrainExactlyOnce()
+            throws Exception {
+        assertThat(gate.attempt()).isTrue();
+        controller.reconcile();
+        assertThat(controller.isRunning(AnalyticsListenerIds.RECOMMENDATION_FEEDBACK)).isTrue();
+        CircuitBreaker breaker =
+                breakers.circuitBreaker(ClickHouseOperationsImpl.CIRCUIT_BREAKER_NAME);
+        breaker.reset();
+        UUID user = insertUser("outage_engagement_user");
+
+        Engaged healthy = engage(user);
+        processedEvents.get(healthy.eventId()).get(30, TimeUnit.SECONDS);
+        verify(gorseClient, times(1)).insertFeedback(anyList());
+
+        CompletableFuture<Void> opened = new CompletableFuture<>();
+        breaker.getEventPublisher()
+                .onStateTransition(
+                        event -> {
+                            if (event.getStateTransition().getToState()
+                                    == CircuitBreaker.State.OPEN) {
+                                opened.complete(null);
+                            }
+                        });
+        clickhouse.getDockerClient().pauseContainerCmd(clickhouse.getContainerId()).exec();
+        List<Engaged> sentDuringOutage = new ArrayList<>();
+        try {
+            for (int i = 0; i < 8; i++) {
+                sentDuringOutage.add(engage(user));
+            }
+
+            opened.get(90, TimeUnit.SECONDS);
+            controller.awaitIdle(30, TimeUnit.SECONDS);
+
+            assertThat(controller.isRunning(AnalyticsListenerIds.RECOMMENDATION_FEEDBACK))
+                    .isFalse();
+            assertThat(queueState(FEEDBACK_QUEUE).getConsumerCount()).isZero();
+            assertThat(queueState(FEEDBACK_QUEUE).getMessageCount())
+                    .isEqualTo(sentDuringOutage.size());
+            assertThat(queueState(FEEDBACK_DEAD_LETTER_QUEUE).getMessageCount()).isZero();
+            // ClickHouse is written first, so none of the stranded events reached the recommender.
+            verify(gorseClient, times(1)).insertFeedback(anyList());
+        } finally {
+            clickhouse.getDockerClient().unpauseContainerCmd(clickhouse.getContainerId()).exec();
+        }
+
+        for (Engaged engaged : sentDuringOutage) {
+            processedEvents.get(engaged.eventId()).get(120, TimeUnit.SECONDS);
+        }
+
+        assertThat(queueState(FEEDBACK_QUEUE).getMessageCount()).isZero();
+        assertThat(queueState(FEEDBACK_DEAD_LETTER_QUEUE).getMessageCount()).isZero();
+        assertThat(countLikes(user)).isEqualTo(1 + sentDuringOutage.size());
+        verify(gorseClient, times(1 + sentDuringOutage.size())).insertFeedback(anyList());
+        assertThat(controller.isRunning(AnalyticsListenerIds.RECOMMENDATION_FEEDBACK)).isTrue();
     }
 }

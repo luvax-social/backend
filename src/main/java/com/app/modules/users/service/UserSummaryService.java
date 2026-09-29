@@ -28,4 +28,16 @@ public interface UserSummaryService {
      *     empty
      */
     Map<UUID, UserSummaryResponse> loadSummaries(Collection<UUID> ids);
+
+    /**
+     * Tells whether an account row exists, soft-deleted or not.
+     *
+     * <p>For a writer whose store cannot enforce the reference itself: ClickHouse has no foreign
+     * keys, so the check the {@code user_events} foreign key used to make is made here instead. A
+     * soft-deleted account still exists, exactly as it did for that constraint.
+     *
+     * @param userId account to look for
+     * @return true when a row with this identifier exists
+     */
+    boolean exists(UUID userId);
 }
