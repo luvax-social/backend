@@ -126,7 +126,8 @@ public class ClickHouseDataSourceConfig {
         config.addDataSourceProperty("retry", "0");
         config.addDataSourceProperty("connection_timeout", millis(connectionTimeout));
         config.addDataSourceProperty("socket_timeout", millis(socketTimeout));
-        return new HikariDataSource(config);
+        return new NetworkTimeoutDataSource(
+                new HikariDataSource(config), Math.toIntExact(socketTimeout.toMillis()));
     }
 
     private static String millis(Duration duration) {
