@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
+- A ClickHouse analytics store (`luvax_analytics`) with writer, reader, batch and migrator connection pools, a versioned schema runner that creates `user_events`, `admin_actions` and `platform_stats` at startup, and a `clickhouse` circuit breaker. The application starts and serves while ClickHouse is down, ClickHouse never reaches `/actuator/health`, and `ANALYTICS_ENABLED`, `ANALYTICS_CLICKHOUSE_URL` and the `ANALYTICS_CLICKHOUSE_*` credentials configure it.
 - OpenTelemetry trace and log export over OTLP, off by default (`OTLP_EXPORT_ENABLED`), with 100 percent sampling; JDBC, Redis and the Gorse and Turnstile HTTP clients are now traced, and application logs carry the real trace and span id.
 - The behavioural-event recorder and the mail dispatch executor now carry the caller's trace context onto their own worker thread, so a decoupled write joins the request's trace instead of starting an unrelated one.
 - One trace now spans the outbox: the request that wrote an event is restored as the parent of its broker send, so the send and every consumer descend from the originating request, while the publisher's own batch trace only links to it.

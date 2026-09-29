@@ -311,6 +311,39 @@ app:
     idempotency-ttl-hours: ${MESSAGE_IDEMPOTENCY_TTL_HOURS:24}
     live:
       enabled: ${MESSAGE_LIVE_ENABLED:false}
+  # ClickHouse analytics store (database luvax_analytics). Defaults serve local development against
+  # the observability profile's ClickHouse on the host; production overrides through environment
+  # variables. Three application users each get a pool: the writer inserts, the reader serves
+  # request-path reads and, through the batch pool, long reads for jobs, and the migrator runs
+  # schema scripts and the seed reset's truncation. Tests pin ANALYTICS_ENABLED=false.
+  analytics:
+    enabled: ${ANALYTICS_ENABLED:true}
+    clickhouse:
+      url: ${ANALYTICS_CLICKHOUSE_URL:jdbc:clickhouse://localhost:8123/luvax_analytics}
+      # Also each pool's checkout timeout, so a starved pool fails fast instead of holding a
+      # listener thread for Hikari's default 30 seconds.
+      connection-timeout: ${ANALYTICS_CLICKHOUSE_CONNECTION_TIMEOUT:PT2S}
+      writer:
+        username: ${ANALYTICS_CLICKHOUSE_WRITER_USERNAME:luvax_analytics_writer}
+        password: ${ANALYTICS_CLICKHOUSE_WRITER_PASSWORD:}
+        pool-size: ${ANALYTICS_CLICKHOUSE_WRITER_POOL_SIZE:12}
+        socket-timeout: ${ANALYTICS_CLICKHOUSE_WRITER_SOCKET_TIMEOUT:PT10S}
+      reader:
+        username: ${ANALYTICS_CLICKHOUSE_READER_USERNAME:luvax_analytics_reader}
+        password: ${ANALYTICS_CLICKHOUSE_READER_PASSWORD:}
+        pool-size: ${ANALYTICS_CLICKHOUSE_READER_POOL_SIZE:6}
+        # Above the reader profile's server-side max_execution_time of 20 seconds, so the server's
+        # typed timeout arrives before the client gives up.
+        socket-timeout: ${ANALYTICS_CLICKHOUSE_READER_SOCKET_TIMEOUT:PT25S}
+      # Uses the reader's credentials.
+      batch:
+        pool-size: ${ANALYTICS_CLICKHOUSE_BATCH_POOL_SIZE:2}
+        socket-timeout: ${ANALYTICS_CLICKHOUSE_BATCH_SOCKET_TIMEOUT:PT5M}
+      migrator:
+        username: ${ANALYTICS_CLICKHOUSE_MIGRATOR_USERNAME:luvax_analytics_migrator}
+        password: ${ANALYTICS_CLICKHOUSE_MIGRATOR_PASSWORD:}
+    migration:
+      retry-interval: ${ANALYTICS_MIGRATION_RETRY_INTERVAL:PT30S}
   gorse:
     base-url: ${APP_GORSE_BASE_URL:http://localhost:8088}
     api-key: ${GORSE_API_KEY:}

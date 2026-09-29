@@ -31,3 +31,25 @@ resilience4j:
         automaticTransitionFromOpenToHalfOpenEnabled: true
         slowCallDurationThreshold: 5s
         slowCallRateThreshold: 80
+      clickhouse:
+        # Never part of /actuator/health: a ClickHouse outage must not make the application look
+        # unhealthy to the deployment platform. Its state is alerted on through the existing
+        # circuit breaker rule.
+        registerHealthIndicator: false
+        allowHealthIndicatorToFail: false
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        # The batch reads take seconds by design.
+        slowCallDurationThreshold: 10s
+        slowCallRateThreshold: 80
+        # Only availability failures count; a rejected request (a caller or data error) is ignored
+        # entirely, so a bug can never open the breaker and pause ingestion.
+        recordExceptions:
+          - com.app.common.analytics.ClickHouseUnavailableException
+        ignoreExceptions:
+          - com.app.common.analytics.ClickHouseRequestRejectedException
