@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- The agent rules mirror now carries the same rule as the primary copy that branch, commit and pull request names must make sense to a reviewer.
 - The structure, testing and data-rule documents, and the recommendation guide, now describe the ClickHouse analytics tier: its tables, users, pools, failure model, schema runner, read routing and rollback script, and the operator runbook for the Gorse rebuild.
 - A notification now holds a real foreign key to the moderation decision behind it, cleared when that decision is deleted; existing dangling references are archived in `archived_notification_admin_action_orphans` and cleared by the migration.
 - The development seed now sends its audit rows, half-hour statistics buckets and behavioural events to ClickHouse through the outbox and the analytics consumers, and its reset (and `scripts/seed-dev-data.sh --reset`) truncates the three ClickHouse analytics tables, failing the run if it cannot.
