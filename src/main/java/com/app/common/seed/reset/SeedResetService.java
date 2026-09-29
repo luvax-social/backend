@@ -18,6 +18,7 @@ import org.springframework.data.elasticsearch.core.IndexOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import com.app.common.analytics.AnalyticsStoreTruncator;
 import com.app.modules.hashtag.search.HashtagDocument;
 import com.app.modules.post.search.PostDocument;
 
@@ -71,6 +72,8 @@ public class SeedResetService {
     private final ObjectProvider<ConnectionFactory> connectionFactoryProvider;
     private final List<Queue> declaredQueues;
     private final ElasticsearchOperations elasticsearchOperations;
+    // An ObjectProvider because the truncator exists only when app.analytics.enabled is true.
+    private final ObjectProvider<AnalyticsStoreTruncator> analyticsTruncatorProvider;
 
     @Value("${spring.datasource.username}")
     private String datasourceUsername;
@@ -155,6 +158,10 @@ public class SeedResetService {
         purgeBrokerQueues();
         resetSearchIndexes();
         purgeGorse();
+        // After the queue purge, so no analytics message still in flight can refill a table the
+        // moment it is emptied, and before the PostgreSQL wipe, so a failure here leaves the
+        // domain data intact instead of a reseed whose analytics quietly disagree with it.
+        truncateAnalytics();
 
         jdbc.execute(
                 (Connection connection) -> {
@@ -172,6 +179,15 @@ public class SeedResetService {
                     return null;
                 });
         log.info("[seed] reset complete: {} tables truncated", TRUNCATE_ORDER.length);
+    }
+
+    private void truncateAnalytics() {
+        AnalyticsStoreTruncator truncator = analyticsTruncatorProvider.getIfAvailable();
+        if (truncator == null) {
+            log.warn("[seed] reset: analytics are disabled, no ClickHouse tables to truncate");
+            return;
+        }
+        truncator.truncateAll();
     }
 
     // Purges every queue RabbitMqTopologyConfig (and any module-owned binding config) declares as

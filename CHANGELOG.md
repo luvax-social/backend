@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- The development seed now sends its audit rows, half-hour statistics buckets and behavioural events to ClickHouse through the outbox and the analytics consumers, and its reset (and `scripts/seed-dev-data.sh --reset`) truncates the three ClickHouse analytics tables, failing the run if it cannot.
 - The administrative activity log is read from ClickHouse and answers 503 ANALYTICS_UNAVAILABLE while ClickHouse cannot serve it, with its 30-day window and cursor unchanged.
 - The recommendation read-set and the behavioural event recorder now read and write ClickHouse: a ClickHouse failure degrades the For You topup to Gorse's results alone, and the recorder counts each dropped event by reason instead of only logging it.
 - Platform statistics are stored in ClickHouse and written through the outbox; `GET /api/v1/admin/stats/current` and `/timeseries` answer 503 `ANALYTICS_UNAVAILABLE` while the analytics store is down.

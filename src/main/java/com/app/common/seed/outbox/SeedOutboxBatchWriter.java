@@ -160,6 +160,25 @@ public class SeedOutboxBatchWriter {
     }
 
     /**
+     * Enqueues one {@code admin.action.recorded.v1} per audit row, in a single transaction, the
+     * same event {@code AdminActionRecorder} enqueues for a live action. Public because the emitter
+     * calls it from another package, through this bean's proxy so that {@code
+     * OutboxService.enqueue} finds a transaction.
+     */
+    @Transactional
+    public void emitAdminActionReplicationBatch(List<SeedOutboxEmitter.AdminActionRow> batch) {
+        for (SeedOutboxEmitter.AdminActionRow row : batch) {
+            outboxService.enqueue(
+                    AdminEventTypes.ACTION_RECORDED_V1,
+                    AdminEventTypes.ACTION_RECORDED_V1,
+                    "admin_action",
+                    row.actionId(),
+                    row.adminId(),
+                    Map.of("adminActionId", row.actionId().toString()));
+        }
+    }
+
+    /**
      * Enqueues one collected-bucket event per platform statistics bucket, in a single transaction.
      * Public because {@code AnalyticsSeedWriter} calls it from another package, and it must go
      * through this bean's proxy so that {@code OutboxService.enqueue} finds a transaction.

@@ -159,7 +159,7 @@ public class AnalyticsSeedWriter {
      * writer produced, and the events' entity references are read back from {@code posts}, {@code
      * hashtags} and {@code stories}.
      */
-    public void write(SeedTimeline timeline) {
+    public AnalyticsCounts write(SeedTimeline timeline) {
         Random random = new Random(ANALYTICS_RANDOM_SEED);
 
         FinalCounts finalCounts =
@@ -180,7 +180,16 @@ public class AnalyticsSeedWriter {
 
         int events = writeUserEvents(timeline, random);
         log.info("[seed] user_events: {} import events enqueued", events);
+        return new AnalyticsCounts(buckets, events);
     }
+
+    /**
+     * What one run enqueued.
+     *
+     * @param statsBuckets half-hour platform statistics buckets
+     * @param userEventImports behavioural events to import
+     */
+    public record AnalyticsCounts(int statsBuckets, int userEventImports) {}
 
     // The real final row counts every bucket's gauge ramps toward, dimensioned exactly the way
     // com.app.modules.admin.enums.PlatformMetric's GROUP BY queries dimension them - one map entry

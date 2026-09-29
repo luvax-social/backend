@@ -218,7 +218,16 @@ public class SeedRunner {
             SeedOutboxEmitter.EmissionCounts counts =
                     seedOutboxEmitter.emitFullVolume(
                             content, chain.usersByUsername(), chain.postIdBySeedId());
-            log.info("[seed] phase=outbox-emission complete: total={}", counts.total());
+            AnalyticsSeedWriter.AnalyticsCounts analytics = chain.analyticsCounts();
+            int totalEnqueued =
+                    counts.total() + analytics.statsBuckets() + analytics.userEventImports();
+            log.info(
+                    "[seed] phase=outbox-emission complete: total={}, analytics:"
+                            + " adminActions={}, platformStatsBuckets={}, userEventImports={}",
+                    totalEnqueued,
+                    counts.adminActions(),
+                    analytics.statsBuckets(),
+                    analytics.userEventImports());
 
             assertEnumCoverage();
             assertReplayCannotNotify();
@@ -233,7 +242,7 @@ public class SeedRunner {
                             + " (app.outbox.publisher.*), so Elasticsearch, Gorse, and notification"
                             + " state are not yet consistent with this seed - this line marks the"
                             + " synchronous portion done, not the whole system",
-                    counts.total());
+                    totalEnqueued);
         } catch (RuntimeException e) {
             log.error("[seed] seed run failed", e);
             throw e;
@@ -242,7 +251,9 @@ public class SeedRunner {
 
     /** The id maps later phases need from the writer chain. */
     private record WriterChainResult(
-            Map<String, UUID> usersByUsername, Map<String, UUID> postIdBySeedId) {}
+            Map<String, UUID> usersByUsername,
+            Map<String, UUID> postIdBySeedId,
+            AnalyticsSeedWriter.AnalyticsCounts analyticsCounts) {}
 
     private WriterChainResult runWriterChain(SeedContent content, SeedTimeline timeline) {
         Map<String, UUID> usersByUsername = userSeedWriter.write(content, timeline);
@@ -265,8 +276,8 @@ public class SeedRunner {
                 supportSeedWriter.write(content, usersByUsername, timeline);
         verificationSeedWriter.write(content, usersByUsername, verificationTicketIds, timeline);
         notificationSeedWriter.write(timeline);
-        analyticsSeedWriter.write(timeline);
-        return new WriterChainResult(usersByUsername, postIdBySeedId);
+        AnalyticsSeedWriter.AnalyticsCounts analyticsCounts = analyticsSeedWriter.write(timeline);
+        return new WriterChainResult(usersByUsername, postIdBySeedId, analyticsCounts);
     }
 
     /**
