@@ -28,6 +28,7 @@ import com.app.modules.admin.entity.AdminAction;
 import com.app.modules.admin.enums.AdminActionType;
 import com.app.modules.admin.mapper.AdminActionMapper;
 import com.app.modules.admin.repository.AdminActionRepository;
+import com.app.modules.admin.service.AdminActionListingService;
 import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.admin.service.AdminService;
@@ -61,6 +62,7 @@ public class AdminServiceImpl implements AdminService {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final AdminActionRepository adminActionRepository;
+    private final AdminActionListingService adminActionListingService;
     private final UserRepository userRepository;
     private final PostRepository postRepository;
     private final PostService postService;
@@ -76,6 +78,7 @@ public class AdminServiceImpl implements AdminService {
 
     public AdminServiceImpl(
             AdminActionRepository adminActionRepository,
+            AdminActionListingService adminActionListingService,
             UserRepository userRepository,
             PostRepository postRepository,
             PostService postService,
@@ -89,6 +92,7 @@ public class AdminServiceImpl implements AdminService {
             NotificationService notificationService,
             VerificationService verificationService) {
         this.adminActionRepository = adminActionRepository;
+        this.adminActionListingService = adminActionListingService;
         this.userRepository = userRepository;
         this.postRepository = postRepository;
         this.postService = postService;
@@ -626,8 +630,8 @@ public class AdminServiceImpl implements AdminService {
         int pageSize = normalizeLimit(size);
         int queryLimit = pageSize + 1;
         ActionCursor decoded = decodeCursor(cursor, scope);
-        List<AdminAction> actions =
-                adminActionRepository.findActions(
+        List<AdminActionSummaryResponse> actions =
+                adminActionListingService.findActions(
                         adminId,
                         targetUserId,
                         actionType,
@@ -760,9 +764,13 @@ public class AdminServiceImpl implements AdminService {
     }
 
     private CursorPageResponse<AdminActionSummaryResponse> toPage(
-            List<AdminAction> actions, int pageSize, boolean hasPreviousPage, String scope) {
+            List<AdminActionSummaryResponse> actions,
+            int pageSize,
+            boolean hasPreviousPage,
+            String scope) {
         boolean hasNextPage = actions.size() > pageSize;
-        List<AdminAction> pageActions = hasNextPage ? actions.subList(0, pageSize) : actions;
+        List<AdminActionSummaryResponse> pageActions =
+                hasNextPage ? actions.subList(0, pageSize) : actions;
         if (pageActions.isEmpty()) {
             return CursorPageResponse.<AdminActionSummaryResponse>builder()
                     .content(Collections.emptyList())
@@ -774,7 +782,7 @@ public class AdminServiceImpl implements AdminService {
                     .build();
         }
         return CursorPageResponse.<AdminActionSummaryResponse>builder()
-                .content(adminActionMapper.toSummaryResponseList(pageActions))
+                .content(pageActions)
                 .pageInfo(
                         CursorPageResponse.PageInfo.builder()
                                 .hasNextPage(hasNextPage)
@@ -791,9 +799,9 @@ public class AdminServiceImpl implements AdminService {
         return size < 1 ? DEFAULT_PAGE_SIZE : Math.min(size, MAX_PAGE_SIZE);
     }
 
-    private String encodeCursor(AdminAction action, String scope) {
+    private String encodeCursor(AdminActionSummaryResponse action, String scope) {
         return CursorCodec.encode(
-                new Cursor(TimeCursors.toMicros(action.getCreatedAt()), action.getId()), scope);
+                new Cursor(TimeCursors.toMicros(action.createdAt()), action.id()), scope);
     }
 
     private ActionCursor decodeCursor(String cursor, String scope) {
