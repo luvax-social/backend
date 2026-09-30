@@ -33,8 +33,7 @@ import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves {@link PostSeedWriter} against a real Flyway-migrated schema, chained after {@link
- * UserSeedWriter} and {@link MediaSeedWriter} the same way Task 8's {@code SeedRunner} will chain
- * them.
+ * UserSeedWriter} and {@link MediaSeedWriter} the same way {@code SeedRunner} chains them.
  */
 @SpringBootTest(
         properties = {

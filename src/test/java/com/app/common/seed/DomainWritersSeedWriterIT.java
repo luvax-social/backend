@@ -46,7 +46,7 @@ import com.app.testsupport.TestContainerImages;
 /**
  * Proves {@link StorySeedWriter}, {@link MessageSeedWriter}, {@link NotificationSeedWriter}, {@link
  * ModerationSeedWriter} and {@link AnalyticsSeedWriter} against a real Flyway-migrated schema,
- * chained after every earlier writer the same way Task 8's {@code SeedRunner} will chain them.
+ * chained after every earlier writer the same way {@code SeedRunner} chains them.
  */
 @SpringBootTest(
         properties = {

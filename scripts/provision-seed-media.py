@@ -12,7 +12,7 @@ former avatar pool that real posts.json entries still reference - see media_mani
 _reclassified_avatar_pool_note - which a fresh `provision` run does not reproduce; use
 `--verify` against the existing manifest rather than re-running `provision` from scratch.)
 Every physical asset is uploaded to R2 exactly once, under a stable
-seed/library/{manifest_id}.{ext} key; downstream consumers (Task 5's
+seed/library/{manifest_id}.{ext} key; downstream consumers (notably
 MediaSeedWriter) mint their own per-owner storage_key for each media_assets
 row but reuse this manifest's single cdn_url, because storage_key is UNIQUE
 in the database but the same physical file may back many owning rows.
@@ -53,7 +53,7 @@ STORAGE_KEY_STRATEGY = (
     "Each of the 255 assets below is uploaded to R2 exactly once, under the "
     "stable key seed/library/{manifest_id}.{ext} recorded as this entry's "
     "storage_key, with cdn_url = {MEDIA_CDN_BASE_URL}/{storage_key}. "
-    "media_assets.storage_key is UNIQUE, so when a downstream seeder (Task 5's "
+    "media_assets.storage_key is UNIQUE, so when a downstream seeder (such as "
     "MediaSeedWriter) creates a media_assets row for a given owner that reuses "
     "one of these manifest entries, it must mint its own fresh "
     "users/{ownerId}/media/{uuid}.{ext}-shaped storage_key (matching "
@@ -65,7 +65,7 @@ STORAGE_KEY_STRATEGY = (
 
 # Topic vocabulary is the 22 distinct topic_tags values used by posts.json
 # (verified via posts.json content), cross-checked against hashtags.json and
-# personas.json's persona.topics vocabulary. Task 2 adds ~188 more posts
+# personas.json's persona.topics vocabulary. The expanded post seed adds ~188 more posts
 # against this same vocabulary, so it does not need to change.
 # Each entry: topic -> (pexels query, optional note explaining substitution).
 IMAGE_TOPICS = [
@@ -135,7 +135,7 @@ VIDEO_TOPICS = [
 # p05_shop_owner_clothes=small_business, p07_fnb_owner=small_business). Only
 # 15 users carry one of those three persona_ids in the current users.json,
 # but the manifest provisions 25 banner objects (per section 3.3) as a pool
-# headroom for Task 2's re-linking of posts.json/users.json.
+# headroom for the expanded posts.json/users.json relationships.
 BANNER_QUERIES = [
     ("photography studio wide", "photography", 9),
     ("boutique clothing shop wide", "small-business", 8),
@@ -562,7 +562,7 @@ def build_manifest(s3, bucket):
         "Only 15 users in the current users.json carry a creator/small_business "
         "persona_id (p03_photographer_freelance=6, p05_shop_owner_clothes=5, "
         "p07_fnb_owner=4). 25 banner objects are provisioned per section 3.3 as "
-        "pool headroom for Task 2's re-linking of posts.json/users.json."
+        "pool headroom for the expanded posts.json/users.json relationships."
     )
 
     manifest = {

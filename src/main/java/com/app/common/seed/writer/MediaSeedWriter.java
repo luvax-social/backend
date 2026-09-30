@@ -32,16 +32,16 @@ import lombok.extern.slf4j.Slf4j;
  * Seeds {@code media_assets} from {@code media_manifest.json}.
  *
  * <p>The manifest records one physical R2 object per entry (the {@code
- * seed/library/{manifest_id}.{ext}} key uploaded once by Task 1), but every owner that references
- * that entry - a post author, or a user via {@code banner_media_ref} - needs its own {@code
- * media_assets} row, because {@code storage_key} is globally unique and the production write path
- * never lets two owners share a key. Avatars are the one exception: {@code users.avatar_url} is a
- * literal externally-hosted URL {@link UserSeedWriter} writes directly from {@code users.json}'s
- * {@code avatar_url} field, never touching R2 or this table, so this writer only ever collects
- * banner uses. This writer therefore inserts one row per (manifest entry, owner) <b>use</b>,
- * minting a fresh {@code users/{ownerId}/media/{randomUUID}.{ext}}-shaped key via {@link
- * MediaStorageKeyGenerator} for every row while reusing the manifest entry's single real {@code
- * cdn_url}, so every reader gets a working image without a duplicate upload.
+ * seed/library/{manifest_id}.{ext}} key uploaded by the media provisioning script), but every owner
+ * that references that entry - a post author, or a user via {@code banner_media_ref} - needs its
+ * own {@code media_assets} row, because {@code storage_key} is globally unique and the production
+ * write path never lets two owners share a key. Avatars are the one exception: {@code
+ * users.avatar_url} is a literal externally-hosted URL {@link UserSeedWriter} writes directly from
+ * {@code users.json}'s {@code avatar_url} field, never touching R2 or this table, so this writer
+ * only ever collects banner uses. This writer therefore inserts one row per (manifest entry, owner)
+ * <b>use</b>, minting a fresh {@code users/{ownerId}/media/{randomUUID}.{ext}}-shaped key via
+ * {@link MediaStorageKeyGenerator} for every row while reusing the manifest entry's single real
+ * {@code cdn_url}, so every reader gets a working image without a duplicate upload.
  *
  * <p><b>Composite-key convention</b>: the returned map is keyed by {@code manifestId + "::" +
  * ownerUserId} - the manifest entry's id, then the owner's generated {@code users.id} rendered via
