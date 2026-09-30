@@ -186,7 +186,20 @@ class GorseRebuildServiceImplTest {
 
         assertThat(run.getStatus()).isEqualTo(GorseRebuildStatus.FAILED);
         assertThat(run.getLastError()).contains("ClickHouse analytics schema is not ready");
+        assertThat(pauses).hasSize(120).containsOnly(1_000L);
         verify(gorsePurger, never()).purge();
+    }
+
+    @Test
+    void execute_analyticsBecomesReadyDuringPreflight_waitsAndCarriesOn() {
+        GorseRebuildRun run = newRun(GorseRebuildPhase.PREFLIGHT);
+        stubCatalogue();
+        when(clickHouse.isReady()).thenReturn(false, false, false, true);
+
+        service.execute(run);
+
+        assertThat(pauses).containsExactly(1_000L, 1_000L, 1_000L);
+        verify(gorsePurger).purge();
     }
 
     @Test

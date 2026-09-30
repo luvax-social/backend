@@ -55,6 +55,12 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
     // A Gorse 5xx or I/O failure is retried three times with these waits; a 4xx never is, since
     // repeating a malformed request cannot succeed.
     private static final long[] RETRY_BACKOFF_MILLIS = {2_000L, 4_000L, 8_000L};
+    // The run starts the moment the application is ready, while the ClickHouse schema gate is still
+    // checking its migrations in the background, which takes a few seconds even when nothing is
+    // left to apply. Preflight waits this long for it rather than failing a run that would have
+    // been fine a moment later; a ClickHouse that is really down still fails it.
+    private static final int SCHEMA_READY_POLLS = 120;
+    private static final long SCHEMA_READY_POLL_MILLIS = 1_000L;
     private static final int VERIFY_PAGE_SIZE = 1_000;
     private static final int VERIFY_FEEDBACK_SAMPLE = 20;
     private static final int EXAMPLE_LIMIT = 20;
@@ -203,10 +209,7 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
     // Checks everything the run depends on before it changes anything, so a run that cannot finish
     // ends here with the stores untouched.
     private void preflight(GorseRebuildRun run) {
-        if (!clickHouse.isReady()) {
-            throw new RebuildFailure(
-                    "the ClickHouse analytics schema is not ready, so the feedback cannot be read");
-        }
+        awaitSchemaReady();
         try {
             rateLimiter.executeSupplier(() -> gorseClient.listItems(null, 1));
         } catch (RestClientException e) {
@@ -225,6 +228,22 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
                             + ". Grant the missing privileges, then restart with the same token.");
         }
         advance(run, GorseRebuildPhase.PURGE);
+    }
+
+    private void awaitSchemaReady() {
+        for (int poll = 0; !clickHouse.isReady(); poll++) {
+            if (poll == SCHEMA_READY_POLLS) {
+                throw new RebuildFailure(
+                        "the ClickHouse analytics schema is not ready, so the feedback cannot be"
+                                + " read");
+            }
+            try {
+                pause.sleep(SCHEMA_READY_POLL_MILLIS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new RebuildFailure("interrupted while waiting for the analytics schema");
+            }
+        }
     }
 
     private void purge(GorseRebuildRun run) {
