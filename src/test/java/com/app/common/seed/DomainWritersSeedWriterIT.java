@@ -40,6 +40,7 @@ import com.app.common.seed.writer.UserSeedWriter;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.notification.dto.response.UnseenCountResponse;
 import com.app.modules.notification.service.NotificationService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves {@link StorySeedWriter}, {@link MessageSeedWriter}, {@link NotificationSeedWriter}, {@link
@@ -57,7 +58,8 @@ import com.app.modules.notification.service.NotificationService;
 class DomainWritersSeedWriterIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

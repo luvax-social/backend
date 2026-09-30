@@ -33,7 +33,7 @@ No `webEnvironment` — the default (`MOCK`) is sufficient. Flyway runs on conte
 
 ```java
 @Container @ServiceConnection
-static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine");
 
 @Container
 static GenericContainer<?> redis =
@@ -91,7 +91,7 @@ Always — `./mvnw test` includes it. Run explicitly after:
 - [ ] File is `src/test/java/com/app/ApplicationTests.java` — one file only
 - [ ] `@SpringBootTest` with no `webEnvironment` (default MOCK)
 - [ ] `@Testcontainers` present
-- [ ] PostgreSQL `postgres:16-alpine` with `@ServiceConnection`
+- [ ] PostgreSQL `postgres:18-alpine` with `@ServiceConnection`
 - [ ] Redis `redis:7-alpine` with `@DynamicPropertySource`
 - [ ] All required env vars supplied in `@DynamicPropertySource`
 - [ ] `@MockitoBean MailService` present

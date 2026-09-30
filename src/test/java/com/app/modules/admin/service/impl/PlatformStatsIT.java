@@ -29,6 +29,7 @@ import com.app.modules.admin.service.PlatformStatsCollectionService;
 import com.app.modules.admin.service.PlatformStatsRollupService;
 import com.app.modules.admin.service.StatsBuckets;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Exercises collection, roll-up and retention against real SQL.
@@ -50,7 +51,8 @@ class PlatformStatsIT {
     private static final Duration INTERVAL = Duration.ofMinutes(30);
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

@@ -23,6 +23,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.mail.service.MailService;
 import com.app.modules.post.service.PostLikeService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves liking and unliking a post each record an outbox event carrying the identifiers the live
@@ -42,7 +43,8 @@ import com.app.modules.post.service.PostLikeService;
 class PostLikeEventPublishingIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

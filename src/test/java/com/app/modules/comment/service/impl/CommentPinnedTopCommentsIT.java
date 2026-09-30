@@ -29,6 +29,7 @@ import com.app.common.response.CursorPageResponse;
 import com.app.modules.comment.dto.response.CommentResponse;
 import com.app.modules.comment.service.CommentService;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Covers the pinned top-comments block end to end against real PostgreSQL: which comments are
@@ -52,7 +53,8 @@ import com.app.modules.mail.service.MailService;
 class CommentPinnedTopCommentsIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

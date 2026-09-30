@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- Integration tests now run against PostgreSQL 18, the production major, through one shared image constant instead of PostgreSQL 16 named in each test class.
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added

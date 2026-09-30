@@ -29,6 +29,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.auth.service.TokenService;
 import com.app.modules.users.repository.UserRepository;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves that replaying a consumed refresh token durably revokes the whole token family.
@@ -58,7 +59,8 @@ class RefreshTokenReplayRevocationIT {
     private static final String REFRESH_COOKIE = "luvax_refresh";
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

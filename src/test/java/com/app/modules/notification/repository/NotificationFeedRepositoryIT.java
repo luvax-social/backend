@@ -32,6 +32,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.app.modules.notification.entity.enums.NotificationFilter;
 import com.app.modules.notification.repository.NotificationFeedRepository.FeedRow;
 import com.app.modules.notification.repository.NotificationFeedRepository.Key;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * The feed reads against PostgreSQL: the visibility predicate every read shares, the bounded unseen
@@ -50,7 +51,8 @@ import com.app.modules.notification.repository.NotificationFeedRepository.Key;
 class NotificationFeedRepositoryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private static final OffsetDateTime SHARED =
             OffsetDateTime.of(2026, 5, 1, 12, 0, 0, 0, ZoneOffset.UTC);

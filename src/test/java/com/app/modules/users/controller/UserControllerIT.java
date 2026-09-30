@@ -28,6 +28,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.modules.auth.service.TokenService;
 import com.app.modules.users.entity.User;
 import com.app.modules.users.repository.UserRepository;
+import com.app.testsupport.TestContainerImages;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -48,7 +49,8 @@ class UserControllerIT {
     private static final String TEST_JWT_AUDIENCE = "App";
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

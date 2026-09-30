@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.users.repository.UserRepository;
+import com.app.testsupport.TestContainerImages;
 
 @DataJpaTest(
         properties = {
@@ -30,7 +31,8 @@ import com.app.modules.users.repository.UserRepository;
 class UserSummaryServiceIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private final UserRepository userRepository;
     private final JdbcClient jdbcClient;

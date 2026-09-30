@@ -35,6 +35,7 @@ import com.app.common.response.CursorPageResponse;
 import com.app.common.response.UserListItemResponse;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.users.service.UserSearchService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves user search excludes self, non-active, deleted, and blocked accounts (in either direction
@@ -60,7 +61,8 @@ import com.app.modules.users.service.UserSearchService;
 class UserSearchIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

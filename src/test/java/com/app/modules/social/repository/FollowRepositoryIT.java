@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.social.entity.Follow;
 import com.app.modules.social.enums.FollowStatus;
+import com.app.testsupport.TestContainerImages;
 
 @DataJpaTest(
         properties = {
@@ -30,7 +31,8 @@ import com.app.modules.social.enums.FollowStatus;
 class FollowRepositoryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private final FollowRepository followRepository;
     private final BlockRepository blockRepository;

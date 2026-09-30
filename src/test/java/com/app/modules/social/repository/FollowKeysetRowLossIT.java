@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.social.entity.Follow;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Guards against keyset row loss when accepted follows share a boundary {@code created_at}. Pages
@@ -38,7 +39,8 @@ import com.app.modules.social.entity.Follow;
 class FollowKeysetRowLossIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private static final OffsetDateTime SHARED_INSTANT =
             OffsetDateTime.of(2026, 1, 1, 12, 0, 0, 0, ZoneOffset.UTC);

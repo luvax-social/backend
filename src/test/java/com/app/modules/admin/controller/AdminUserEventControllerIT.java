@@ -34,6 +34,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -50,7 +51,8 @@ class AdminUserEventControllerIT {
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

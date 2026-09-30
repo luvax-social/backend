@@ -18,6 +18,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.app.testsupport.TestContainerImages;
+
 /**
  * The in-feed story surface draws from followed accounts and suggested ones alike; it must not
  * widen who may see a story.
@@ -35,7 +37,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class StoryDiscoveryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Autowired private StoryRepository storyRepository;
     @Autowired private JdbcClient jdbcClient;

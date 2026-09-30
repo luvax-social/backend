@@ -38,6 +38,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * End-to-end coverage of the warning and strike ladder.
@@ -60,7 +61,8 @@ import com.app.modules.mail.service.MailService;
 class AdminDisciplineControllerIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

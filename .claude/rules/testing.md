@@ -42,7 +42,7 @@ Maven Surefire includes `**/*Test.java`, `**/*Tests.java`, `**/*IT.java`. Never 
 **Mock annotation:** use `@MockitoBean` (Spring Boot 4.x, `org.springframework.test.context.bean.override.mockito`). Never use legacy `@MockBean`.
 
 **Testcontainers images (enforced):**
-- PostgreSQL: `postgres:16-alpine` with `@Container @ServiceConnection`
+- PostgreSQL: `TestContainerImages.POSTGRES` (`postgres:18-alpine`, the production major) with `@Container @ServiceConnection`; every image comes from `com.app.testsupport.TestContainerImages`, never a literal in a test class
 - Redis: `redis:7-alpine` with `@Container` + `@DynamicPropertySource`
 
 **No shared base class.** Each test class declares its own containers and `@DynamicPropertySource`. Container fields must be `static`.

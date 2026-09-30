@@ -18,6 +18,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.app.testsupport.TestContainerImages;
+
 @DataJpaTest(
         properties = {
             "spring.docker.compose.enabled=false",
@@ -29,7 +31,8 @@ class UserHashtagAffinityRepositoryIT {
     private static final long HALF_LIFE_SECONDS = 30L * 86_400L;
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Autowired private UserHashtagAffinityRepository affinityRepository;
     @Autowired private JdbcClient jdbcClient;

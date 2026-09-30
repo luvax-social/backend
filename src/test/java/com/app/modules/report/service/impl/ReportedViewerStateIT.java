@@ -31,6 +31,7 @@ import com.app.modules.mail.service.MailService;
 import com.app.modules.post.service.PostService;
 import com.app.modules.post.validation.PostTypeFilter;
 import com.app.modules.users.service.UserService;
+import com.app.testsupport.TestContainerImages;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -58,7 +59,8 @@ import tools.jackson.databind.ObjectMapper;
 class ReportedViewerStateIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

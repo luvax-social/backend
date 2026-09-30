@@ -25,6 +25,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.app.common.outbox.entity.OutboxEvent;
 import com.app.common.outbox.enums.OutboxEventStatus;
 import com.app.common.outbox.model.DomainEventEnvelope;
+import com.app.testsupport.TestContainerImages;
 
 @DataJpaTest(
         properties = {
@@ -35,7 +36,8 @@ import com.app.common.outbox.model.DomainEventEnvelope;
 class OutboxEventRepositoryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Autowired private OutboxEventRepository outboxEventRepository;
     @Autowired private EntityManager entityManager;

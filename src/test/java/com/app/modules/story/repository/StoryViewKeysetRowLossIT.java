@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.story.entity.StoryView;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Guards against keyset row loss when story views share a boundary {@code viewed_at}. Pages with a
@@ -37,7 +38,8 @@ import com.app.modules.story.entity.StoryView;
 class StoryViewKeysetRowLossIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private static final OffsetDateTime SHARED_INSTANT =
             OffsetDateTime.of(2026, 1, 1, 12, 0, 0, 0, ZoneOffset.UTC);

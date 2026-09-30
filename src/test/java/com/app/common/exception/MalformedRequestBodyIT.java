@@ -29,6 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Reproduces the audit's F-3.16-a defect over HTTP: a malformed request body must return 400, not
@@ -56,7 +57,8 @@ import com.app.modules.mail.service.MailService;
 class MalformedRequestBodyIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

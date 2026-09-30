@@ -19,6 +19,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.auth.messaging.AuthMailEventConsumer;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves {@code application-seed.yml} actually overrides {@code application-dev.yml}'s consumer
@@ -49,7 +50,8 @@ import com.app.modules.mail.service.MailService;
 class SeedProfileConsumerOverrideIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =
