@@ -57,8 +57,9 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
     private static final long[] RETRY_BACKOFF_MILLIS = {2_000L, 4_000L, 8_000L};
     // The run starts the moment the application is ready, while the ClickHouse schema gate is still
     // checking its migrations in the background, which takes a few seconds even when nothing is
-    // left to apply. Preflight waits this long for it rather than failing a run that would have
-    // been fine a moment later; a ClickHouse that is really down still fails it.
+    // left to apply. A run waits this long for it before doing anything, at whatever phase it
+    // starts or resumes in, rather than failing a run that would have been fine a moment later; a
+    // ClickHouse that is really down still fails it.
     private static final int SCHEMA_READY_POLLS = 120;
     private static final long SCHEMA_READY_POLL_MILLIS = 1_000L;
     private static final int VERIFY_PAGE_SIZE = 1_000;
@@ -161,6 +162,7 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
             run.setLastError(null);
             run.setFinishedAt(null);
             runs.save(run);
+            awaitSchemaReady();
             while (run.getPhase() != GorseRebuildPhase.DONE) {
                 metrics.entered(run.getPhase());
                 // Held from the first phase that changes anything until the end, so no live
@@ -209,7 +211,6 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
     // Checks everything the run depends on before it changes anything, so a run that cannot finish
     // ends here with the stores untouched.
     private void preflight(GorseRebuildRun run) {
-        awaitSchemaReady();
         try {
             rateLimiter.executeSupplier(() -> gorseClient.listItems(null, 1));
         } catch (RestClientException e) {
