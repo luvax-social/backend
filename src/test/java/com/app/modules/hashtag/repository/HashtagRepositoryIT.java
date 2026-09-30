@@ -200,6 +200,32 @@ class HashtagRepositoryIT {
         assertThat(countTrending(kept)).isEqualTo(1);
     }
 
+    @Test
+    void findNamesByPostIds_manyPosts_groupsNamesPerPostOrderedByNameWithNoStatusFilter() {
+        UUID author = insertUser();
+        UUID tagged = insertPost(author);
+        UUID otherTagged = insertPost(author);
+        UUID untagged = insertPost(author);
+        link(tagged, insertHashtag("bulkbeta", HashtagStatus.ACTIVE));
+        link(tagged, insertHashtag("bulkalpha", HashtagStatus.ACTIVE));
+        link(tagged, insertHashtag("bulkbanned", HashtagStatus.BANNED));
+        link(otherTagged, insertHashtag("bulkzeta", HashtagStatus.ACTIVE));
+
+        List<PostHashtagNameProjection> rows =
+                hashtagRepository.findNamesByPostIds(List.of(tagged, otherTagged, untagged));
+
+        assertThat(rows.stream().filter(r -> r.getPostId().equals(tagged)).map(r -> r.getName()))
+                .containsExactly("bulkalpha", "bulkbanned", "bulkbeta");
+        assertThat(
+                        rows.stream()
+                                .filter(r -> r.getPostId().equals(otherTagged))
+                                .map(r -> r.getName()))
+                .containsExactly("bulkzeta");
+        assertThat(rows).noneMatch(r -> r.getPostId().equals(untagged));
+        assertThat(hashtagRepository.findNamesByPostId(tagged))
+                .containsExactly("bulkalpha", "bulkbanned", "bulkbeta");
+    }
+
     private UUID insertHashtag(String name, HashtagStatus status) {
         return insertHashtag(name, status, null);
     }
@@ -238,5 +264,40 @@ class HashtagRepositoryIT {
                 .param("hashtagId", hashtagId)
                 .query(Long.class)
                 .single();
+    }
+
+    private UUID insertUser() {
+        UUID id = UUID.randomUUID();
+        String username = "bulk_" + id.toString().substring(0, 8);
+        jdbcClient
+                .sql(
+                        "INSERT INTO users (id, username, email, role, status, is_private,"
+                                + " is_verified) VALUES (:id, :username, :email, 'user', 'active',"
+                                + " FALSE, TRUE)")
+                .param("id", id)
+                .param("username", username)
+                .param("email", username + "@test.local")
+                .update();
+        return id;
+    }
+
+    private UUID insertPost(UUID author) {
+        UUID id = UUID.randomUUID();
+        jdbcClient
+                .sql(
+                        "INSERT INTO posts (id, user_id, caption, post_type, status) VALUES"
+                                + " (:id, :author, 'caption', 'text', 'published')")
+                .param("id", id)
+                .param("author", author)
+                .update();
+        return id;
+    }
+
+    private void link(UUID postId, UUID hashtagId) {
+        jdbcClient
+                .sql("INSERT INTO post_hashtags (post_id, hashtag_id) VALUES (:post, :tag)")
+                .param("post", postId)
+                .param("tag", hashtagId)
+                .update();
     }
 }

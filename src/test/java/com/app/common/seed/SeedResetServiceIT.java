@@ -2,6 +2,11 @@ package com.app.common.seed;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;
@@ -15,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
@@ -22,11 +28,13 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.app.common.analytics.migration.AnalyticsSchemaGate;
 import com.app.common.config.rabbit.RabbitMqTopologyConfig;
 import com.app.common.seed.reset.SeedResetService;
 import com.app.modules.hashtag.search.HashtagDocument;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.post.search.PostDocument;
+import com.app.testsupport.ClickHouseTestSupport;
 import com.app.testsupport.TestContainerImages;
 
 /**
@@ -53,6 +61,8 @@ import com.app.testsupport.TestContainerImages;
 @Testcontainers
 class SeedResetServiceIT {
 
+    static final ClickHouseContainer clickhouse = ClickHouseTestSupport.startProvisioned();
+
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres =
             new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
@@ -73,6 +83,7 @@ class SeedResetServiceIT {
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry registry) {
+        ClickHouseTestSupport.register(registry, clickhouse);
         // SeedResetService injects these two directly with @Value, which resolves eagerly and
         // fails outright on an unset placeholder; @ServiceConnection wires the real DataSource
         // through a different mechanism and never sets these two property names itself.
@@ -115,6 +126,7 @@ class SeedResetServiceIT {
     @Autowired private SeedResetService seedResetService;
     @Autowired private RabbitTemplate rabbitTemplate;
     @Autowired private ElasticsearchOperations elasticsearchOperations;
+    @Autowired private AnalyticsSchemaGate analyticsSchemaGate;
 
     @Test
     void reset_truncatesDomainTablesButPreservesExcludedConfigTables() {
@@ -137,6 +149,25 @@ class SeedResetServiceIT {
         assertThat(countRows("system_settings")).isPositive();
         assertThat(countRows("feature_flags")).isPositive();
         assertThat(countRows("flyway_schema_history")).isPositive();
+    }
+
+    @Test
+    void reset_keepsTheRecordOfGorseRebuildRuns() {
+        jdbcTemplate.update(
+                "INSERT INTO gorse_rebuild_runs (token, status, phase) VALUES"
+                        + " ('seed_reset_it_run', 'DONE', 'DONE')");
+        try {
+            seedResetService.reset();
+
+            assertThat(
+                            jdbcTemplate.queryForObject(
+                                    "SELECT COUNT(*) FROM gorse_rebuild_runs WHERE token ="
+                                            + " 'seed_reset_it_run'",
+                                    Integer.class))
+                    .isEqualTo(1);
+        } finally {
+            jdbcTemplate.update("DELETE FROM gorse_rebuild_runs WHERE token = 'seed_reset_it_run'");
+        }
     }
 
     @Test
@@ -178,6 +209,43 @@ class SeedResetServiceIT {
         assertThat(hashtagIndex.exists()).isTrue();
         assertThat(elasticsearchOperations.exists("seed-reset-it-stray-post", PostDocument.class))
                 .isFalse();
+    }
+
+    @Test
+    void reset_truncatesTheAnalyticsTablesInClickHouse() throws Exception {
+        try (Connection connection = ClickHouseTestSupport.adminConnection(clickhouse);
+                Statement statement = connection.createStatement()) {
+            // The reset runs the schema migrations itself when they have not applied yet, so the
+            // tables need not exist before it; create them the same way it would.
+            analyticsSchemaGate.attempt();
+            statement.execute(
+                    "INSERT INTO luvax_analytics.platform_stats VALUES (now(), 'users_total', '',"
+                            + " 1, now64(6))");
+            statement.execute(
+                    "INSERT INTO luvax_analytics.user_events (user_id, event_type, created_at)"
+                            + " VALUES (generateUUIDv4(), 'search', now64(6))");
+            statement.execute(
+                    "INSERT INTO luvax_analytics.admin_actions (id, action_type, created_at,"
+                            + " row_version) VALUES (generateUUIDv4(), 'ban_user', now64(6), 1)");
+            assertThat(analyticsRows(statement)).containsExactly(1L, 1L, 1L);
+
+            seedResetService.reset();
+
+            assertThat(analyticsRows(statement)).containsExactly(0L, 0L, 0L);
+        }
+    }
+
+    private static long[] analyticsRows(Statement statement) throws SQLException {
+        long[] counts = new long[3];
+        String[] tables = {"platform_stats", "user_events", "admin_actions"};
+        for (int i = 0; i < tables.length; i++) {
+            try (ResultSet rs =
+                    statement.executeQuery("SELECT count() FROM luvax_analytics." + tables[i])) {
+                rs.next();
+                counts[i] = rs.getLong(1);
+            }
+        }
+        return counts;
     }
 
     private int countRows(String table) {

@@ -17,9 +17,9 @@ import lombok.Setter;
 @ConfigurationProperties(prefix = "app.recommendation")
 public class RecommendationProperties {
 
-    // Matches the horizon UserEventsPartitionJob and the seed pipeline already assume. A read
-    // older than this is invisible to the topup's second pass, which only degrades the pass to
-    // "show something read long ago" rather than failing - see DATA_RULES.md.
+    // Matches the affinity window and the span the seeded dataset covers. A read older than this
+    // is invisible to the topup's second pass, which only degrades the pass to "show something
+    // read long ago" rather than failing - see DATA_RULES.md.
     private Duration readSetWindow = Duration.ofDays(90);
 
     // Caps the read-set query's row count regardless of window size, so a very active account

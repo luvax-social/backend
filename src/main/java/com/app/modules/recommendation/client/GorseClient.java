@@ -1,10 +1,12 @@
 package com.app.modules.recommendation.client;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.app.modules.recommendation.client.dto.GorseFeedback;
 import com.app.modules.recommendation.client.dto.GorseItem;
+import com.app.modules.recommendation.client.dto.GorseItemPage;
 import com.app.modules.recommendation.client.dto.GorseScore;
 import com.app.modules.recommendation.client.dto.GorseUser;
 
@@ -112,4 +114,38 @@ public interface GorseClient {
      * @param feedback feedback rows in Gorse wire format
      */
     void insertFeedback(List<GorseFeedback> feedback);
+
+    /**
+     * Writes feedback rows, overwriting the value of a tuple Gorse already holds.
+     *
+     * <p>Unlike {@link #insertFeedback}, sending the same tuple twice leaves the same state: the
+     * stored value is replaced, not added to. That is what makes it the write for a rebuild, which
+     * sends each tuple's total and may repeat a batch after a crash without inflating anything.
+     * Verified against v0.5.11: 5.0 sent twice stayed 5.0, where {@code POST} would have made 10.0.
+     *
+     * @param feedback feedback rows in Gorse wire format, each carrying the tuple's total value
+     */
+    void upsertFeedback(List<GorseFeedback> feedback);
+
+    /**
+     * Reads one page of the item catalogue Gorse holds, hidden items included.
+     *
+     * @param cursor position returned by the previous page, or null or empty for the first
+     * @param n maximum number of items to return
+     * @return the page and the cursor of the next one; the cursor is empty after the last page
+     */
+    GorseItemPage listItems(String cursor, int n);
+
+    /**
+     * Reads one feedback tuple back from Gorse, for the rebuild's verification.
+     *
+     * <p>Answers empty for a tuple Gorse does not hold, which the single-tuple REST endpoint cannot
+     * do on v0.5.11 (it closes the connection instead), so it reads the user's list of that type.
+     *
+     * @param feedbackType the Gorse feedback type
+     * @param userId the user
+     * @param itemId the item
+     * @return the stored tuple with its value, or empty when Gorse holds none
+     */
+    Optional<GorseFeedback> getFeedback(String feedbackType, String userId, String itemId);
 }

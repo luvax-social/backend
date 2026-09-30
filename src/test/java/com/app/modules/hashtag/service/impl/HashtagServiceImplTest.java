@@ -30,6 +30,7 @@ import com.app.modules.hashtag.entity.PostHashtag;
 import com.app.modules.hashtag.entity.PostHashtagId;
 import com.app.modules.hashtag.repository.HashtagIndexProjection;
 import com.app.modules.hashtag.repository.HashtagRepository;
+import com.app.modules.hashtag.repository.PostHashtagNameProjection;
 import com.app.modules.hashtag.repository.PostHashtagRepository;
 import com.app.modules.hashtag.service.HashtagIndexEventPublisher;
 
@@ -276,6 +277,37 @@ class HashtagServiceImplTest {
         assertThat(service.getVisibleHashtagsForPosts(List.of())).isEmpty();
 
         verifyNoInteractions(postHashtagRepository);
+    }
+
+    @Test
+    void getHashtagNamesForPosts_emptyInput_returnsEmptyWithoutQuerying() {
+        assertThat(service.getHashtagNamesForPosts(List.of())).isEmpty();
+
+        verifyNoInteractions(hashtagRepository);
+    }
+
+    @Test
+    void getHashtagNamesForPosts_rowsOfSeveralPosts_areGroupedPerPostKeepingTheirOrder() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        // Built before stubbing, because creating a mock inside a thenReturn argument list would
+        // start a second stubbing while the first is unfinished.
+        List<PostHashtagNameProjection> rows =
+                List.of(named(first, "alpha"), named(second, "zeta"), named(first, "beta"));
+        when(hashtagRepository.findNamesByPostIds(List.of(first, second))).thenReturn(rows);
+
+        Map<UUID, List<String>> names = service.getHashtagNamesForPosts(List.of(first, second));
+
+        assertThat(names)
+                .containsEntry(first, List.of("alpha", "beta"))
+                .containsEntry(second, List.of("zeta"));
+    }
+
+    private static PostHashtagNameProjection named(UUID postId, String name) {
+        PostHashtagNameProjection row = org.mockito.Mockito.mock(PostHashtagNameProjection.class);
+        when(row.getPostId()).thenReturn(postId);
+        when(row.getName()).thenReturn(name);
+        return row;
     }
 
     private static HashtagIndexProjection projection(UUID id, int postCount) {

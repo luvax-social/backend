@@ -32,6 +32,7 @@
         <spring-cloud.version>2025.1.1</spring-cloud.version>
         <testcontainers.version>1.21.4</testcontainers.version>
         <mapstruct.version>1.6.3</mapstruct.version>
+        <clickhouse-java.version>0.10.0</clickhouse-java.version>
         <aws-sdk.version>2.25.60</aws-sdk.version>
         <sonar.organization>zentech-graduation</sonar.organization>
         <sonar.projectKey>zentech-graduation_luvax</sonar.projectKey>
@@ -174,6 +175,15 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- ClickHouse analytics store. Only the V2 JDBC driver is depended on: it does not register
+             itself with DriverManager, so the pools name com.clickhouse.jdbc.Driver explicitly. The
+             umbrella clickhouse-jdbc artifact would also ship the V1 driver. httpclient5 resolves to
+             the version the Boot BOM manages. -->
+        <dependency>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>jdbc-v2</artifactId>
+            <version>${clickhouse-java.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
@@ -243,6 +253,11 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>elasticsearch</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>clickhouse</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -346,6 +361,11 @@
                              imported file, because a system property outranks spring.config.import,
                              so tests never seed while local development keeps SEED_DATA=true. -->
                         <SEED_DATA>false</SEED_DATA>
+                        <!-- The operator-triggered Gorse rebuild is started by an environment toggle, and
+                             application.yaml imports the developer's .env, so a local
+                             GORSE_REBUILD=true would purge and refill whatever Gorse the test context
+                             reaches. Pinned off for the same reason as SEED_DATA. -->
+                        <GORSE_REBUILD>false</GORSE_REBUILD>
                         <!-- application-dev.yml defaults app.mail.transport to resend via APP_MAIL_TRANSPORT,
                              matching production, so local mail reaches the real provider unless a developer
                              opts out. Without this pin, every @SpringBootTest/*IT in the suite would inherit
@@ -360,6 +380,12 @@
                              property look non-absent to ApplicationContextRunner tests that assert on its
                              absence. -->
                         <APP_MAIL_TRANSPORT>noop</APP_MAIL_TRANSPORT>
+                        <!-- The application defaults analytics on, so a test that loads the full context
+                             would otherwise try to reach a ClickHouse on the developer's machine.
+                             Pinned as the placeholder's input key, like APP_MAIL_TRANSPORT above; a test
+                             that needs ClickHouse sets app.analytics.enabled=true through
+                             @DynamicPropertySource, which outranks this. -->
+                        <ANALYTICS_ENABLED>false</ANALYTICS_ENABLED>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

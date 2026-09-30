@@ -1,27 +1,24 @@
 package com.app.common.seed.reset;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.IndexOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import com.app.common.analytics.AnalyticsStoreTruncator;
 import com.app.modules.hashtag.search.HashtagDocument;
 import com.app.modules.post.search.PostDocument;
+import com.app.modules.recommendation.client.GorsePurgeException;
+import com.app.modules.recommendation.client.GorsePurger;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,22 +41,14 @@ import lombok.extern.slf4j.Slf4j;
  * not domain data), {@code notification_type_configs}/{@code moderation_action_configs}/ {@code
  * report_reason_configs} (enum display metadata owned by Flyway, V18), {@code system_settings}
  * (operational config, not seed content), {@code feature_flags} (operational toggles, not seed
- * content). A future contributor adding a new reference/config table should add it here.
+ * content), {@code gorse_rebuild_runs} (a record of operator actions, not seed content). A future
+ * contributor adding a new reference/config table should add it here.
  */
 @Slf4j
 @Service
 @Profile("seed & (dev | prod)")
 @RequiredArgsConstructor
 public class SeedResetService {
-
-    // Matches the last path segment of a PostgreSQL JDBC URL, e.g. ".../luvax" or
-    // ".../luvax?stringtype=unspecified", so the Gorse sibling database's own URL can be derived
-    // without a second configured datasource.
-    private static final Pattern JDBC_URL_DATABASE_NAME = Pattern.compile("/([^/?]+)(\\?.*)?$");
-    private static final String GORSE_DATABASE_NAME = "gorse";
-    private static final String[] GORSE_TABLES = {
-        "feedback", "items", "users", "documents", "values", "time_series_points", "message"
-    };
 
     private final JdbcTemplate jdbc;
     // An ObjectProvider, not a direct ConnectionFactory, because plenty of dev-profile test
@@ -73,12 +62,10 @@ public class SeedResetService {
     private final ObjectProvider<ConnectionFactory> connectionFactoryProvider;
     private final List<Queue> declaredQueues;
     private final ElasticsearchOperations elasticsearchOperations;
+    // An ObjectProvider because the truncator exists only when app.analytics.enabled is true.
+    private final ObjectProvider<AnalyticsStoreTruncator> analyticsTruncatorProvider;
 
-    @Value("${spring.datasource.username}")
-    private String datasourceUsername;
-
-    @Value("${spring.datasource.password}")
-    private String datasourcePassword;
+    private final GorsePurger gorsePurger;
 
     // Verified against a live `\dt` on 2026-08-25: every name below matches the running schema
     // exactly, no renames since database/schema.sql was last regenerated.
@@ -96,7 +83,6 @@ public class SeedResetService {
         "post_categories",
         "post_user_tags",
         "post_edit_history",
-        "post_interaction_scores",
         "comments",
         "messages",
         "conversation_participants",
@@ -110,7 +96,6 @@ public class SeedResetService {
         "admin_actions",
         "user_warnings",
         "user_strikes",
-        "user_similarity",
         "user_interests",
         "push_tokens",
         "refresh_tokens",
@@ -126,27 +111,26 @@ public class SeedResetService {
         "media_assets",
         "processed_messages",
         "outbox_events",
-        "platform_stats",
         "users"
     };
 
     /**
-     * Truncates every seedable table listed in {@link #TRUNCATE_ORDER}, plus every declared {@code
-     * user_events} partition, so a fresh seed run starts from an empty domain dataset.
+     * Truncates every seedable table listed in {@link #TRUNCATE_ORDER}, so a fresh seed run starts
+     * from an empty domain dataset.
      *
      * <p>Never truncates the config/reference tables documented in this class's Javadoc, and never
      * touches {@code flyway_schema_history}. FK checks are disabled only for the duration of the
      * wipe, since {@code TRUNCATE ... CASCADE} in dependency order would otherwise still fail on
      * tables with circular or forward references.
      *
-     * <p>The entire sequence (disabling FK checks, every {@code TRUNCATE}, partition discovery, and
-     * restoring FK checks) runs inside a single {@link
-     * org.springframework.jdbc.core.ConnectionCallback} so every statement is provably issued on
-     * the same physical connection. A pooled HikariCP connection only resets a small fixed set of
-     * session properties on return to the pool - {@code session_replication_role} is not one of
-     * them - so splitting this sequence across separate {@code JdbcTemplate} calls could let {@code
-     * 'origin'} land on a different connection than the one that set {@code 'replica'}, leaving a
-     * pooled connection permanently in trigger-disabled mode for whatever borrows it next.
+     * <p>The entire sequence (disabling FK checks, every {@code TRUNCATE}, and restoring FK checks)
+     * runs inside a single {@link org.springframework.jdbc.core.ConnectionCallback} so every
+     * statement is provably issued on the same physical connection. A pooled HikariCP connection
+     * only resets a small fixed set of session properties on return to the pool - {@code
+     * session_replication_role} is not one of them - so splitting this sequence across separate
+     * {@code JdbcTemplate} calls could let {@code 'origin'} land on a different connection than the
+     * one that set {@code 'replica'}, leaving a pooled connection permanently in trigger-disabled
+     * mode for whatever borrows it next.
      */
     public void reset() {
         // Purged first, and in this order, so a message already in flight when the purge starts
@@ -158,6 +142,10 @@ public class SeedResetService {
         purgeBrokerQueues();
         resetSearchIndexes();
         purgeGorse();
+        // After the queue purge, so no analytics message still in flight can refill a table the
+        // moment it is emptied, and before the PostgreSQL wipe, so a failure here leaves the
+        // domain data intact instead of a reseed whose analytics quietly disagree with it.
+        truncateAnalytics();
 
         jdbc.execute(
                 (Connection connection) -> {
@@ -168,7 +156,6 @@ public class SeedResetService {
                             for (String table : TRUNCATE_ORDER) {
                                 statement.execute("TRUNCATE TABLE " + table + " CASCADE");
                             }
-                            truncateUserEventsPartitions(statement);
                         } finally {
                             statement.execute("SET session_replication_role = 'origin'");
                         }
@@ -176,6 +163,15 @@ public class SeedResetService {
                     return null;
                 });
         log.info("[seed] reset complete: {} tables truncated", TRUNCATE_ORDER.length);
+    }
+
+    private void truncateAnalytics() {
+        AnalyticsStoreTruncator truncator = analyticsTruncatorProvider.getIfAvailable();
+        if (truncator == null) {
+            log.warn("[seed] reset: analytics are disabled, no ClickHouse tables to truncate");
+            return;
+        }
+        truncator.truncateAll();
     }
 
     // Purges every queue RabbitMqTopologyConfig (and any module-owned binding config) declares as
@@ -235,62 +231,14 @@ public class SeedResetService {
         }
     }
 
-    // Gorse's GorseClient has no bulk-delete operation - upsertUsers/upsertItems/insertFeedback are
-    // the only write paths the production client exposes, and Gorse's own REST API's /api/purge
-    // endpoint (confirmed by direct request) does not accept this deployment's configured
-    // credentials. Gorse's actual storage is Postgres, though: GORSE_DATA_STORE in
-    // docker-compose.yaml points gorse-in-one at a sibling database named "gorse" on the same
-    // Postgres server the application uses. Truncating that database's own tables directly is the
-    // same operation Gorse's own purge would perform, reached the way the application's own reset
-    // reaches its tables, on a plain one-shot JDBC connection since no DataSource bean for a
-    // second database is configured.
+    // The truncation itself lives in GorsePurger, shared with the operator-triggered rebuild, which
+    // treats a failure as fatal. A reset only warns, as it always has: Gorse is a derived store and
+    // a seed run against a stack without one should still complete.
     private void purgeGorse() {
-        // Derived from the live connection's own URL, never from the spring.datasource.url
-        // property. Testcontainers' @ServiceConnection contributes a ConnectionDetails bean and
-        // does not override that property, so in an integration-test context the property still
-        // names the developer's real local database while the actual connection points at the
-        // container. Reading the property here truncated the developer's real Gorse store every
-        // time the seed integration tests ran.
-        String applicationUrl;
-        try (Connection appConnection = jdbc.getDataSource().getConnection()) {
-            applicationUrl = appConnection.getMetaData().getURL();
-        } catch (SQLException | NullPointerException e) {
-            log.warn(
-                    "[seed] reset: could not resolve the live datasource URL, skipping Gorse purge");
-            return;
-        }
-        String gorseUrl =
-                JDBC_URL_DATABASE_NAME
-                        .matcher(applicationUrl)
-                        .replaceFirst("/" + GORSE_DATABASE_NAME);
-        try (Connection connection =
-                        DriverManager.getConnection(
-                                gorseUrl, datasourceUsername, datasourcePassword);
-                Statement statement = connection.createStatement()) {
-            for (String table : GORSE_TABLES) {
-                statement.execute("TRUNCATE TABLE " + table + " CASCADE");
-            }
-            log.info("[seed] reset: {} Gorse tables truncated", GORSE_TABLES.length);
-        } catch (SQLException e) {
+        try {
+            gorsePurger.purge();
+        } catch (GorsePurgeException e) {
             log.warn("[seed] reset: could not purge Gorse's database: {}", e.getMessage());
         }
-    }
-
-    private void truncateUserEventsPartitions(Statement statement) throws SQLException {
-        List<String> partitions = new ArrayList<>();
-        try (ResultSet rs =
-                statement.executeQuery(
-                        "SELECT c.relname FROM pg_inherits i"
-                                + " JOIN pg_class c ON c.oid = i.inhrelid"
-                                + " JOIN pg_class p ON p.oid = i.inhparent"
-                                + " WHERE p.relname = 'user_events'")) {
-            while (rs.next()) {
-                partitions.add(rs.getString(1));
-            }
-        }
-        for (String partition : partitions) {
-            statement.execute("TRUNCATE TABLE " + partition);
-        }
-        statement.execute("TRUNCATE TABLE user_events_default");
     }
 }

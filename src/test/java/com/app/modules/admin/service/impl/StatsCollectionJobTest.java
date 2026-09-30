@@ -28,9 +28,7 @@ class StatsCollectionJobTest {
     @Mock private PlatformStatsCollectionService collectionService;
 
     private StatsCollectionJob jobStartedAt(String startedAt) {
-        StatsProperties properties =
-                new StatsProperties(
-                        true, HALF_HOUR, Duration.ofDays(30), Duration.ofDays(365), "0 20 3 * * *");
+        StatsProperties properties = new StatsProperties(true, HALF_HOUR, Duration.ofDays(30));
         return new StatsCollectionJob(collectionService, properties, Instant.parse(startedAt));
     }
 

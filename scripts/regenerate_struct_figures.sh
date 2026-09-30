@@ -191,10 +191,10 @@ section_rabbit() {
 
     echo "### Consumers"
     echo
-    echo "Classes carrying \`@RabbitListener\`: $(git grep -l '@RabbitListener' -- 'src/main/java' | wc -l | tr -d ' ')"
-    echo "Annotated methods: $(git grep -c '@RabbitListener' -- 'src/main/java' | awk -F: '{ s += $2 } END { print s }')"
+    echo "Classes carrying \`@RabbitListener\`: $(git grep -lE '^[[:space:]]*@RabbitListener' -- 'src/main/java' | wc -l | tr -d ' ')"
+    echo "Annotated methods: $(git grep -cE '^[[:space:]]*@RabbitListener' -- 'src/main/java' | awk -F: '{ s += $2 } END { print s }')"
     echo
-    git grep -l '@RabbitListener' -- 'src/main/java' | sed 's#^#- `#; s#$#`#'
+    git grep -lE '^[[:space:]]*@RabbitListener' -- 'src/main/java' | sed 's#^#- `#; s#$#`#'
     echo
 
     echo "### Files declaring bindings"

@@ -45,6 +45,16 @@ Maven Surefire includes `**/*Test.java`, `**/*Tests.java`, `**/*IT.java`. Never 
 - PostgreSQL: `TestContainerImages.POSTGRES` (`postgres:18-alpine`, the production major) with `@Container @ServiceConnection`; every image comes from `com.app.testsupport.TestContainerImages`, never a literal in a test class
 - Redis: `redis:7-alpine` with `@Container` + `@DynamicPropertySource`
 
+**ClickHouse tests (enforced):**
+- The image is `TestContainerImages.CLICKHOUSE` (`26.3.33.24`), and the container comes from `ClickHouseTestSupport.startProvisioned()`, held in a `static` field (not `@Container`).
+- `startProvisioned()` runs the production provisioning SQL, the body of the observability stack's `02-create-analytics.sh` kept as the test resource `src/test/resources/clickhouse/provisioning.sql`, so a test exercises the same users, profiles and grants production has.
+- `ProvisioningScriptParityTest` compares the resource with the script when the `observability/` checkout sits next to this repository and skips with a stated reason otherwise.
+- A Spring test registers the URL and credentials with `ClickHouseTestSupport.register(registry, container)` in its `@DynamicPropertySource`, and sets `app.analytics.enabled=true`.
+- A repository test that needs no Spring context uses `ClickHouseTestSupport.applyMigrations(container)` and `directOperations(container)`.
+- Surefire pins `ANALYTICS_ENABLED=false`, so no test can reach a developer's local ClickHouse unless it turns the tier on itself, and pins `GORSE_REBUILD=false`, so a local `.env` can never purge a test Gorse.
+- Wait for asynchronous delivery with a future completed by the consumer (the `@Primary` `ProcessedMessageService` wrapper in `AdminActionReplicationConsumerIT` is the pattern), never by sleeping or polling.
+- A test that pauses ClickHouse (`docker pause`) must use a client with a socket timeout, or a flush against the paused server blocks forever.
+
 **No shared base class.** Each test class declares its own containers and `@DynamicPropertySource`. Container fields must be `static`.
 
 **`@Transactional` must not appear on `@SpringBootTest` classes.** Committed transactions must be visible to assertions that query the DB directly.

@@ -116,4 +116,16 @@ public interface HashtagService {
      * @return hashtag names for the post; empty when it carries none
      */
     List<String> getHashtagNamesForPost(UUID postId);
+
+    /**
+     * Returns the hashtag names of many posts at once, each list ordered by name.
+     *
+     * <p>Applies exactly the rule of {@link #getHashtagNamesForPost}, so a bulk push of items to
+     * the recommender labels them the way the live sync does.
+     *
+     * @param postIds the posts to look up
+     * @return names grouped by post id; posts without a hashtag are absent, and empty input gives
+     *     an empty map
+     */
+    Map<UUID, List<String>> getHashtagNamesForPosts(Collection<UUID> postIds);
 }

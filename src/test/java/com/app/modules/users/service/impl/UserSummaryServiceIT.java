@@ -109,6 +109,16 @@ class UserSummaryServiceIT {
     }
 
     @Test
+    void exists_liveSoftDeletedAndUnknownAccounts_matchWhatTheForeignKeyWouldHaveAccepted() {
+        UUID live = insertUser("gina", "Gina", null, false, false);
+        UUID softDeleted = insertUser("hank", "Hank", null, false, true);
+
+        assertThat(service.exists(live)).isTrue();
+        assertThat(service.exists(softDeleted)).isTrue();
+        assertThat(service.exists(UUID.randomUUID())).isFalse();
+    }
+
+    @Test
     void findSummariesByIdIn_excludesDeleted() {
         UUID live = insertUser("erin", "Erin", null, false, false);
         UUID deleted = insertUser("frank", "Frank", null, false, true);

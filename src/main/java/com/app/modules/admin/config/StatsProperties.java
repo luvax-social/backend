@@ -6,28 +6,25 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Configuration for platform statistics collection and roll-up. Bound from {@code app.stats.*}.
+ * Configuration for platform statistics collection. Bound from {@code app.stats.*}.
  *
  * <ul>
- *   <li>{@code enabled}: whether the two scheduled jobs are registered at all. Defaults to true.
- *   <li>{@code interval}: bucket width for the fine-grained series, and the delay between
- *       collection passes. Buckets are aligned to the epoch, not to process start.
- *   <li>{@code fine-retention}: how long fine-grained buckets are kept before the daily job rolls
- *       them up into one row per metric per day and deletes them.
- *   <li>{@code daily-retention}: how long rolled-up daily rows are kept before deletion. There is
- *       no backfill, so a row deleted here is gone.
- *   <li>{@code rollup-cron}: when the daily roll-up and retention pass runs, in UTC.
+ *   <li>{@code enabled}: whether the scheduled collection job is registered at all. Defaults to
+ *       true.
+ *   <li>{@code interval}: bucket width, and the delay between collection passes. Buckets are
+ *       aligned to the epoch, not to process start.
+ *   <li>{@code half-hour-horizon}: how far back a series may be requested at half-hour width.
+ *       Nothing is deleted at this age: every half-hour bucket is kept, and the horizon only stops
+ *       a chart from asking for a year of half-hour points, which is 17,520 of them.
  * </ul>
  *
  * <p>A single application instance is assumed. No distributed scheduler lock exists in this
- * codebase, so two instances would each run both jobs. The composite primary key on {@code
- * platform_stats} together with {@code ON CONFLICT DO UPDATE} keeps that harmless rather than
- * duplicative, but it is an assumption to revisit before scaling out.
+ * codebase, so two instances would each collect every bucket. That is harmless rather than
+ * duplicative, because both collections describe the same bucket and the store keeps the one
+ * computed last, but it is an assumption to revisit before scaling out.
  */
 @ConfigurationProperties(prefix = "app.stats")
 public record StatsProperties(
         @DefaultValue("true") boolean enabled,
         @DefaultValue("PT30M") Duration interval,
-        @DefaultValue("P30D") Duration fineRetention,
-        @DefaultValue("P365D") Duration dailyRetention,
-        @DefaultValue("0 20 3 * * *") String rollupCron) {}
+        @DefaultValue("P30D") Duration halfHourHorizon) {}

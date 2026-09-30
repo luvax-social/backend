@@ -7,10 +7,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- The agent rules mirror now carries the same rule as the primary copy that branch, commit and pull request names must make sense to a reviewer.
+- The structure, testing and data-rule documents, and the recommendation guide, now describe the ClickHouse analytics tier: its tables, users, pools, failure model, schema runner, read routing and rollback script, and the operator runbook for the Gorse rebuild.
+- A notification now holds a real foreign key to the moderation decision behind it, cleared when that decision is deleted; existing dangling references are archived in `archived_notification_admin_action_orphans` and cleared by the migration.
+- The development seed now sends its audit rows, half-hour statistics buckets and behavioural events to ClickHouse through the outbox and the analytics consumers, and its reset (and `scripts/seed-dev-data.sh --reset`) truncates the three ClickHouse analytics tables, failing the run if it cannot.
+- The administrative activity log is read from ClickHouse and answers 503 ANALYTICS_UNAVAILABLE while ClickHouse cannot serve it, with its 30-day window and cursor unchanged.
+- The recommendation read-set and the behavioural event recorder now read and write ClickHouse: a ClickHouse failure degrades the For You topup to Gorse's results alone, and the recorder counts each dropped event by reason instead of only logging it.
+- Platform statistics are stored in ClickHouse and written through the outbox; `GET /api/v1/admin/stats/current` and `/timeseries` answer 503 `ANALYTICS_UNAVAILABLE` while the analytics store is down.
+- Daily statistics are computed from the half-hour buckets when a series is read, summing a flow and taking a gauge from the last bucket of the day, and the day in progress is never returned; a gauge dimension missing from the last bucket now reads as zero instead of keeping an earlier value.
+- The development seed writes 90 days of half-hour statistics buckets through the outbox, so the seeded series reaches ClickHouse through the same consumer as live collection.
+- The moderation audit log listing is now read from the ClickHouse replica and falls back to PostgreSQL when the replica is unavailable, under one cursor contract, so a page sequence continues across a switch; a new action can take a few seconds to appear in the list while the detail view still shows it at once.
 - Integration tests now run against PostgreSQL 18, the production major, through one shared image constant instead of PostgreSQL 16 named in each test class.
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
+- A rollback script, `scripts/rollback/phase2_postgres_rollback.sql`, restores the PostgreSQL schema from V133 to V126 and forgets V127 to V133, so the release that moved analytics to ClickHouse can be abandoned; a test proves the result matches a V126 database, that a second run changes nothing and that the migrations then apply again.
+- `GORSE_REBUILD_REQUESTS_PER_SECOND`, `GORSE_REBUILD_USER_BATCH_SIZE`, `GORSE_REBUILD_ITEM_BATCH_SIZE` and `GORSE_REBUILD_FEEDBACK_BATCH_SIZE` configuration properties.
+- An operator-triggered Gorse rebuild (`GORSE_REBUILD`, `GORSE_REBUILD_TOKEN`) purges Gorse's store, pushes every account and every post as an item (hidden when unpublished or deleted), replays the feedback the live pipeline accumulated from ClickHouse, and fails loudly if the catalogue then differs from PostgreSQL; a run is checkpointed in `gorse_rebuild_runs`, resumes after a crash with the same token, never repeats once finished, and pauses the feedback consumer while it runs.
+- RECOMMENDATION_CONSUMER_CONCURRENCY sets the number of recommendation feedback consumer threads (default 4), and a feedback message is returned to its queue while ClickHouse is unavailable instead of being retried or dead-lettered.
+- Behavioural events are stored in ClickHouse (luvax_analytics.user_events, kept 12 months), and the recommendation feedback consumer records each event there before it reaches Gorse, together with the feedback type and value it sent.
+- recommendation.user-event.imported.v1 stores a behavioural event in ClickHouse without sending it to Gorse, and the development seed imports its events that way; its queue, dead-letter queue and consumer start once the analytics schema is ready.
+- Hashtag affinity is now recomputed from the per-user contributions ClickHouse sums over the window, staged in PostgreSQL and joined to each post's hashtags, giving the same scores as the join over the former table.
+- `STATS_HALF_HOUR_HORIZON` configuration property, the furthest back a statistics series may be requested at half-hour width (default 30 days).
+- The moderation audit log is now replicated to ClickHouse through the outbox: each new audit row raises an event in its own transaction, and a database trigger raises one when PostgreSQL itself rewrites a row because an account it referenced was deleted, so the replica always converges on the newest state.
+- Analytics ingestion pauses while ClickHouse is unavailable: the analytics consumers stop when the `clickhouse` circuit breaker opens, so their messages wait in RabbitMQ instead of dead-lettering, and start again when it half-opens. `luvax_analytics_schema_ready`, `luvax_analytics_ingestion_running`, `luvax_analytics_user_events_dropped_total` and `luvax_analytics_audit_log_fallback_total` report its state.
+- ClickHouse connections enforce their socket timeout even after the pool has validated them, so a server that stops answering fails calls after the bound instead of blocking their callers.
+- A ClickHouse analytics store (`luvax_analytics`) with writer, reader, batch and migrator connection pools, a versioned schema runner that creates `user_events`, `admin_actions` and `platform_stats` at startup, and a `clickhouse` circuit breaker. The application starts and serves while ClickHouse is down, ClickHouse never reaches `/actuator/health`, and `ANALYTICS_ENABLED`, `ANALYTICS_CLICKHOUSE_URL` and the `ANALYTICS_CLICKHOUSE_*` credentials configure it.
 - OpenTelemetry trace and log export over OTLP, off by default (`OTLP_EXPORT_ENABLED`), with 100 percent sampling; JDBC, Redis and the Gorse and Turnstile HTTP clients are now traced, and application logs carry the real trace and span id.
 - The behavioural-event recorder and the mail dispatch executor now carry the caller's trace context onto their own worker thread, so a decoupled write joins the request's trace instead of starting an unrelated one.
 - One trace now spans the outbox: the request that wrote an event is restored as the parent of its broker send, so the send and every consumer descend from the originating request, while the publisher's own batch trace only links to it.
@@ -539,6 +561,10 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- A Gorse rebuild resumed after a restart now holds the feedback listener before it waits for the ClickHouse schema, so no live feedback is applied in the gap between the listeners starting and the run suspending them.
+- A Gorse rebuild resumed after a restart no longer fails in its feedback phase because the ClickHouse schema check has not finished; every run waits for it before doing anything.
+- A Gorse rebuild started with the application no longer fails its preflight because the ClickHouse schema check has not finished yet; it waits up to two minutes for it.
+- The structure figures script no longer counts comment mentions of the listener annotation as consumers, so it reports the real consumer count.
 - The local Postgres monitoring role and `pg_stat_statements` extension are now provisioned on every `docker compose up`, including against a Postgres volume that predates this change, instead of only on a fresh volume's first boot.
 - The local Docker Compose project name is now pinned, so `docker compose up -d` works from any invocation directory instead of depending on the caller happening to run it from a directory named `backend`.
 - Trace and log export over OTLP now actually reaches the collector; a dependency conflict between the exporter's HTTP client and the mail transport's HTTP client silently discarded every export attempt.
@@ -761,6 +787,9 @@ A conversation that already has messages in it is kept, because unfollowing some
 - Two integration tests that exercise the production profile or the seed reset path failed to start their context because their Postgres credentials were never supplied to the beans that read them directly, unrelated to and pre-existing before this change.
 
 ### Removed
+- The `post_interaction_scores` and `user_similarity` tables, which never had a writer or a reader; the migration refuses to drop them if either holds a row, and the reference schema is regenerated without them and without the tables the analytics move already dropped.
+- The PostgreSQL user_events table, its monthly partitions and the daily job that created them, replaced by the ClickHouse store.
+- The platform statistics roll-up job, the PostgreSQL `platform_stats` table and the `STATS_FINE_RETENTION`, `STATS_DAILY_RETENTION` and `STATS_ROLLUP_CRON` settings; every half-hour bucket is now kept.
 - `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/{id}/read`, and the `actor`, `entityType`, `entityId`, `postId` and `message` fields of notification list items; this is a breaking change that ships together with the matching frontend.
 - Direct messages no longer produce activity notifications; the retired `message.notification.queue` and its dead-letter queue are deleted from the broker at startup, and `MESSAGE_CONSUMER_ENABLED` is gone.
 - The redundant `is_read` notification column, whose value is fully carried by `read_at`, and three notification indexes superseded by the new feed indexes.

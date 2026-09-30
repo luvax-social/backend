@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
@@ -26,15 +27,23 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.app.common.analytics.impl.ClickHouseOperationsImpl;
+import com.app.common.analytics.migration.AnalyticsSchemaGate;
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
+import com.app.modules.recommendation.enums.UserEventType;
+import com.app.modules.recommendation.repository.UserEventAnalyticsRepository;
+import com.app.testsupport.ClickHouseTestSupport;
 import com.app.testsupport.TestContainerImages;
+
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -42,13 +51,20 @@ import com.app.testsupport.TestContainerImages;
             "spring.profiles.active=dev",
             "spring.docker.compose.enabled=false",
             "spring.autoconfigure.exclude="
-                    + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration"
+                    + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration",
+            "management.health.elasticsearch.enabled=false",
+            // A paused server accepts the connection and never answers, so the socket timeout is
+            // what turns the hang into a failure the endpoint can answer with a 503.
+            "app.analytics.clickhouse.reader.socket-timeout=PT1S",
+            "app.analytics.clickhouse.connection-timeout=PT1S"
         })
 @Testcontainers
 @AutoConfigureTestRestTemplate
 class AdminUserEventControllerIT {
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+
+    static final ClickHouseContainer clickhouse = ClickHouseTestSupport.startProvisioned();
 
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres =
@@ -60,6 +76,7 @@ class AdminUserEventControllerIT {
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry registry) {
+        ClickHouseTestSupport.register(registry, clickhouse);
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         registry.add("spring.data.redis.password", () -> "");
@@ -89,12 +106,29 @@ class AdminUserEventControllerIT {
     @Autowired private TestRestTemplate rest;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private JwtTokenProvider jwtTokenProvider;
+    @Autowired private UserEventAnalyticsRepository userEventAnalyticsRepository;
+    @Autowired private AnalyticsSchemaGate gate;
+    @Autowired private CircuitBreakerRegistry breakers;
 
     private record TestUser(UUID id, String token) {}
 
+    @BeforeEach
+    void startFromAHealthyStore() {
+        assertThat(gate.attempt()).isTrue();
+        breakers.circuitBreaker(ClickHouseOperationsImpl.CIRCUIT_BREAKER_NAME).reset();
+    }
+
     @AfterEach
-    void cleanup() {
-        jdbcTemplate.update("DELETE FROM user_events");
+    void cleanup() throws Exception {
+        try {
+            clickhouse.getDockerClient().unpauseContainerCmd(clickhouse.getContainerId()).exec();
+        } catch (RuntimeException notPaused) {
+            // The container is not paused when a test failed before pausing it.
+        }
+        try (var connection = ClickHouseTestSupport.adminConnection(clickhouse);
+                var statement = connection.createStatement()) {
+            statement.execute("TRUNCATE TABLE luvax_analytics.user_events");
+        }
         jdbcTemplate.update("DELETE FROM admin_actions");
         jdbcTemplate.update("DELETE FROM users");
     }
@@ -138,6 +172,41 @@ class AdminUserEventControllerIT {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(eventTypesOf(response)).containsExactly("search");
+    }
+
+    @Test
+    void listUserEvents_searchMetadata_comesBackAsTheMapTheResponseExposes() {
+        TestUser admin = createUser("evt_meta_admin", "admin");
+        TestUser subject = createUser("evt_meta_subject", "user");
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        userEventAnalyticsRepository.insertImported(
+                UUID.randomUUID(),
+                subject.id(),
+                UserEventType.SEARCH,
+                null,
+                null,
+                "{\"scope\":\"posts\",\"query\":\"sunset\"}",
+                now.minusDays(1));
+        insertEvent(subject.id(), "session_start", now.minusDays(2));
+
+        ResponseEntity<Map> response = query(admin, window(now.minusDays(7), now));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(contentOf(response).get(0).get("metadata"))
+                .isEqualTo(Map.of("scope", "posts", "query", "sunset"));
+        assertThat(contentOf(response).get(1).get("metadata")).isNull();
+    }
+
+    @Test
+    void listUserEvents_clickHouseDown_answersTheTypedServiceUnavailable() {
+        TestUser admin = createUser("evt_down_admin", "admin");
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+
+        clickhouse.getDockerClient().pauseContainerCmd(clickhouse.getContainerId()).exec();
+        ResponseEntity<Map> response = query(admin, window(now.minusDays(7), now));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(String.valueOf(response.getBody())).contains("ANALYTICS_UNAVAILABLE");
     }
 
     @Test
@@ -187,9 +256,10 @@ class AdminUserEventControllerIT {
     @Test
     void listUserEvents_cursorFromAnotherSurface_isRejected() {
         TestUser admin = createUser("evt_scope_admin", "admin");
-        insertAdminAction(admin.id());
-        ResponseEntity<Map> actions = getWithAuth("/api/v1/admin/actions?limit=1", admin);
-        String foreignCursor = (String) pageInfoOf(actions).get("endCursor");
+        createUser("evt_scope_other", "user");
+        // A cursor minted by the account listing, a different keyset surface.
+        ResponseEntity<Map> accounts = getWithAuth("/api/v1/admin/users?limit=1", admin);
+        String foreignCursor = (String) pageInfoOf(accounts).get("endCursor");
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
 
         ResponseEntity<Map> response =
@@ -244,19 +314,14 @@ class AdminUserEventControllerIT {
     }
 
     private void insertEvent(UUID userId, String eventType, OffsetDateTime createdAt) {
-        jdbcTemplate.update(
-                "INSERT INTO user_events (user_id, event_type, created_at) "
-                        + "VALUES (?, CAST(? AS event_type), ?)",
+        userEventAnalyticsRepository.insertImported(
+                UUID.randomUUID(),
                 userId,
-                eventType,
+                UserEventType.fromJson(eventType),
+                null,
+                null,
+                "",
                 createdAt);
-    }
-
-    private void insertAdminAction(UUID adminId) {
-        jdbcTemplate.update(
-                "INSERT INTO admin_actions (admin_id, action_type, reason) "
-                        + "VALUES (?, CAST('ban_user' AS admin_action_type), 'seed')",
-                adminId);
     }
 
     private ResponseEntity<Map> getWithAuth(String path, TestUser user) {

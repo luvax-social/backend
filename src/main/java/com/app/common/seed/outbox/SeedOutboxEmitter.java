@@ -134,11 +134,22 @@ public class SeedOutboxEmitter {
             int saves,
             int comments,
             int views,
-            int shares) {
+            int shares,
+            int adminActions) {
         public int total() {
-            return postIndex + hashtagIndex + likes + saves + comments + views + shares;
+            return postIndex
+                    + hashtagIndex
+                    + likes
+                    + saves
+                    + comments
+                    + views
+                    + shares
+                    + adminActions;
         }
     }
+
+    /** One {@code admin_actions} row's identifying data, the audit row a replication names. */
+    public record AdminActionRow(UUID actionId, UUID adminId) {}
 
     /**
      * Emits exactly one real event of each of the five seed-emitted event types, sampled from
@@ -187,7 +198,9 @@ public class SeedOutboxEmitter {
      * Emits the full seed event volume through the real transactional outbox: one {@code
      * post.index.upsert.v1} per published post, one {@code hashtag.index.upsert.v1} per hashtag
      * row, one {@code post.liked.v1} per {@code post_likes} row, one {@code post.saved.v1} per
-     * {@code post_saves} row, and one {@code comment.created.v1} per non-soft-deleted comment.
+     * {@code post_saves} row, one {@code comment.created.v1} per non-soft-deleted comment, and one
+     * {@code admin.action.recorded.v1} per {@code admin_actions} row, which is what fills the
+     * ClickHouse replica of the audit log.
      *
      * @return the number of events enqueued per type
      */
@@ -213,6 +226,9 @@ public class SeedOutboxEmitter {
         List<ShareRow> shares = fetchPostShares();
         emitBatched(shares, batchWriter::emitShareBatch);
 
+        List<AdminActionRow> adminActions = fetchAdminActions();
+        emitBatched(adminActions, batchWriter::emitAdminActionReplicationBatch);
+
         EmissionCounts counts =
                 new EmissionCounts(
                         posts.size(),
@@ -221,10 +237,11 @@ public class SeedOutboxEmitter {
                         saves.size(),
                         comments.size(),
                         views.size(),
-                        shares.size());
+                        shares.size(),
+                        adminActions.size());
         log.info(
                 "[seed] outbox full volume emitted: postIndex={}, hashtagIndex={}, likes={}, saves={},"
-                        + " comments={}, views={}, shares={}, total={}",
+                        + " comments={}, views={}, shares={}, adminActions={}, total={}",
                 counts.postIndex(),
                 counts.hashtagIndex(),
                 counts.likes(),
@@ -232,6 +249,7 @@ public class SeedOutboxEmitter {
                 counts.comments(),
                 counts.views(),
                 counts.shares(),
+                counts.adminActions(),
                 counts.total());
         return counts;
     }
@@ -406,6 +424,17 @@ public class SeedOutboxEmitter {
             int end = Math.min(start + BATCH_SIZE, items.size());
             emitBatch.accept(items.subList(start, end));
         }
+    }
+
+    // Oldest first, so the replica fills in the order the audit log was written. Every row is
+    // replicated, seeded moderation and support history included: the seed writers insert
+    // admin_actions directly and never enqueue an event of their own for them.
+    private List<AdminActionRow> fetchAdminActions() {
+        return jdbc.query(
+                "SELECT id, admin_id FROM admin_actions ORDER BY created_at, id",
+                (rs, rowNum) ->
+                        new AdminActionRow(
+                                (UUID) rs.getObject("id"), (UUID) rs.getObject("admin_id")));
     }
 
     private List<PostIndexRow> fetchAllPosts() {

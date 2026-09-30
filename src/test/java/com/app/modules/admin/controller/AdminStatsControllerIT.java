@@ -2,14 +2,19 @@ package com.app.modules.admin.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
@@ -26,29 +31,49 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.app.common.analytics.impl.ClickHouseOperationsImpl;
+import com.app.common.analytics.migration.AnalyticsSchemaGate;
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.ClickHouseTestSupport;
 import com.app.testsupport.TestContainerImages;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+
+/**
+ * The administrative statistics endpoints over the ClickHouse store: the stored snapshot rather
+ * than a live count, daily series computed from half-hour buckets, and the typed 503 when the store
+ * is down.
+ */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
             "spring.profiles.active=dev",
             "spring.docker.compose.enabled=false",
             "spring.autoconfigure.exclude="
-                    + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration"
+                    + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration",
+            "management.health.elasticsearch.enabled=false",
+            // A paused server accepts the connection and never answers, so the socket timeout is
+            // what turns the hang into a failure the endpoint can answer with a 503.
+            "app.analytics.clickhouse.reader.socket-timeout=PT1S",
+            "app.analytics.clickhouse.connection-timeout=PT1S"
         })
 @Testcontainers
 @AutoConfigureTestRestTemplate
 class AdminStatsControllerIT {
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+    private static final DateTimeFormatter CLICKHOUSE_TIME =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC);
+
+    static final ClickHouseContainer clickhouse = ClickHouseTestSupport.startProvisioned();
 
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres =
@@ -60,6 +85,7 @@ class AdminStatsControllerIT {
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry registry) {
+        ClickHouseTestSupport.register(registry, clickhouse);
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         registry.add("spring.data.redis.password", () -> "");
@@ -91,12 +117,25 @@ class AdminStatsControllerIT {
     @Autowired private TestRestTemplate rest;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private JwtTokenProvider jwtTokenProvider;
+    @Autowired private AnalyticsSchemaGate gate;
+    @Autowired private CircuitBreakerRegistry breakers;
 
     private record TestUser(UUID id, String token) {}
 
+    @BeforeEach
+    void startFromAHealthyStore() {
+        assertThat(gate.attempt()).isTrue();
+        breakers.circuitBreaker(ClickHouseOperationsImpl.CIRCUIT_BREAKER_NAME).reset();
+    }
+
     @AfterEach
     void cleanup() {
-        jdbcTemplate.update("DELETE FROM platform_stats");
+        try {
+            clickhouse.getDockerClient().unpauseContainerCmd(clickhouse.getContainerId()).exec();
+        } catch (RuntimeException notPaused) {
+            // The container is not paused when a test failed before pausing it.
+        }
+        clickHouse("TRUNCATE TABLE luvax_analytics.platform_stats");
         jdbcTemplate.update("DELETE FROM hashtags");
         jdbcTemplate.update("DELETE FROM users");
     }
@@ -128,9 +167,9 @@ class AdminStatsControllerIT {
         // A figure no live count could produce: the accounts table holds one row. If the endpoint
         // answered 999999 it read the snapshot; if it answered 1 it counted, which at production
         // size is seconds of work on a request path.
-        plantFine(bucket, "users_total", "", 999_999);
-        plantFine(bucket, "users_by_status", "active", 999_998);
-        plantFine(bucket, "posts_total", "", 4242);
+        plant(bucket, "users_total", "", 999_999);
+        plant(bucket, "users_by_status", "active", 999_998);
+        plant(bucket, "posts_total", "", 4242);
 
         ResponseEntity<Map> response = getWithAuth("/api/v1/admin/stats/current", admin);
 
@@ -146,8 +185,8 @@ class AdminStatsControllerIT {
     @Test
     void currentStats_readsTheNewestBucketWhenSeveralExist() {
         TestUser admin = createUser("stats_newest_admin", "admin");
-        plantFine(OffsetDateTime.parse("2026-08-01T00:00:00Z"), "users_total", "", 100);
-        plantFine(OffsetDateTime.parse("2026-08-01T00:30:00Z"), "users_total", "", 200);
+        plant(OffsetDateTime.parse("2026-08-01T00:00:00Z"), "users_total", "", 100);
+        plant(OffsetDateTime.parse("2026-08-01T00:30:00Z"), "users_total", "", 200);
 
         ResponseEntity<Map> response = getWithAuth("/api/v1/admin/stats/current", admin);
 
@@ -181,10 +220,10 @@ class AdminStatsControllerIT {
     }
 
     @Test
-    void timeseries_noBounds_defaultsToTwentyFourHoursOfFineBuckets() {
+    void timeseries_noBounds_defaultsToTwentyFourHoursOfHalfHourBuckets() {
         TestUser admin = createUser("stats_default_admin", "admin");
         OffsetDateTime recent = OffsetDateTime.now(ZoneOffset.UTC).minusHours(2);
-        plantFine(recent, "registrations", "", 11);
+        plant(recent, "registrations", "", 11);
 
         ResponseEntity<Map> response =
                 getWithAuth("/api/v1/admin/stats/timeseries?metric=registrations", admin);
@@ -199,10 +238,13 @@ class AdminStatsControllerIT {
     }
 
     @Test
-    void timeseries_windowOlderThanFineRetention_isServedFromDailyRows() {
+    void timeseries_windowOlderThanTheHorizon_isServedAsDailyPointsComputedFromBuckets() {
         TestUser admin = createUser("stats_daily_admin", "admin");
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        plantDaily(now.minusDays(100).truncatedTo(java.time.temporal.ChronoUnit.DAYS), 7);
+        OffsetDateTime day = now.minusDays(100).truncatedTo(ChronoUnit.DAYS);
+        // A flow: the daily figure is the sum of the day's buckets.
+        plant(day.plusHours(1), "registrations", "", 3);
+        plant(day.plusHours(2), "registrations", "", 4);
 
         ResponseEntity<Map> response =
                 getWithAuth(
@@ -213,21 +255,22 @@ class AdminStatsControllerIT {
                         admin);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        // The server states the width it used, so a chart does not have to assume one. Fine buckets
-        // do not survive that far back, so answering at half_hour would return an empty series and
-        // look like nothing happened.
+        // The server states the width it used, so a chart does not have to assume one.
         assertThat(dataOf(response).get("granularity")).isEqualTo("day");
-        assertThat(pointsOf(response)).hasSize(1);
+        List<Map<String, Object>> points = pointsOf(response);
+        assertThat(points).hasSize(1);
+        assertThat(((Number) points.get(0).get("value")).longValue()).isEqualTo(7L);
     }
 
     @Test
-    void timeseries_requestedDayGranularity_isHonouredInsideTheFineWindow() {
+    void timeseries_requestedDayGranularity_isHonouredInsideTheHalfHourWindow() {
         // The response has always carried a granularity field, so a client reasonably builds a
         // Half hour / Day toggle and sends one. Accepting the parameter and ignoring it made that
         // toggle do nothing while still returning 200.
         TestUser admin = createUser("stats_reqday_admin", "admin");
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        plantDaily(now.minusDays(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS), 5);
+        OffsetDateTime yesterday = now.minusDays(1).truncatedTo(ChronoUnit.DAYS);
+        plant(yesterday.plusHours(3), "registrations", "", 5);
 
         ResponseEntity<Map> response =
                 getWithAuth(
@@ -243,10 +286,10 @@ class AdminStatsControllerIT {
     }
 
     @Test
-    void timeseries_requestedHalfHourGranularity_isHonouredInsideTheFineWindow() {
+    void timeseries_requestedHalfHourGranularity_isHonouredInsideTheHorizon() {
         TestUser admin = createUser("stats_reqfine_admin", "admin");
         OffsetDateTime recent = OffsetDateTime.now(ZoneOffset.UTC).minusHours(2);
-        plantFine(recent, "registrations", "", 11);
+        plant(recent, "registrations", "", 11);
 
         ResponseEntity<Map> response =
                 getWithAuth(
@@ -260,10 +303,9 @@ class AdminStatsControllerIT {
     }
 
     @Test
-    void timeseries_halfHourRequestedBeyondFineRetention_isRejectedNotAnsweredEmpty() {
-        // Those rows were rolled up and deleted. An empty series would be indistinguishable from a
-        // stretch in which nothing happened, and the response's granularity field would contradict
-        // what was asked for.
+    void timeseries_halfHourRequestedBeyondTheHorizon_isRejectedWithTheHorizonInTheMessage() {
+        // Answering at day width would contradict the request, and the response's granularity field
+        // would then disagree with what was asked for.
         TestUser admin = createUser("stats_reqfine_old_admin", "admin");
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
 
@@ -277,6 +319,9 @@ class AdminStatsControllerIT {
                         admin);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(String.valueOf(response.getBody()))
+                .contains(
+                        "Half-hour points are served for windows starting within the last 30 days");
     }
 
     @Test
@@ -361,6 +406,25 @@ class AdminStatsControllerIT {
         assertThat(seriesStatus(admin, now.minusDays(365), now)).isEqualTo(HttpStatus.OK);
     }
 
+    @Test
+    void bothReads_analyticsDown_answerTheTypedServiceUnavailableForTheWholeResponse() {
+        TestUser admin = createUser("stats_down_admin", "admin");
+        insertHashtag("loud", 90);
+        plant(OffsetDateTime.parse("2026-08-01T00:00:00Z"), "users_total", "", 10);
+
+        clickhouse.getDockerClient().pauseContainerCmd(clickhouse.getContainerId()).exec();
+        ResponseEntity<Map> current = getWithAuth("/api/v1/admin/stats/current", admin);
+        ResponseEntity<Map> series =
+                getWithAuth("/api/v1/admin/stats/timeseries?metric=registrations", admin);
+
+        assertThat(current.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(String.valueOf(current.getBody())).contains("ANALYTICS_UNAVAILABLE");
+        // The live hashtag list is not served alongside a missing snapshot.
+        assertThat(current.getBody().get("data")).isNull();
+        assertThat(series.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(String.valueOf(series.getBody())).contains("ANALYTICS_UNAVAILABLE");
+    }
+
     private HttpStatus seriesStatus(TestUser admin, OffsetDateTime from, OffsetDateTime to) {
         return (HttpStatus)
                 getWithAuth(
@@ -401,25 +465,29 @@ class AdminStatsControllerIT {
                 status);
     }
 
-    private void plantFine(
-            OffsetDateTime bucketStart, String metricKey, String dimension, long value) {
-        jdbcTemplate.update(
-                "INSERT INTO platform_stats"
-                        + " (bucket_start, granularity, metric_key, dimension, value)"
-                        + " VALUES (?, CAST('half_hour' AS stat_granularity), ?, ?, ?)",
-                bucketStart,
-                metricKey,
-                dimension,
-                value);
+    // Plants one row the way the ingest consumer would have written it, as the administrator user
+    // because the tests need to write and read without the application's pools in between.
+    private void plant(OffsetDateTime bucketStart, String metricKey, String dimension, long value) {
+        clickHouse(
+                "INSERT INTO luvax_analytics.platform_stats"
+                        + " (bucket_start, metric_key, dimension, value, computed_at) VALUES ('"
+                        + CLICKHOUSE_TIME.format(bucketStart)
+                        + "', '"
+                        + metricKey
+                        + "', '"
+                        + dimension
+                        + "', "
+                        + value
+                        + ", now64(6))");
     }
 
-    private void plantDaily(OffsetDateTime bucketStart, long value) {
-        jdbcTemplate.update(
-                "INSERT INTO platform_stats"
-                        + " (bucket_start, granularity, metric_key, dimension, value)"
-                        + " VALUES (?, CAST('day' AS stat_granularity), 'registrations', '', ?)",
-                bucketStart,
-                value);
+    private static void clickHouse(String sql) {
+        try (Connection admin = ClickHouseTestSupport.adminConnection(clickhouse);
+                Statement statement = admin.createStatement()) {
+            statement.execute(sql);
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private ResponseEntity<Map> getWithAuth(String path, TestUser user) {

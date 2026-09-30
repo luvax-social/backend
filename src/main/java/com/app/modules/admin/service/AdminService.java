@@ -159,6 +159,10 @@ public interface AdminService {
      * administrator sees every row. The restriction is applied here rather than at the web layer so
      * it holds for any caller of this method.
      *
+     * <p>The page is read from the ClickHouse replica, which lags a committed action by a few
+     * seconds, and from PostgreSQL when the replica is unavailable. The cursor means the same on
+     * both, so a page sequence survives a switch between them.
+     *
      * @param actorId the requesting account, resolved from the security context
      * @param adminId actor filter requested by the caller; ignored for a moderator
      * @param actionType action-type filter, or null for every type

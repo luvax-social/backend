@@ -81,18 +81,9 @@ public class SeedRunner {
                     new EnumColumn("reports", "report_reason", "report_reason"),
                     new EnumColumn("notifications", "type", "notification_type"),
                     new EnumColumn("notifications", "category", "notification_category"),
-                    new EnumColumn("admin_actions", "action_type", "admin_action_type"),
-                    new EnumColumn("user_events", "event_type", "event_type"),
-                    new EnumColumn("platform_stats", "granularity", "stat_granularity"));
+                    new EnumColumn("admin_actions", "action_type", "admin_action_type"));
 
     private static final int MIN_ROWS_PER_ENUM_VALUE = 5;
-
-    // user_events.event_type = 'post_view' is produced by the recommendation consumer draining
-    // post.viewed.v1 from the outbox, which happens asynchronously after this run returns. The
-    // assertion below reads the database synchronously, so it would always see zero and always
-    // fail. Coverage for this one value is asserted against the drained system instead.
-    private static final Map<String, Set<String>> ASYNC_ENUM_VALUES =
-            Map.of("user_events.event_type", Set.of("post_view"));
 
     // Values the schema keeps but nothing writes any more. notification_type 'message' and its
     // notification_category 'message' stay in their enums so historical rows remain readable,
@@ -227,7 +218,16 @@ public class SeedRunner {
             SeedOutboxEmitter.EmissionCounts counts =
                     seedOutboxEmitter.emitFullVolume(
                             content, chain.usersByUsername(), chain.postIdBySeedId());
-            log.info("[seed] phase=outbox-emission complete: total={}", counts.total());
+            AnalyticsSeedWriter.AnalyticsCounts analytics = chain.analyticsCounts();
+            int totalEnqueued =
+                    counts.total() + analytics.statsBuckets() + analytics.userEventImports();
+            log.info(
+                    "[seed] phase=outbox-emission complete: total={}, analytics:"
+                            + " adminActions={}, platformStatsBuckets={}, userEventImports={}",
+                    totalEnqueued,
+                    counts.adminActions(),
+                    analytics.statsBuckets(),
+                    analytics.userEventImports());
 
             assertEnumCoverage();
             assertReplayCannotNotify();
@@ -242,7 +242,7 @@ public class SeedRunner {
                             + " (app.outbox.publisher.*), so Elasticsearch, Gorse, and notification"
                             + " state are not yet consistent with this seed - this line marks the"
                             + " synchronous portion done, not the whole system",
-                    counts.total());
+                    totalEnqueued);
         } catch (RuntimeException e) {
             log.error("[seed] seed run failed", e);
             throw e;
@@ -251,7 +251,9 @@ public class SeedRunner {
 
     /** The id maps later phases need from the writer chain. */
     private record WriterChainResult(
-            Map<String, UUID> usersByUsername, Map<String, UUID> postIdBySeedId) {}
+            Map<String, UUID> usersByUsername,
+            Map<String, UUID> postIdBySeedId,
+            AnalyticsSeedWriter.AnalyticsCounts analyticsCounts) {}
 
     private WriterChainResult runWriterChain(SeedContent content, SeedTimeline timeline) {
         Map<String, UUID> usersByUsername = userSeedWriter.write(content, timeline);
@@ -274,8 +276,8 @@ public class SeedRunner {
                 supportSeedWriter.write(content, usersByUsername, timeline);
         verificationSeedWriter.write(content, usersByUsername, verificationTicketIds, timeline);
         notificationSeedWriter.write(timeline);
-        analyticsSeedWriter.write(timeline);
-        return new WriterChainResult(usersByUsername, postIdBySeedId);
+        AnalyticsSeedWriter.AnalyticsCounts analyticsCounts = analyticsSeedWriter.write(timeline);
+        return new WriterChainResult(usersByUsername, postIdBySeedId, analyticsCounts);
     }
 
     /**
@@ -294,9 +296,7 @@ public class SeedRunner {
             Map<String, Integer> declaredValues = fetchEnumValues(column.enumTypeName());
             Map<String, Integer> actualCounts = fetchColumnCounts(column);
             String qualified = column.table() + "." + column.column();
-            Set<String> skippedValues = new java.util.HashSet<>();
-            skippedValues.addAll(ASYNC_ENUM_VALUES.getOrDefault(qualified, Set.of()));
-            skippedValues.addAll(RETIRED_ENUM_VALUES.getOrDefault(qualified, Set.of()));
+            Set<String> skippedValues = RETIRED_ENUM_VALUES.getOrDefault(qualified, Set.of());
             for (String value : declaredValues.keySet()) {
                 if (skippedValues.contains(value)) {
                     continue;
@@ -418,8 +418,6 @@ public class SeedRunner {
                         "hashtags",
                         "support_tickets",
                         "verification_requests",
-                        "platform_stats",
-                        "user_events",
                         "outbox_events");
         StringBuilder summary = new StringBuilder("[seed] row count summary:");
         for (String table : tables) {

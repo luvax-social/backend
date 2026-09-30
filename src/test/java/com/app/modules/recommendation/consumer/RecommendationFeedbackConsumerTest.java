@@ -3,8 +3,12 @@ package com.app.modules.recommendation.consumer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -24,16 +28,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 
+import com.app.common.analytics.ClickHouseRequestRejectedException;
+import com.app.common.analytics.ClickHouseUnavailableException;
+import com.app.common.analytics.ClickHouseUnavailableException.Reason;
 import com.app.common.inbox.enums.ProcessedMessageResult;
 import com.app.common.inbox.service.ProcessedMessageService;
 import com.app.common.messaging.DomainEventMessageParser;
@@ -46,7 +53,8 @@ import com.app.modules.post.messaging.PostEventTypes;
 import com.app.modules.recommendation.client.GorseClient;
 import com.app.modules.recommendation.client.dto.GorseFeedback;
 import com.app.modules.recommendation.enums.UserEventType;
-import com.app.modules.recommendation.repository.UserEventJdbcRepository;
+import com.app.modules.recommendation.repository.UserEventAnalyticsRepository;
+import com.app.modules.users.service.UserSummaryService;
 import com.rabbitmq.client.Channel;
 
 @ExtendWith(MockitoExtension.class)
@@ -58,7 +66,8 @@ class RecommendationFeedbackConsumerTest {
     private static final OffsetDateTime OCCURRED_AT = OffsetDateTime.now(ZoneOffset.UTC);
 
     @Mock private ProcessedMessageService processedMessageService;
-    @Mock private UserEventJdbcRepository userEventJdbcRepository;
+    @Mock private UserEventAnalyticsRepository userEventAnalyticsRepository;
+    @Mock private UserSummaryService userSummaryService;
     @Mock private GorseClient gorseClient;
     @Mock private Channel channel;
 
@@ -72,12 +81,14 @@ class RecommendationFeedbackConsumerTest {
         retryProperties.setMaxAttempts(3);
         retryProperties.setRetryBackoffs(List.of(Duration.ofMillis(5), Duration.ZERO));
         sleptMillis = new ArrayList<>();
+        lenient().when(userSummaryService.exists(USER_ID)).thenReturn(true);
         consumer =
                 new RecommendationFeedbackConsumer(
                         new DomainEventMessageParser(),
                         processedMessageService,
                         retryProperties,
-                        userEventJdbcRepository,
+                        userEventAnalyticsRepository,
+                        userSummaryService,
                         gorseClient,
                         sleptMillis::add);
     }
@@ -126,9 +137,16 @@ class RecommendationFeedbackConsumerTest {
 
         consumer.consume(message, channel);
 
-        verify(userEventJdbcRepository)
-                .insertIgnoreDuplicate(
-                        EVENT_ID, USER_ID, UserEventType.POST_LIKE, "post", POST_ID, OCCURRED_AT);
+        verify(userEventAnalyticsRepository)
+                .insertEngagement(
+                        EVENT_ID,
+                        USER_ID,
+                        UserEventType.POST_LIKE,
+                        "post",
+                        POST_ID,
+                        OCCURRED_AT,
+                        "like",
+                        1.0);
         verifyFeedbackPushed("like");
         verify(channel).basicAck(1L, false);
     }
@@ -140,9 +158,16 @@ class RecommendationFeedbackConsumerTest {
 
         consumer.consume(message, channel);
 
-        verify(userEventJdbcRepository)
-                .insertIgnoreDuplicate(
-                        EVENT_ID, USER_ID, UserEventType.POST_SAVE, "post", POST_ID, OCCURRED_AT);
+        verify(userEventAnalyticsRepository)
+                .insertEngagement(
+                        EVENT_ID,
+                        USER_ID,
+                        UserEventType.POST_SAVE,
+                        "post",
+                        POST_ID,
+                        OCCURRED_AT,
+                        "save",
+                        1.0);
         verifyFeedbackPushed("save");
         verify(channel).basicAck(1L, false);
     }
@@ -154,14 +179,16 @@ class RecommendationFeedbackConsumerTest {
 
         consumer.consume(message, channel);
 
-        verify(userEventJdbcRepository)
-                .insertIgnoreDuplicate(
+        verify(userEventAnalyticsRepository)
+                .insertEngagement(
                         EVENT_ID,
                         USER_ID,
                         UserEventType.POST_COMMENT,
                         "post",
                         POST_ID,
-                        OCCURRED_AT);
+                        OCCURRED_AT,
+                        "comment",
+                        1.0);
         verifyFeedbackPushed("comment");
         verify(channel).basicAck(1L, false);
     }
@@ -173,9 +200,16 @@ class RecommendationFeedbackConsumerTest {
 
         consumer.consume(message, channel);
 
-        verify(userEventJdbcRepository)
-                .insertIgnoreDuplicate(
-                        EVENT_ID, USER_ID, UserEventType.POST_VIEW, "post", POST_ID, OCCURRED_AT);
+        verify(userEventAnalyticsRepository)
+                .insertEngagement(
+                        EVENT_ID,
+                        USER_ID,
+                        UserEventType.POST_VIEW,
+                        "post",
+                        POST_ID,
+                        OCCURRED_AT,
+                        "read",
+                        1.0);
         verifyFeedbackPushed("read");
         verify(channel).basicAck(1L, false);
     }
@@ -225,9 +259,16 @@ class RecommendationFeedbackConsumerTest {
 
         consumer.consume(message, channel);
 
-        verify(userEventJdbcRepository)
-                .insertIgnoreDuplicate(
-                        EVENT_ID, USER_ID, UserEventType.POST_SHARE, "post", POST_ID, OCCURRED_AT);
+        verify(userEventAnalyticsRepository)
+                .insertEngagement(
+                        EVENT_ID,
+                        USER_ID,
+                        UserEventType.POST_SHARE,
+                        "post",
+                        POST_ID,
+                        OCCURRED_AT,
+                        "share",
+                        1.0);
         verifyFeedbackPushed("share");
         verify(channel).basicAck(1L, false);
     }
@@ -239,14 +280,16 @@ class RecommendationFeedbackConsumerTest {
 
         consumer.consume(message, channel);
 
-        verify(userEventJdbcRepository)
-                .insertIgnoreDuplicate(
+        verify(userEventAnalyticsRepository)
+                .insertEngagement(
                         EVENT_ID,
                         USER_ID,
                         UserEventType.COMMENT_LIKE,
                         "post",
                         POST_ID,
-                        OCCURRED_AT);
+                        OCCURRED_AT,
+                        "like",
+                        0.5);
         ArgumentCaptor<List<GorseFeedback>> captor = ArgumentCaptor.forClass(List.class);
         verify(gorseClient).insertFeedback(captor.capture());
         GorseFeedback feedback = captor.getValue().get(0);
@@ -346,27 +389,115 @@ class RecommendationFeedbackConsumerTest {
     }
 
     @Test
-    void consume_userEventForeignKeyViolation_nacksWithoutRetry() throws Exception {
-        // Reproduces the defect: a stale event whose actor was deleted (e.g. by a seed reset)
-        // violates user_events.user_id's foreign key on every attempt, since retrying an insert
-        // against a user that no longer exists can never succeed. Before the fix this exception
-        // was classified transient and retried to exhaustion (see consume_gorseTransientFailure_
-        // retriesThenNacksWithoutRequeue for what that costs); after the fix it must dead-letter
-        // on the very first attempt with no wasted retries.
+    void consume_actorNoLongerExists_nacksOnceWithoutRetryAndWritesNothing() throws Exception {
+        // ClickHouse has no foreign key, so the consumer checks the actor itself. A stale event
+        // whose actor was deleted can never succeed, so it must dead-letter on the very first
+        // attempt instead of exhausting the retry budget on every redelivery.
         Message message = message(envelope(PostEventTypes.POST_LIKED_V1));
         stubProcessOnce();
-        doThrow(new DataIntegrityViolationException("FK violation"))
-                .when(userEventJdbcRepository)
-                .insertIgnoreDuplicate(any(), any(), any(), any(), any(), any());
+        when(userSummaryService.exists(USER_ID)).thenReturn(false);
 
         consumer.consume(message, channel);
 
-        verify(userEventJdbcRepository, times(1))
-                .insertIgnoreDuplicate(any(), any(), any(), any(), any(), any());
+        verify(userEventAnalyticsRepository, never())
+                .insertEngagement(any(), any(), any(), any(), any(), any(), any(), anyDouble());
         verify(gorseClient, never()).insertFeedback(anyList());
         verify(channel).basicNack(1L, false, false);
         verify(channel, never()).basicAck(1L, false);
         assertThat(sleptMillis).isEmpty();
+    }
+
+    @Test
+    void consume_clickHouseUnavailable_requeuesWithoutRetryOrGorseCall() throws Exception {
+        Message message = message(envelope(PostEventTypes.POST_LIKED_V1));
+        stubProcessOnce();
+        doThrow(new ClickHouseUnavailableException(Reason.CIRCUIT_OPEN, "circuit open"))
+                .when(userEventAnalyticsRepository)
+                .insertEngagement(any(), any(), any(), any(), any(), any(), any(), anyDouble());
+
+        consumer.consume(message, channel);
+
+        // requeue=true: the message waits in the queue while the ingestion controller pauses this
+        // listener, instead of being retried in process or dead-lettered.
+        verify(channel).basicNack(1L, false, true);
+        verify(channel, never()).basicAck(1L, false);
+        verify(userEventAnalyticsRepository, times(1))
+                .insertEngagement(any(), any(), any(), any(), any(), any(), any(), anyDouble());
+        verify(gorseClient, never()).insertFeedback(anyList());
+        assertThat(sleptMillis).isEmpty();
+    }
+
+    @Test
+    void consume_clickHouseRejectsTheRequest_nacksWithoutRequeueOrRetry() throws Exception {
+        Message message = message(envelope(PostEventTypes.POST_LIKED_V1));
+        stubProcessOnce();
+        doThrow(new ClickHouseRequestRejectedException("bad enum", 691, null))
+                .when(userEventAnalyticsRepository)
+                .insertEngagement(any(), any(), any(), any(), any(), any(), any(), anyDouble());
+
+        consumer.consume(message, channel);
+
+        verify(channel).basicNack(1L, false, false);
+        verify(userEventAnalyticsRepository, times(1))
+                .insertEngagement(any(), any(), any(), any(), any(), any(), any(), anyDouble());
+        verify(gorseClient, never()).insertFeedback(anyList());
+        assertThat(sleptMillis).isEmpty();
+    }
+
+    @Test
+    void consume_writesClickHouseBeforeGorse_soGorseNeverHoldsFeedbackWithoutARecord()
+            throws Exception {
+        stubProcessOnce();
+
+        consumer.consume(message(envelope(PostEventTypes.POST_LIKED_V1)), channel);
+
+        InOrder order = inOrder(userEventAnalyticsRepository, gorseClient);
+        order.verify(userEventAnalyticsRepository)
+                .insertEngagement(
+                        eq(EVENT_ID),
+                        eq(USER_ID),
+                        eq(UserEventType.POST_LIKE),
+                        eq("post"),
+                        eq(POST_ID),
+                        eq(OCCURRED_AT),
+                        eq("like"),
+                        eq(1.0));
+        order.verify(gorseClient).insertFeedback(anyList());
+    }
+
+    @Test
+    void consume_dwell_isStoredWithTheEventAsTheValueSentToGorse() throws Exception {
+        stubProcessOnce();
+        DomainEventEnvelope envelope =
+                new DomainEventEnvelope(
+                        EVENT_ID,
+                        PostEventTypes.POST_VIEWED_V1,
+                        OCCURRED_AT,
+                        USER_ID,
+                        "post",
+                        POST_ID,
+                        Map.of("postId", POST_ID.toString(), "dwellSeconds", 4.5));
+
+        consumer.consume(message(envelope), channel);
+
+        verify(userEventAnalyticsRepository)
+                .insertEngagement(
+                        EVENT_ID,
+                        USER_ID,
+                        UserEventType.POST_VIEW,
+                        "post",
+                        POST_ID,
+                        OCCURRED_AT,
+                        "read",
+                        4.5);
+    }
+
+    @Test
+    void isTransient_clickHouseFailure_isNeverRetriedInProcess() {
+        assertThat(consumer.isTransient(new ClickHouseUnavailableException(Reason.SERVER, "down")))
+                .isFalse();
+        assertThat(consumer.isTransient(new ClickHouseRequestRejectedException("bad", 62, null)))
+                .isFalse();
     }
 
     @Test
@@ -377,8 +508,8 @@ class RecommendationFeedbackConsumerTest {
 
         consumer.consume(message, channel);
 
-        verify(userEventJdbcRepository, never())
-                .insertIgnoreDuplicate(any(), any(), any(), any(), any(), any());
+        verify(userEventAnalyticsRepository, never())
+                .insertEngagement(any(), any(), any(), any(), any(), any(), any(), anyDouble());
         verify(gorseClient, never()).insertFeedback(anyList());
         verify(channel).basicAck(1L, false);
     }

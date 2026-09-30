@@ -8,8 +8,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Binds the hashtag affinity job's window and decay settings from {@code
  * app.recommendation.affinity.*}.
  *
- * @param window how far back the recompute reads {@code user_events}; also the bound that makes the
- *     read prune partitions instead of scanning every one ever declared
+ * @param window how far back the recompute reads {@code user_events}; also the bound that lets the
+ *     ClickHouse read skip the monthly partitions outside it
  * @param halfLife age at which a contribution is worth half its original weight
  * @param topLimit maximum affinity rows a personalised surface reads for one user
  */

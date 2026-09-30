@@ -127,6 +127,12 @@ class SeedOutboxEmitterIT {
     @Test
     void emitFullVolume_writesOneEventPerRowAndEmitsSeededViews() {
         SeededIds seeded = seedDomainWriters();
+        // No moderation writer runs in this test, so give the audit log rows to replicate.
+        jdbcTemplate.update(
+                "INSERT INTO admin_actions (admin_id, action_type, reason)"
+                        + " SELECT id, 'ban_user'::admin_action_type, 'emitter it ' || n"
+                        + " FROM (SELECT id FROM users ORDER BY username LIMIT 1) u,"
+                        + " generate_series(1, 3) AS n");
 
         Integer allPostCount =
                 jdbcTemplate.queryForObject("SELECT COUNT(*) FROM posts", Integer.class);
@@ -139,6 +145,8 @@ class SeedOutboxEmitterIT {
         Integer commentCount =
                 jdbcTemplate.queryForObject(
                         "SELECT COUNT(*) FROM comments WHERE deleted_at IS NULL", Integer.class);
+        Integer adminActionCount =
+                jdbcTemplate.queryForObject("SELECT COUNT(*) FROM admin_actions", Integer.class);
 
         SeedOutboxEmitter.EmissionCounts counts =
                 seedOutboxEmitter.emitFullVolume(
@@ -149,6 +157,7 @@ class SeedOutboxEmitterIT {
         assertThat(counts.likes()).isEqualTo(likeCount);
         assertThat(counts.saves()).isEqualTo(saveCount);
         assertThat(counts.comments()).isEqualTo(commentCount);
+        assertThat(counts.adminActions()).isEqualTo(adminActionCount).isEqualTo(3);
         assertThat(counts.views()).isPositive();
         // Seeded post_share messages must produce share feedback, or "share" sits in
         // positive_feedback_types with an empty bucket behind it.
@@ -162,6 +171,7 @@ class SeedOutboxEmitterIT {
         assertThat(countByType.get("comment.created.v1")).isEqualTo(commentCount);
         assertThat(countByType.get("post.viewed.v1")).isEqualTo(counts.views());
         assertThat(countByType.get("post.shared.v1")).isEqualTo(counts.shares());
+        assertThat(countByType.get("admin.action.recorded.v1")).isEqualTo(adminActionCount);
 
         Integer total =
                 jdbcTemplate.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class);
@@ -173,7 +183,8 @@ class SeedOutboxEmitterIT {
                                 + saveCount
                                 + commentCount
                                 + counts.views()
-                                + counts.shares());
+                                + counts.shares()
+                                + adminActionCount);
 
         // Every row must still be PENDING: the outbox publisher is disabled in this test, so
         // nothing has drained yet - proves emission alone, not the live-stack drain.

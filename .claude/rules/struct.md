@@ -9,7 +9,8 @@ description: Load when working on App (social network). Contains the authoritati
 
 Instagram-style social network: profiles, follow graph, photo/video/carousel posts, likes/saves, nested comments, 24-hour stories, 1-1 and group DMs, hashtags, ranked feed.
 
-Private accounts enforce pending follow requests. Content moderation uses a report system with an admin audit log. A recommendation subsystem tracks behavioral events and interaction scores for feed ranking.
+Private accounts enforce pending follow requests. Content moderation uses a report system with an admin audit log. A recommendation subsystem tracks behavioral events for feed ranking.
+Behavioral events and platform statistics live in ClickHouse, which also holds a replica of the audit log; PostgreSQL stays the system of record for everything else.
 
 User roles: `user`, `moderator`, `admin`. Architecture: **Modular Monolith**.
 
@@ -45,7 +46,9 @@ app/
 │   │   │   ├── modules/            # 15 domain modules (see §2)
 │   │   │   └── Application.java    # @SpringBootApplication @ConfigurationPropertiesScan
 │   │   └── resources/
-│   │       ├── db/migration/       # Flyway V01-V126 SQL migrations
+│   │       ├── clickhouse/
+│   │       │   └── migration/      # V1-V3 ClickHouse analytics schema scripts (application-owned runner)
+│   │       ├── db/migration/       # Flyway V01-V133 SQL migrations
 │   │       ├── elasticsearch/
 │   │       │   └── settings/       # hashtags.json, posts.json (Elasticsearch index settings)
 │   │       ├── resilience/
@@ -76,7 +79,8 @@ app/
 ├── pom.xml
 ├── mvnw / mvnw.cmd
 ├── scripts/                        # regenerate_struct_figures.sh, regenerate_schema_sql.sh,
-│                                   # normalise_schema_dump.py, seed and media helpers
+│                                   # normalise_schema_dump.py, seed and media helpers,
+│                                   # rollback/phase2_postgres_rollback.sql
 ├── AGENTS.md                       # Agent instructions (root-level)
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
@@ -95,6 +99,12 @@ app/
 | Package | Key Classes |
 |---------|------------|
 | `common/` | `ApiConstants` |
+| `common/analytics/` | `ClickHouseOperations` (the only way application code reaches ClickHouse), `ClickHouseErrorTranslator`, `ClickHouseException`, `ClickHouseUnavailableException`, `ClickHouseRequestRejectedException`, `AnalyticsStoreTruncator` (seed reset) |
+| `common/analytics/config/` | `AnalyticsProperties`, `ClickHouseDataSourceConfig`, `NetworkTimeoutDataSource`, `PrimaryDatabaseHealthConfig` |
+| `common/analytics/impl/` | `ClickHouseOperationsImpl`, `DisabledClickHouseOperations` |
+| `common/analytics/ingest/` | `AnalyticsIngestionController`, `AnalyticsListenerIds` |
+| `common/analytics/migration/` | `ClickHouseMigrationRunner`, `ClickHouseMigrationScript`, `ClickHouseMigrationException`, `AnalyticsSchemaGate`, `AnalyticsSchemaReadyEvent` |
+| `common/analytics/observability/` | `AnalyticsMetrics` |
 | `common/base/` | `BaseController` |
 | `common/config/app/` | `AppProperties` |
 | `common/config/elasticsearch/` | `ElasticsearchConfig`, `ElasticsearchProperties` |
@@ -184,8 +194,8 @@ Extra sub-packages (e.g. `oauth2/`, `validation/`, `storage/`) follow the same p
 | `story` | **Implemented** | api, consumer, controller, converter, dto/{request,response}, entity, enums, mapper, messaging, repository, service/impl |
 | `message` | **Implemented** | api, config, controller, converter, dto/{request,response}, entity, enums, live, mapper, messaging, repository, service/impl |
 | `report` | **Implemented** | api, controller, converter, dto/{request,response}, entity, enums, mapper, repository, service/impl |
-| `admin` | **Implemented** | api, config, controller, converter, dto/{request,response}, entity, enums, mapper, messaging, repository, service/impl |
-| `recommendation` | **Implemented** | api, client/{dto,impl}, config, consumer, controller, converter, dto/{request,response}, entity, enums, messaging, observability, repository, service/impl/feed |
+| `admin` | **Implemented** | api, config, consumer, controller, converter, dto/{request,response}, entity, enums, mapper, messaging, repository, service/impl |
+| `recommendation` | **Implemented** | api, client/{dto,impl}, config, consumer, controller, converter, dto/{request,response}, entity, enums, messaging, observability, rebuild/impl, repository, service/impl/feed |
 | `support` | **Implemented** | config, controller, converter, dto/{request,response}, entity, enums, mapper, repository, service/impl |
 
 **Module responsibilities:**
@@ -199,9 +209,18 @@ Extra sub-packages (e.g. `oauth2/`, `validation/`, `storage/`) follow the same p
 - **`notification`**: The activity feed. `NotificationAggregationRepository` writes rows and aggregates likes, story views and follows into windowed groups with their members in `notification_actors`; `NotificationFeedRepository` serves the filtered keyset list, the head and the bounded unseen badge under one visibility predicate; `NotificationSeenStateRepository` keeps the per-user seen and previous watermarks. `NotificationItemAssembler` hydrates rows through the owning modules' preview services. `SocialNotificationConsumer` handles the follow, unfollow, request, approve, reject, block and verification events, `AdminNotificationConsumer` the warning notice, and `NotificationLiveFanoutConsumer` pushes typed envelopes to `/topic/notifications.{userId}`. See `docs/modules/notification/DATA_RULES.md`.
 - **`comment`**: Threaded comment CRUD (create with idempotency, edit, soft-delete subtree), likes, moderation, and real-time live fanout via WebSocket (STOMP over SockJS); `CommentNotificationConsumer` handles `comment.created.v1`, `comment.liked.v1` and `comment.unliked.v1` for notifications; `CommentLiveFanoutConsumer` fans out all `comment.*` events to connected WebSocket sessions; `CommentMaintenanceScheduler` performs periodic pruning tasks.
 - **`report`**: User-submitted content flag lifecycle (submit, list, triage, status transitions); `ReportServiceImpl` enforces self-report prevention, duplicate suppression, entity existence validation, valid status-machine transitions, and resolution-note requirements for terminal states.
-- **`admin`**: Immutable moderation audit log, atomic moderation actions, the warning and strike discipline ladder, report escalation, the report-anchored moderation view of a reported entity, the administrative hashtag registry, the behavioural activity log read surface, and platform statistics; `AdminServiceImpl` handles ban/unban, suspend/unsuspend, post/comment remove/restore, and report resolve/dismiss, and `AdminHashtagServiceImpl` handles hashtag create/ban/unban/delete — each writing an `admin_actions` row and mutating the target entity in the same transaction. `AdminAuthorizationServiceImpl` holds every actor-and-target rule for both status and role changes. `StatsCollectionJob` fills `platform_stats` one completed bucket at a time and `StatsRollupJob` compacts fine buckets into daily rows and enforces retention; `AdminStatsServiceImpl` and `AdminUserEventServiceImpl` are the administrator-only read paths.
+- **`admin`**: Immutable moderation audit log, atomic moderation actions, the warning and strike discipline ladder, report escalation, the report-anchored moderation view of a reported entity, the administrative hashtag registry, the behavioural activity log read surface, and platform statistics; `AdminServiceImpl` handles ban/unban, suspend/unsuspend, post/comment remove/restore, and report resolve/dismiss, and `AdminHashtagServiceImpl` handles hashtag create/ban/unban/delete - each writing an `admin_actions` row and mutating the target entity in the same transaction. `AdminAuthorizationServiceImpl` holds every actor-and-target rule for both status and role changes. `admin_actions` stays in PostgreSQL as the system of record and is replicated to ClickHouse through the outbox: `AdminActionRecorder` enqueues `admin.action.recorded.v1` in the same transaction as the audit row, PostgreSQL triggers enqueue `admin.action.changed.v1` when a foreign-key `SET NULL` rewrites a row, and `AdminActionReplicationConsumer` fetches the current row and writes it with its `row_version`.
+`AdminActionListingServiceImpl` serves the audit-log listing from ClickHouse and falls back to PostgreSQL under one cursor contract; lookups by id stay on PostgreSQL.
+`StatsCollectionJob` computes one completed bucket at a time in PostgreSQL and `PlatformStatsCollectionServiceImpl` ships it as one `admin.platform-stats.collected.v1` event; `PlatformStatsIngestConsumer` writes it to ClickHouse, and daily figures are computed at query time.
+`AdminStatsServiceImpl` and `AdminUserEventServiceImpl` are the administrator-only read paths and answer `503 ANALYTICS_UNAVAILABLE` when ClickHouse is unavailable.
 - **`support`**: The support ticket lifecycle, the appeal route a disciplined account reaches without a session, and account verification requests. `SupportTokenServiceImpl` mints the two single-use link families (`support:token:appeal:`, `support:token:confirmation:`) that authorise exactly one ticket against one audit row without ever minting a session; `SupportTicketServiceImpl` enforces the one-open-ticket guard (V107) and the per-client daily cap on the anonymous public form. See `docs/modules/support/DATA_RULES.md`.
-- **`recommendation`**: Owns `user_events` and the personalized ranked feed. The feed is backed by the external Gorse recommender, reached over REST through `GorseClient`; `RecommendationFeedServiceImpl` runs a Source → Hydrator → Filter → Scorer → Selector pipeline with a `gorse` circuit breaker and degrades to the popularity ranking then the chronological feed. `user_events` has two writers with opposite durability contracts: `UserEventRecorder` produces `session_start`, `search`, and `profile_view` off the request thread, dropping rows rather than failing or extending the caller's request; `RecommendationFeedbackConsumer` turns `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, and `comment.created.v1` into idempotent append-only rows plus Gorse feedback, because those are the canonical record Gorse is rebuilt from. `UserEventsPartitionJob` maintains a rolling window of monthly partitions covering the current month and the next two. See `docs/modules/recommendation/README.md`.
+- **`recommendation`**: Owns `user_events` and the personalized ranked feed.
+`user_events` lives in ClickHouse (`luvax_analytics.user_events`), not PostgreSQL.
+The feed is backed by the external Gorse recommender, reached over REST through `GorseClient`; `RecommendationFeedServiceImpl` runs a Source → Hydrator → Filter → Scorer → Selector pipeline with a `gorse` circuit breaker and degrades to the popularity ranking then the chronological feed.
+`user_events` has three writers: `UserEventRecorder` produces `session_start`, `search`, and `profile_view` off the request thread with `wait_for_async_insert=0`, dropping rows rather than failing or extending the caller's request; `RecommendationFeedbackConsumer` turns `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1` and `comment.liked.v1` into idempotent append-only rows and then Gorse feedback, ClickHouse first, and stores the exact Gorse type and value it sent; `UserEventImportConsumer` writes `recommendation.user-event.imported.v1` events (the seed's path) and never sends them to Gorse.
+The For You read-set and the hashtag affinity recompute both read ClickHouse.
+`rebuild/` holds the operator-triggered Gorse rebuild (`GorseRebuildRunner`, `GorseRebuildServiceImpl`), and `GorsePurger` is the shared Gorse store truncation used by it and by the seed reset.
+See `docs/modules/recommendation/README.md`.
 
 ### Transactional Outbox / Inbox Pattern
 
@@ -231,13 +250,18 @@ All domain events flow through shared outbox/inbox infrastructure in `common/out
 ### Test Coverage
 
 Generated by `./scripts/regenerate_struct_figures.sh tests`, which counts what `git ls-files`
-reports under `src/test/java` rather than what this table last said; 301 test classes total.
+reports under `src/test/java` rather than what this table last said; 331 test classes total.
 Re-run it and paste the output back here whenever a test class is added, moved or renamed.
 
 | Package | Test Classes |
 |---------|-------------|
 | `(root)` | `ApplicationTests` |
-| `common` | `ApiConstantsSocialTest`, `ApiConstantsUnroutedFieldsTest`, `UpdatedAtSingleWriterIT` |
+| `common` | `AnalyticsRollbackScriptIT`, `ApiConstantsSocialTest`, `ApiConstantsUnroutedFieldsTest`, `UpdatedAtSingleWriterIT` |
+| `common/analytics` | `AnalyticsHealthIsolationIT`, `AnalyticsStoreTruncatorTest`, `ClickHouseErrorTranslatorTest`, `ClickHouseOperationsIT`, `ProvisioningScriptParityTest` |
+| `common/analytics/impl` | `ClickHouseOperationsImplTest` |
+| `common/analytics/ingest` | `AnalyticsIngestionControllerTest`, `AnalyticsOutageIT` |
+| `common/analytics/migration` | `ClickHouseMigrationRunnerIT`, `ClickHouseMigrationScriptTest` |
+| `common/analytics/observability` | `AnalyticsMetricsTest` |
 | `common/base` | `BaseControllerTest` |
 | `common/config` | `ManagementPortAccessIT`, `ProdProfileConsumerActivationIT`, `RequiredEnvironmentGuardTest` |
 | `common/config/elasticsearch` | `ElasticsearchConfigTest`, `ElasticsearchHealthIT` |
@@ -267,18 +291,20 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `common/security/user` | `UserPrincipalTest` |
 | `common/security/util` | `CachedBodyHttpServletRequestTest`, `IpExtractorTest`, `SecurityUtilsTest` |
 | `common/security/websocket` | `BrokerSendGuardRegistrationIT`, `BrokerTopicSendGuardIT`, `JwtHandshakeInterceptorTest`, `WebSocketHandshakeRateLimitIT`, `WebSocketRevocationIT`, `WebSocketRevocationSweepServiceTest` |
-| `common/seed` | `CommentAndEngagementSeedWriterIT`, `DomainWritersSeedWriterIT`, `MediaAndSocialGraphSeedWriterIT`, `PostSeedWriterIT`, `SeedDataLoaderRealDataTest`, `SeedDataLoaderTest`, `SeedOutboxEmitterIT`, `SeedProfileConsumerOverrideIT`, `SeedResetServiceIT`, `SeedRunnerDatasourceGuardTest`, `SeedRunnerIT`, `SeedTimelineTest`, `SupportSeedWriterIT`, `UserSeedWriterIT` |
+| `common/seed` | `CommentAndEngagementSeedWriterIT`, `DomainWritersSeedWriterIT`, `MediaAndSocialGraphSeedWriterIT`, `PostSeedWriterIT`, `SeedAnalyticsDrainIT`, `SeedDataLoaderRealDataTest`, `SeedDataLoaderTest`, `SeedOutboxEmitterIT`, `SeedProfileConsumerOverrideIT`, `SeedResetServiceIT`, `SeedRunnerDatasourceGuardTest`, `SeedRunnerIT`, `SeedTimelineTest`, `SupportSeedWriterIT`, `UserSeedWriterIT` |
+| `common/seed/writer` | `AnalyticsSeedWriterTest` |
 | `common/settings/service/impl` | `SystemSettingServiceImplTest` |
 | `common/text` | `SnippetsTest` |
 | `common/turnstile` | `AuthTurnstileGuardTest`, `TurnstilePropertiesValidationTest`, `TurnstileVerifierTest` |
 | `common/vocabulary/controller` | `VocabularyControllerIT` |
 | `common/web` | `StrictQueryParameterInterceptorTest` |
-| `modules/admin/controller` | `AdminContentControllerIT`, `AdminControllerIT`, `AdminDisciplineControllerIT`, `AdminHashtagControllerIT`, `AdminStatsControllerIT`, `AdminUserControllerIT`, `AdminUserEventControllerIT` |
+| `modules/admin/consumer` | `AdminActionReplicationConsumerIT`, `PlatformStatsIngestConsumerIT` |
+| `modules/admin/controller` | `AdminActionListingFallbackIT`, `AdminContentControllerIT`, `AdminControllerIT`, `AdminDisciplineControllerIT`, `AdminHashtagControllerIT`, `AdminStatsControllerIT`, `AdminUserControllerIT`, `AdminUserEventControllerIT` |
 | `modules/admin/dto/request` | `AdminUpdateHashtagRequestDeserializationTest` |
 | `modules/admin/messaging` | `ModerationMailEventHandlerTest` |
-| `modules/admin/repository` | `AdminActionKeysetRowLossIT`, `AdminActionRepositoryTest`, `AdminContentMediaStatementCountIT`, `UserWarningRepositoryIT` |
+| `modules/admin/repository` | `AdminActionClickHouseKeysetRowLossIT`, `AdminActionKeysetRowLossIT`, `AdminActionReplicationTriggerIT`, `AdminActionRepositoryTest`, `AdminContentMediaStatementCountIT`, `PlatformStatsDailySemanticsIT`, `UserWarningRepositoryIT` |
 | `modules/admin/service` | `AdminActionRecorderTest`, `StatsBucketsTest` |
-| `modules/admin/service/impl` | `AdminAuthorizationServiceImplTest`, `AdminHashtagServiceImplTest`, `AdminServiceImplTest`, `AdminUserEventServiceImplTest`, `AdminUserServiceImplTest`, `ModerationNoticeServiceImplTest`, `PlatformStatsIT`, `StatsCollectionJobTest`, `SuspensionExpiryServiceImplTest`, `UserDisciplineServiceImplTest` |
+| `modules/admin/service/impl` | `AdminAuthorizationServiceImplTest`, `AdminHashtagServiceImplTest`, `AdminServiceImplTest`, `AdminStatsServiceImplTest`, `AdminUserEventServiceImplTest`, `AdminUserServiceImplTest`, `ModerationNoticeServiceImplTest`, `PlatformStatsIT`, `StatsCollectionJobTest`, `SuspensionExpiryServiceImplTest`, `UserDisciplineServiceImplTest` |
 | `modules/auth/controller` | `AuthControllerIT`, `PasswordPolicyIT` |
 | `modules/auth/converter` | `OAuthProviderConverterTest` |
 | `modules/auth/cookie` | `RefreshTokenCookieManagerTest` |
@@ -315,7 +341,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/notification/entity/converter` | `NotificationTypeConverterTest` |
 | `modules/notification/live` | `NotificationLiveDeliveryIT`, `NotificationLiveFanoutConsumerTest`, `NotificationOnlyWebSocketConfigIT`, `NotificationPushLatencyIT`, `NotificationWebSocketSubscriptionAuthIT` |
 | `modules/notification/messaging` | `AdminNotificationConsumerTest`, `SocialNotificationConsumerIT`, `SocialNotificationConsumerTest` |
-| `modules/notification/migration` | `NotificationOverhaulMigrationIT` |
+| `modules/notification/migration` | `NotificationAdminActionForeignKeyIT`, `NotificationOverhaulMigrationIT` |
 | `modules/notification/repository` | `NotificationAggregationRepositoryIT`, `NotificationFeedRepositoryIT`, `NotificationSeenStateRepositoryIT` |
 | `modules/notification/service/impl` | `NotificationItemAssemblerTest`, `NotificationServiceImplTest`, `NotificationTypePolicyTest` |
 | `modules/post/consumer` | `PostIndexSyncConsumerIT`, `PostIndexSyncConsumerTest`, `PostNotificationConsumerIT`, `PostNotificationConsumerTest` |
@@ -325,14 +351,17 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/post/repository` | `PostKeysetRowLossIT` |
 | `modules/post/service/impl` | `PostAuthorEmbeddingIT`, `PostByHashtagSearchReaderTest`, `PostByHashtagServiceImplTest`, `PostLikeEventPublishingIT`, `PostLikeServiceImplTest`, `PostPreviewServiceImplTest`, `PostResponseAssemblerTest`, `PostSaveServiceImplTest`, `PostSearchServiceImplTest`, `PostServiceImplTest`, `PostViewServiceImplTest`, `PostViewerStateIT`, `PostViewerStateServiceImplTest`, `PostVisibilityServiceImplTest` |
 | `modules/post/validation` | `PostTypeFilterTest` |
-| `modules/recommendation/client/impl` | `GorseClientImplTest` |
+| `modules/recommendation/client/impl` | `GorseClientImplTest`, `GorsePurgerIT` |
 | `modules/recommendation/config` | `RecommendationPropertiesTest` |
-| `modules/recommendation/consumer` | `RecommendationFeedbackConsumerTest` |
+| `modules/recommendation/consumer` | `RecommendationFeedbackConsumerTest`, `UserEventImportConsumerIT` |
 | `modules/recommendation/controller` | `ImpressionIngestIT`, `RecommendationControllerIT` |
 | `modules/recommendation/dto/request` | `ImpressionRequestValidationTest` |
-| `modules/recommendation/repository` | `AffinityProfileDepthIT`, `SuggestionReadFilterIT`, `UserEventRepositoryImplIT`, `UserHashtagAffinityRepositoryIT` |
+| `modules/recommendation/migration` | `DormantTablesDropIT` |
+| `modules/recommendation/rebuild` | `GorseRebuildRunnerTest`, `GorseRebuildServiceIT` |
+| `modules/recommendation/rebuild/impl` | `GorseRebuildServiceImplTest` |
+| `modules/recommendation/repository` | `AffinityProfileDepthIT`, `HashtagAffinityClickHouseIT`, `SuggestionReadFilterIT`, `UserEventAnalyticsRepositoryIT`, `UserEventKeysetRowLossIT`, `UserHashtagAffinityRepositoryIT` |
 | `modules/recommendation/service` | `UserEventRecordingIT` |
-| `modules/recommendation/service/impl` | `RecommendationFeedServiceImplTest`, `SuggestionRowMappingTest`, `SuggestionServiceImplTest`, `UserEventsPartitionJobTest` |
+| `modules/recommendation/service/impl` | `RecommendationFeedServiceImplTest`, `SuggestionRowMappingTest`, `SuggestionServiceImplTest` |
 | `modules/recommendation/service/impl/feed` | `RecommendationSourceTest` |
 | `modules/report/controller` | `ReportControllerIT` |
 | `modules/report/repository` | `ReportKeysetRowLossIT`, `ReportQueueIndexIT`, `ReportRepositoryIT` |
@@ -351,7 +380,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/users/mapper` | `UserMapperTest` |
 | `modules/users/repository` | `UserRepositorySurfaceTest` |
 | `modules/users/service/impl` | `UserProfileViewerStateIT`, `UserSearchIT`, `UserSearchServiceImplTest`, `UserServiceImplTest`, `UserSummaryServiceIT`, `UserSummaryServiceImplTest`, `UsernameLookupIT` |
-| `testsupport` | `TestContainerImages` |
+| `testsupport` | `ClickHouseTestSupport`, `TestContainerImages` |
 
 ---
 
@@ -360,7 +389,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 ### Database
 
 - Engine: **PostgreSQL** (docker-compose builds `./docker/postgres` on the `postgres:latest` base)
-- Migration: **Flyway** (`out-of-order: false`); 126 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109, V110, V121, V122 and V125 build or drop their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those nineteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V126 all exist.
+- Migration: **Flyway** (`out-of-order: false`); 133 migrations at `src/main/resources/db/migration/`. V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109, V110, V121, V122 and V125 build or drop their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those nineteen sidecars are the only ones in the tree. Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`. Every other migration adds no index and runs in the ordinary transactional mode. The numbering has no gaps: V01 through V133 all exist.
 
 | Migration | Description |
 |-----------|-------------|
@@ -490,6 +519,13 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | V124 | add_outbox_trace_context |
 | V125 | add_outbox_retention_indexes |
 | V126 | create_pg_stat_statements_extension |
+| V127 | add_admin_actions_replication_version |
+| V128 | add_notifications_admin_action_fk |
+| V129 | validate_notifications_admin_action_fk |
+| V130 | drop_platform_stats |
+| V131 | drop_user_events |
+| V132 | drop_dormant_recommendation_tables |
+| V133 | create_gorse_rebuild_runs |
 
 - Reference schema: `database/schema.sql` (authoritative final-state; not applied by Flyway)
 - Extensions: `pgcrypto` (UUID gen), `pg_trgm` (fuzzy username search), `btree_gin` (composite GIN indexes)
@@ -504,7 +540,6 @@ means a migration: these are domain primitives, not configuration.
 |------|--------|
 | `admin_action_type` | `ban_user`, `unban_user`, `suspend_user`, `unsuspend_user`, `remove_post`, `restore_post`, `remove_comment`, `restore_comment`, `resolve_report`, `dismiss_report`, `change_user_role`, `warn_user`, `revoke_warning`, `issue_strike`, `revoke_strike`, `escalate_report`, `force_logout`, `create_hashtag`, `edit_hashtag`, `ban_hashtag`, `unban_hashtag`, `delete_hashtag`, `remove_story`, `restore_story`, `remove_message`, `restore_message`, `revoke_session`, `pin_hashtag`, `unpin_hashtag`, `respond_support_ticket`, `reject_support_ticket`, `escalate_support_ticket`, `grant_verification`, `reject_verification`, `revoke_verification` (35 values). Every value has a caller. `revoke_session` ends exactly one session, distinct from `force_logout`, which ends every session on the account. |
 | `email_delivery_status` | `pending`, `sent`, `failed`, `throttled`, `skipped` (5 values). |
-| `event_type` | `post_view`, `post_like`, `post_unlike`, `post_save`, `post_unsave`, `post_share`, `post_comment`, `story_view`, `story_reply`, `profile_view`, `profile_follow`, `profile_unfollow`, `search`, `hashtag_click`, `comment_like`, `comment_reply`, `message_send`, `session_start`, `session_end`, `app_open` (20 values). |
 | `follow_status` | `pending`, `accepted` (2 values). |
 | `hashtag_status` | `active`, `banned`, `deleted` (3 values). |
 | `media_type` | `image`, `video` (2 values). |
@@ -517,7 +552,6 @@ means a migration: these are domain primitives, not configuration.
 | `report_reason` | `spam`, `nudity`, `violence`, `hate_speech`, `harassment`, `false_information`, `scam`, `other` (8 values). |
 | `report_status` | `pending`, `reviewing`, `resolved`, `dismissed`, `escalated` (5 values). |
 | `report_type` | `post`, `comment`, `user`, `story`, `message` (5 values). |
-| `stat_granularity` | `half_hour`, `day` (2 values). |
 | `story_type` | `image`, `video` (2 values). |
 | `support_category` | `appeal_ban`, `appeal_suspension`, `appeal_warning_strike`, `appeal_content_removal`, `account_access`, `account_data`, `bug_report`, `safety_concern`, `other`, `verification_request` (10 values). |
 | `support_source` | `authenticated`, `signed_link`, `public_form` (3 values). |
@@ -525,6 +559,10 @@ means a migration: these are domain primitives, not configuration.
 | `user_role` | `user`, `moderator`, `admin` (3 values). |
 | `user_status` | `active`, `suspended`, `deactivated`, `banned` (4 values). |
 | `verification_revocation_actor` | `moderator`, `system` (2 values). |
+
+`event_type` (dropped with `user_events` in V131) and `stat_granularity` (dropped with `platform_stats` in V130) are no longer PostgreSQL types.
+The user event types live on as the ClickHouse `Enum8` on `luvax_analytics.user_events.event_type` and as `UserEventType`, and `StatGranularity` is now only the API's `half_hour` or `day` choice.
+The regeneration script lists the two dropped types from the migrations that created them; the live set is that union less these two.
 
 ### Cache — Redis
 
@@ -594,6 +632,13 @@ The appeal window is thirty days because the notice arrives unannounced and is r
 | `recommendation.feedback.queue` | `recommendation.feedback.dlq` | `recommendation.feedback.dead-letter` |
 | `post.notification.queue` | `post.notification.dlq` | `post.notification.dead-letter` |
 | `admin.notification.queue` | `admin.notification.dlq` | `admin.notification.dead-letter` |
+| `admin.action.replication.queue` | `admin.action.replication.dlq` | `admin.action.replication.dead-letter` |
+| `admin.platform-stats.queue` | `admin.platform-stats.dlq` | `admin.platform-stats.dead-letter` |
+| `recommendation.user-event.import.queue` | `recommendation.user-event.import.dlq` | `recommendation.user-event.import.dead-letter` |
+
+That is 13 queues and their 13 dead-letter queues, 26 durable queues in all.
+Seventeen consumer classes each carry one `@RabbitListener` method.
+The four analytics listeners (`adminActionReplication`, `platformStatsIngest`, `userEventImport`, `recommendationFeedback`) start with `autoStartup = false` and are started and stopped by `AnalyticsIngestionController`.
 
 `AUDIT_LOG_QUEUE`, `MODERATION_QUEUE` and `SEARCH_INDEX_QUEUE` are name constants only: they are
 declared in `RabbitMqTopologyConfig` and reserved, and no `@Bean` declares them, so the broker
@@ -619,8 +664,11 @@ never sees them.
 | `comment.notification.queue` | `comment.unliked.v1` | `CommentRabbitBindingConfig` |
 | `post.notification.queue` | `post.liked.v1`, `post.unliked.v1` | `PostRabbitBindingConfig` |
 | `story.notification.queue` | `story.viewed.v1` | `StoryRabbitBindingConfig` |
-| `recommendation.feedback.queue` | `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1` | `RecommendationRabbitBindingConfig` |
+| `recommendation.feedback.queue` | `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1`, `comment.liked.v1` | `RecommendationRabbitBindingConfig` |
 | `admin.notification.queue` | `user.warned.v1` | `AdminRabbitBindingConfig` |
+| `admin.action.replication.queue` | `admin.action.recorded.v1`, `admin.action.changed.v1` | `AdminAnalyticsRabbitBindingConfig` |
+| `admin.platform-stats.queue` | `admin.platform-stats.collected.v1` | `AdminAnalyticsRabbitBindingConfig` |
+| `recommendation.user-event.import.queue` | `recommendation.user-event.imported.v1` | `RecommendationRabbitBindingConfig` |
 | `moderation.mail.queue` | `admin.moderation-notice.requested.v1` | `AdminRabbitBindingConfig` |
 | `comment.live.events` (exchange) | `comment.#` (wildcard, exchange-to-exchange) | `RabbitMqTopologyConfig` |
 | `message.live.events` (exchange) | `message.#` (wildcard, exchange-to-exchange) | `RabbitMqTopologyConfig` |
@@ -632,6 +680,92 @@ never sees them.
 - `publisher-returns: true` — unroutable messages returned to sender
 - `template.mandatory: true` — mandatory flag on every send
 - `listener.simple/direct.acknowledge-mode: manual` — consumers ack/nack explicitly
+
+### Analytics - ClickHouse
+
+- Database `luvax_analytics` on the observability stack's ClickHouse, pinned to the 26.3 LTS line (`26.3.33.24`).
+- The database, its users and its settings profiles are provisioned by `observability/clickhouse/initdb/02-create-analytics.sh`, not by the application.
+- Local development reaches it at `jdbc:clickhouse://localhost:8123/luvax_analytics`; production reaches it over the `coolify` network.
+- Client: `com.clickhouse:jdbc-v2` 0.10.0 through plain JDBC and `JdbcClient`; every call goes through `ClickHouseOperations` (`read`, `readBatch`, `write`, `isReady`).
+- `app.analytics.enabled` (`ANALYTICS_ENABLED`, default `true`) switches the tier off.
+  Surefire pins it to `false`; with it off, `DisabledClickHouseOperations` throws `ClickHouseUnavailableException` on every call, so reads that have a fallback use it and the analytics consumers are absent.
+
+**Local development**:
+- Start ClickHouse with `docker compose -f observability/compose.local.yaml --profile observability up -d clickhouse`; on a fresh volume `initdb` provisions the users, and on an existing volume run `docker exec <clickhouse container> bash /docker-entrypoint-initdb.d/02-create-analytics.sh`.
+- Set `ANALYTICS_CLICKHOUSE_WRITER_PASSWORD`, `ANALYTICS_CLICKHOUSE_READER_PASSWORD` and `ANALYTICS_CLICKHOUSE_MIGRATOR_PASSWORD` in `.env` to the values of the matching `CLICKHOUSE_ANALYTICS_*_PASSWORD` variables of the observability stack; the other `ANALYTICS_*` keys in `.env.example` have working local defaults.
+- The backend starts without ClickHouse, retries the schema every 30 seconds, and serves the audit log from PostgreSQL until it is ready.
+
+**Tables** (all `ReplacingMergeTree`, all with `fsync_after_insert = 1`):
+
+| Table | Role | Sorting key | Retention |
+|-------|------|-------------|-----------|
+| `user_events` | System of record | `(user_id, event_type, created_at, id)`, monthly partitions | 12 months; whole monthly parts are dropped (`ttl_only_drop_parts`) |
+| `admin_actions` | Replica of PostgreSQL `admin_actions`, version column `row_version` | `(created_at, id)`, yearly partitions | Permanent |
+| `platform_stats` | System of record, version column `computed_at` | `(metric_key, bucket_start, dimension)`, yearly partitions | Permanent |
+
+**Users and profiles** (created by the provisioning script):
+
+| User | Grants | Used by |
+|------|--------|---------|
+| `luvax_analytics_writer` | `INSERT` on `luvax_analytics.*` | consumers and `UserEventRecorder` |
+| `luvax_analytics_reader` | `SELECT` on `luvax_analytics.*` | request-path reads and the batch reads |
+| `luvax_analytics_migrator` | DDL, `TRUNCATE`, `OPTIMIZE`, `SELECT`, `INSERT` on `luvax_analytics.*` only | the migration runner and the seed reset |
+| `grafana_reader` | `SELECT` on `luvax_analytics.*` and on `system.asynchronous_insert_log` | the Business dashboards |
+
+Each application user runs under a settings profile with a per-user memory cap marked `CONST` (writer 512 MiB, reader 1 GiB, migrator 512 MiB), `max_threads = 2` and a query time cap, so analytics can never hold more than 2 GiB of the server's memory.
+
+**Pools** (`ClickHouseDataSourceConfig`, `@Bean(defaultCandidate = false)` with a `@Qualifier`, so an unqualified `DataSource` or `JdbcClient` is still PostgreSQL):
+- `writer` (12 connections, socket timeout `PT10S`), `reader` (6, `PT25S`), `batch` (2, `PT5M`, reader credentials) and `migrator`.
+- Every pool sets `retry=0`, a 2 second connection and checkout timeout, and `initializationFailTimeout=-1`, so the application starts while ClickHouse is down.
+- `NetworkTimeoutDataSource` sets the socket timeout on every checkout, because HikariCP resets it to 0 after validating a connection (the driver reports 0) and a hung server would otherwise block callers forever.
+- `PrimaryDatabaseHealthConfig` declares a `dbHealthIndicator` over the primary `DataSource` only, so ClickHouse never reaches `/actuator/health`.
+
+**Failure model** (`ClickHouseErrorTranslator`):
+- A driver `SQLException` is translated by ClickHouse error code and SQLState, never by Spring's exception type, because every server error carries SQLState `22000`.
+- A rejected request (a parse, type, unknown-column, result-size, setting-constraint or unknown-enum error) becomes `ClickHouseRequestRejectedException`.
+- Everything else, including an unknown code, a refused connection, a timeout, a memory limit, a missing table, a privilege or an authentication failure, becomes `ClickHouseUnavailableException`, which pauses ingestion rather than dead-lettering data.
+- `ClickHouseOperationsImpl` runs every call through the `clickhouse` circuit breaker, which records only `ClickHouseUnavailableException`.
+- Before the schema gate is ready every call fails with `ClickHouseUnavailableException(NOT_READY)` without touching the breaker.
+
+**Schema management**: an application-owned runner, `ClickHouseMigrationRunner`, applies `src/main/resources/clickhouse/migration/V{n}__{description}.sql` as `luvax_analytics_migrator`.
+- Versions apply in ascending order, and a version lower than the highest applied is refused.
+- The checksum is SHA-256 of the script with line endings normalised to LF, and an edited applied script is refused.
+- Every statement must be safe to run twice, and the history row in `luvax_analytics.schema_migrations` is written only after the last statement succeeds, so no repair step exists.
+- A PostgreSQL advisory lock keeps two instances from migrating at once.
+- `AnalyticsSchemaGate` runs the runner at startup and every `app.analytics.migration.retry-interval` (`PT30S`) until it succeeds, then publishes `AnalyticsSchemaReadyEvent`.
+- Adding a `UserEventType` value means adding the value to the enum and, in the same commit, a `V{n}` script that runs `ALTER TABLE user_events MODIFY COLUMN event_type Enum8(...)` with the full value list.
+
+**Writes** (all through the outbox, except the recorder):
+
+| Event | Producer | Consumer (listener id, concurrency) |
+|-------|----------|-------------------------------------|
+| `admin.action.recorded.v1`, `admin.action.changed.v1` | `AdminActionRecorder`, the V127 trigger, the seed emitter | `AdminActionReplicationConsumer` (`adminActionReplication`, 1) |
+| `admin.platform-stats.collected.v1` | `PlatformStatsCollectionServiceImpl`, the seed | `PlatformStatsIngestConsumer` (`platformStatsIngest`, 2) |
+| `recommendation.user-event.imported.v1` | the seed | `UserEventImportConsumer` (`userEventImport`, 2) |
+| `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1`, `comment.liked.v1` | the owning modules | `RecommendationFeedbackConsumer` (`recommendationFeedback`, `app.recommendation.consumer.concurrency`, default 4) |
+
+- Consumers insert with `async_insert = 1, wait_for_async_insert = 1`, so the acknowledgement follows the part write; the busy timeout (5 to 20 ms) comes from the writer profile.
+- `UserEventRecorder` inserts with `wait_for_async_insert = 0`, at most 8 writes in flight, and drops a row rather than fail the request; drops are counted by reason and ClickHouse's own `FailedAsyncInsertQuery` counter covers the silent failures.
+- Replication is notify-then-fetch: the consumer reads the current PostgreSQL row by id and writes it with its `row_version`, so a late, duplicate or out-of-order event can never regress the replica.
+- On `ClickHouseUnavailableException` a consumer nacks with requeue; any other failure dead-letters as before.
+- `AnalyticsIngestionController` stops the four analytics listener containers while the `clickhouse` breaker is open and starts them when it half-opens or closes, so messages wait in their queues instead of reaching a dead-letter queue.
+  It also exposes `suspend(reason)` and `resume(reason)`, which the Gorse rebuild uses to hold the feedback listener.
+
+**Reads**:
+
+| Read | Store | Behaviour when ClickHouse is unavailable |
+|------|-------|------------------------------------------|
+| Audit-log listing (`GET /admin/actions`, per-user) | ClickHouse, `FINAL`, ties ordered by `toString(id)` | Falls back to PostgreSQL with the same cursor; `luvax.analytics.audit_log.fallback` counts it |
+| Audit action by id, appeal recovery, support appeals, moderation notices | PostgreSQL | Not affected |
+| Activity log (`AdminUserEventServiceImpl`) | ClickHouse, `FINAL`, mandatory window | `503 ANALYTICS_UNAVAILABLE` |
+| Platform statistics current and series | ClickHouse, `FINAL` | `503 ANALYTICS_UNAVAILABLE` for the whole response |
+| For You read-set (`RecommendationSource`) | ClickHouse, no `FINAL` (a set, duplicates are harmless) | Degrades to Gorse results only; never touches the `gorse` breaker |
+| Hashtag affinity recompute | ClickHouse signals into a temporary PostgreSQL stage table | The previous rows stay; the job waits for the next cycle |
+
+**Metrics** (Prometheus names): `luvax_analytics_user_events_dropped_total{reason}`, `luvax_analytics_audit_log_fallback_total`, `luvax_analytics_ingestion_running{listener}`, `luvax_analytics_schema_ready`, and the `luvax_gorse_rebuild_*` family.
+
+**Rollback**: `scripts/rollback/phase2_postgres_rollback.sql` recreates the dropped tables and removes V127 to V133 from `flyway_schema_history`.
+It must run with the new backend stopped and before the previous backend image starts, because that image refuses to start on Flyway rows it does not know.
 
 ### Search — Elasticsearch
 
@@ -659,7 +793,9 @@ Pre-configured Resilience4j (dev and prod profiles):
 | Component | Instance | Dev config | Prod config |
 |-----------|----------|------------|-------------|
 | Circuit breaker | `default` | 10-call sliding window, 5 min calls, 50% failure threshold, 10s open wait, 3 half-open calls | 20-call sliding window, 10 min calls, 50% threshold, 30s open wait, 5 half-open calls |
+| Circuit breaker | `clickhouse` | COUNT_BASED 10-call, 5 min calls, 50% threshold, 10s open wait, 3 half-open, auto-transition; records only `ClickHouseUnavailableException`, ignores `ClickHouseRequestRejectedException`; no health indicator | COUNT_BASED 20-call, 10 min calls, 50% threshold, 30s open wait, 3 half-open, auto-transition, 10s slow-call threshold, 80% slow-call rate; same exception lists; no health indicator |
 | Circuit breaker | `elasticsearchSearch` | COUNT_BASED 10-call, 50% threshold, 10s open wait, 3 half-open, auto-transition | COUNT_BASED 20-call, 50% threshold, 30s open wait, 5 half-open, auto-transition, 5s slow-call threshold, 80% slow-call rate |
+| Rate limiter | `gorseRebuild` | `app.recommendation.gorse-rebuild.requests-per-second` (default 5) per 1s, 30s timeout | same |
 | Rate limiter | `lowTraffic` | 3,000 req / 30s, 5s timeout | 3,000 req / 30s, 5s timeout |
 | Rate limiter | `mediumTraffic` | 6,000 req / 30s, 5s timeout | 6,000 req / 30s, 5s timeout |
 | Rate limiter | `highTraffic` | 9,000 req / 30s, 5s timeout | 9,000 req / 30s, 5s timeout |
@@ -689,6 +825,7 @@ buckets on the key that matched rather than on the concrete request path.
 | Cache | Redis |
 | Message broker | RabbitMQ |
 | Search | Elasticsearch 9.2.5 (`spring-boot-starter-data-elasticsearch`) |
+| Analytics store | ClickHouse 26.3 LTS (`com.clickhouse:jdbc-v2` 0.10.0) |
 | Object storage | Cloudflare R2 via AWS SDK v2 (`software.amazon.awssdk:s3 2.25.60`) |
 | Transactional email | Resend SDK (`resend-java 3.1.0`) |
 | Build | Maven (`./mvnw`) |
@@ -699,7 +836,7 @@ buckets on the key that matched rather than on the concrete request path.
 | Code generation | Lombok, MapStruct 1.6.3 |
 | Observability | Micrometer Tracing with the OpenTelemetry bridge, OTLP export of traces and logs, Prometheus scrape on the management port, datasource-micrometer 2.2.1, Spring Actuator |
 | Formatting | Spotless 2.46.1 (Google AOSP); run `./mvnw spotless:apply` |
-| Testing | JUnit 5, Testcontainers 1.21.4 (postgresql, elasticsearch), Spring Boot test starters |
+| Testing | JUnit 5, Testcontainers 1.21.4 (postgresql, clickhouse, elasticsearch), Spring Boot test starters |
 | CI/CD | GitHub Actions (`.github/workflows/pr-lint.yml`, `pr-size.yml`, `sonarcloud.yml`) |
 
 ---
@@ -744,9 +881,24 @@ Implemented in `common/security/` and `modules/auth/`:
   - `hashtags`: `post_count`
   - `stories`: `view_count`, `like_count`
   - `notifications`: `actor_count`
-- **`user_events` partitioning**: partitioned by month (`PARTITION BY RANGE (created_at)`) with a `DEFAULT` catch-all. A write whose month has no partition therefore does not fail; it lands in the catch-all, and once it does that month's partition can never be created (`updated partition constraint for default partition would be violated by some row`). `UserEventsPartitionJob` keeps the current month plus two ahead declared, daily. Rows accumulating in `user_events_default` are the signal that the horizon has fallen behind.
-- **`user_events` reads**: always bounded by `created_at`. A read bounded only by `user_id` prunes nothing and touches every partition ever declared, which is why the activity log makes the time window mandatory. Measured: a window inside one month scans one partition, a window crossing a boundary scans exactly two, and a window reaching past the last declared partition scans the catch-all as well.
-- **`platform_stats`**: written only by `StatsCollectionJob` and `StatsRollupJob`, never from a Controller or Service on a request path. Gauges are absolute snapshots bounded by the bucket end; flows are direct counts over the bucket window and are never derived by subtracting consecutive gauges. The roll-up sums flows and takes the last bucket for gauges — summing gauges multiplies a total by the number of buckets in the day. There is no backfill: a bucket never collected can never be collected later, and the bucket a process starts inside is deliberately skipped. A single application instance is assumed; there is no distributed scheduler lock, and the composite primary key with `ON CONFLICT DO UPDATE` is what keeps a double run harmless rather than duplicative.
+- **`user_events`**: lives in ClickHouse, not PostgreSQL.
+  The sorting key is `(user_id, event_type, created_at, id)` and the engine keeps one row per key, so a redelivered event folds away on merge; reads that must be exact use `FINAL`, and a read that only builds a set (the For You read-set) does not.
+  `event_type` is an `Enum8`, so an unknown value is rejected (code 691) the way the PostgreSQL enum rejected it, and adding a `UserEventType` value needs a ClickHouse migration in the same commit.
+  Rows are kept 12 months; whole monthly parts are dropped once every row has expired.
+  Every read is bounded by `created_at`: the activity log requires a window of at most 30 days.
+  `feedback_type` and `feedback_value` hold the exact Gorse feedback the row was sent with, null when it was never sent, so a Gorse rebuild reproduces what the live pipeline accumulated.
+  `created_at` is always supplied by the writer, never defaulted, because an async insert is processed at flush time.
+- **`platform_stats`**: lives in ClickHouse and is written only through `admin.platform-stats.collected.v1`, never from a Controller or Service on a request path.
+  Gauges are absolute snapshots bounded by the bucket end; flows are direct counts over the bucket window and are never derived by subtracting consecutive gauges.
+  Only half-hour buckets are stored; daily figures are computed at query time, summing flows and taking the last bucket of the day for gauges, because summing gauges multiplies a total by the number of buckets in the day.
+  A day belongs to a daily series when its UTC midnight falls in the window, and the day in progress is never returned.
+  There is no backfill: a bucket never collected can never be collected later, and the bucket a process starts inside is deliberately skipped.
+  A single application instance is assumed; a double run restates a bucket rather than doubling it, because both events land on the same sorting key and the later `computed_at` wins under `FINAL`.
+- **`admin_actions` replica**: PostgreSQL is the system of record and ClickHouse holds a listing replica.
+  The application never updates a row, but PostgreSQL does: `admin_id`, `target_user_id` and `report_id` are `ON DELETE SET NULL`.
+  A `row_version` column, bumped by a trigger on every real change, lets `ReplacingMergeTree(row_version)` keep the newest state whatever order events arrive in, and a second trigger enqueues `admin.action.changed.v1` in the same transaction.
+  Reads that dereference an audit row by id (the detail drawer, appeal recovery, support appeals, moderation notices, the discipline ladder, `notifications.admin_action_id`) stay on PostgreSQL; only the listing reads the replica, and it falls back to PostgreSQL under the same cursor, with ties ordered by `toString(id)` because ClickHouse's native UUID order differs from PostgreSQL's.
+- **Analytics reads lag writes by seconds**: an analytics row is visible after the outbox publishes it and the consumer writes it, so a screen fed by ClickHouse can trail the action that produced it.
 - **Message tombstones**: `messages` carries two independent ones. The sender-owned pair `is_deleted`/`deleted_at` is set together and clears `content`, which makes a sender's own deletion irreversible. `admin_removed_at` (V77) is the moderation tombstone; it preserves every payload so a restore can return the message, and clearing it never undoes a sender deletion. A message is hidden when either is set, and the read path withholds text, media and shares for an administrative removal.
 - **Comment and story tombstones**: both tables carry two independent ones since V95. `deleted_at` is the owner's own deletion; `admin_removed_at` is the moderation tombstone. A row is hidden when either is set, an administrative restore clears only `admin_removed_at` and never undoes an owner deletion, and the entity `@SQLRestriction` on both covers every JPQL and derived read, so only native SQL restates the predicate. `posts` solved the same problem with `status_before_moderation` (V59) and `messages` with `admin_removed_at` (V77). Rows an administrator removed before V95 keep only their `deleted_at`, so they stay hidden but now read as owner deletions and can no longer be administratively restored; there was no way to tell them apart and no backfill was attempted.
 - **Story moderation and expiry**: expiry keeps deciding visibility independently of both tombstones, so a story that expired while removed does not return to a feed when restored, and the cleanup job hard-deletes rows that are expired and carry either tombstone, after which a restore answers not-found.
@@ -755,7 +907,5 @@ Implemented in `common/security/` and `modules/auth/`:
 - **Comment depth cap**: `CHECK (depth BETWEEN 0 AND 10)`; adjacency list uses `root_id` for subtree queries.
 - **Follow visibility**: insert to `follows` with `is_private = true` target → `status = 'pending'`; counters increment only on `status = 'accepted'` (trigger-enforced).
 - **Story expiry**: `expires_at DEFAULT NOW() + INTERVAL '24 hours'`; `idx_stories_expires` implies a cleanup job.
-- **`post_interaction_scores`**: written by background scheduler only — not from Controller or Service layers.
-- **`user_similarity`**: `user_id_a < user_id_b` constraint eliminates duplicate pairs; populated by batch/ML jobs.
 - **Config tables**: `notification_type_configs`, `moderation_action_configs`, `report_reason_configs` (V18) store display metadata for enum values. See `docs/modules/GLOBAL_RULES.md` for the enum/config table contract.
 - **Swagger path**: configured at `/api-docs` in `application-dev.yml`; disabled in prod.

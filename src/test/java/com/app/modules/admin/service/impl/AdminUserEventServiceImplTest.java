@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -21,10 +22,18 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.app.common.analytics.ClickHouseUnavailableException;
+import com.app.common.analytics.ClickHouseUnavailableException.Reason;
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
+import com.app.common.response.CursorPageResponse;
 import com.app.modules.admin.service.AdminAuthorizationService;
-import com.app.modules.recommendation.repository.UserEventRepository;
+import com.app.modules.recommendation.dto.response.UserEventResponse;
+import com.app.modules.recommendation.enums.UserEventType;
+import com.app.modules.recommendation.repository.UserEventAnalyticsRepository;
+import com.app.modules.recommendation.repository.UserEventRow;
+
+import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class AdminUserEventServiceImplTest {
@@ -32,14 +41,18 @@ class AdminUserEventServiceImplTest {
     private static final OffsetDateTime NOW = OffsetDateTime.now(ZoneOffset.UTC);
     private static final UUID ACTOR = UUID.randomUUID();
 
-    @Mock private UserEventRepository userEventRepository;
+    @Mock private UserEventAnalyticsRepository userEventAnalyticsRepository;
     @Mock private AdminAuthorizationService adminAuthorizationService;
 
     private AdminUserEventServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new AdminUserEventServiceImpl(userEventRepository, adminAuthorizationService);
+        service =
+                new AdminUserEventServiceImpl(
+                        userEventAnalyticsRepository,
+                        adminAuthorizationService,
+                        JsonMapper.builder().build());
     }
 
     @Test
@@ -69,12 +82,13 @@ class AdminUserEventServiceImplTest {
 
     @Test
     void listUserEvents_windowOfExactlyThirtyDays_isAccepted() {
-        when(userEventRepository.findPage(any(), any(), any(), any(), any(), any(), anyInt()))
+        when(userEventAnalyticsRepository.findPage(
+                        any(), any(), any(), any(), any(), any(), anyInt()))
                 .thenReturn(List.of());
 
         service.listUserEvents(ACTOR, null, NOW.minusDays(30), NOW, null, null, 20);
 
-        verify(userEventRepository)
+        verify(userEventAnalyticsRepository)
                 .findPage(
                         eq(null),
                         eq(NOW.minusDays(30)),
@@ -87,12 +101,14 @@ class AdminUserEventServiceImplTest {
 
     @Test
     void listUserEvents_limitAboveMax_isClampedBeforeTheRead() {
-        when(userEventRepository.findPage(any(), any(), any(), any(), any(), any(), anyInt()))
+        when(userEventAnalyticsRepository.findPage(
+                        any(), any(), any(), any(), any(), any(), anyInt()))
                 .thenReturn(List.of());
 
         service.listUserEvents(ACTOR, UUID.randomUUID(), NOW.minusDays(1), NOW, null, null, 5000);
 
-        verify(userEventRepository).findPage(any(), any(), any(), any(), any(), any(), eq(101));
+        verify(userEventAnalyticsRepository)
+                .findPage(any(), any(), any(), any(), any(), any(), eq(101));
     }
 
     // The role gate runs ahead of the window validation, so a non-administrator is refused without
@@ -113,8 +129,48 @@ class AdminUserEventServiceImplTest {
                                 assertThat(((AppException) e).getErrorCode())
                                         .isEqualTo(ApiErrorCode.FORBIDDEN));
 
-        verify(userEventRepository, never())
+        verify(userEventAnalyticsRepository, never())
                 .findPage(any(), any(), any(), any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void listUserEvents_clickHouseUnavailable_answersTheTypedServiceUnavailableError() {
+        when(userEventAnalyticsRepository.findPage(
+                        any(), any(), any(), any(), any(), any(), anyInt()))
+                .thenThrow(new ClickHouseUnavailableException(Reason.CIRCUIT_OPEN, "circuit open"));
+
+        assertThatThrownBy(
+                        () ->
+                                service.listUserEvents(
+                                        ACTOR, null, NOW.minusDays(1), NOW, null, null, 20))
+                .isInstanceOf(AppException.class)
+                .satisfies(
+                        e ->
+                                assertThat(((AppException) e).getErrorCode())
+                                        .isEqualTo(ApiErrorCode.ANALYTICS_UNAVAILABLE));
+    }
+
+    @Test
+    void listUserEvents_metadataText_isParsedBackIntoTheMapTheResponseExposes() {
+        UserEventRow search =
+                row(UserEventType.SEARCH, "{\"scope\":\"posts\",\"query\":\"sunset\"}");
+        UserEventRow login = row(UserEventType.SESSION_START, "");
+        UserEventRow broken = row(UserEventType.APP_OPEN, "not json");
+        when(userEventAnalyticsRepository.findPage(
+                        any(), any(), any(), any(), any(), any(), anyInt()))
+                .thenReturn(List.of(search, login, broken));
+
+        CursorPageResponse<UserEventResponse> page =
+                service.listUserEvents(ACTOR, null, NOW.minusDays(1), NOW, null, null, 20);
+
+        assertThat(page.getContent())
+                .extracting(UserEventResponse::metadata)
+                .containsExactly(Map.of("scope", "posts", "query", "sunset"), null, null);
+    }
+
+    private static UserEventRow row(UserEventType type, String metadata) {
+        return new UserEventRow(
+                UUID.randomUUID(), UUID.randomUUID(), type, null, null, metadata, NOW);
     }
 
     private void assertRejected(OffsetDateTime from, OffsetDateTime to) {
@@ -125,7 +181,7 @@ class AdminUserEventServiceImplTest {
                                 assertThat(((AppException) e).getErrorCode())
                                         .isEqualTo(ApiErrorCode.BAD_REQUEST));
 
-        verify(userEventRepository, never())
+        verify(userEventAnalyticsRepository, never())
                 .findPage(any(), any(), any(), any(), any(), any(), anyInt());
     }
 }
