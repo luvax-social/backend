@@ -162,6 +162,13 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
             run.setLastError(null);
             run.setFinishedAt(null);
             runs.save(run);
+            // A run resumed past preflight holds the feedback listener before it waits, because
+            // the ingestion controller starts the listeners the moment the schema is ready and
+            // would otherwise let live feedback through in the gap.
+            if (run.getPhase().isAfter(GorseRebuildPhase.PREFLIGHT)) {
+                suspendFeedbackListener();
+                feedbackSuspended = true;
+            }
             awaitSchemaReady();
             while (run.getPhase() != GorseRebuildPhase.DONE) {
                 metrics.entered(run.getPhase());

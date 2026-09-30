@@ -561,6 +561,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- A Gorse rebuild resumed after a restart now holds the feedback listener before it waits for the ClickHouse schema, so no live feedback is applied in the gap between the listeners starting and the run suspending them.
 - A Gorse rebuild resumed after a restart no longer fails in its feedback phase because the ClickHouse schema check has not finished; every run waits for it before doing anything.
 - A Gorse rebuild started with the application no longer fails its preflight because the ClickHouse schema check has not finished yet; it waits up to two minutes for it.
 - The structure figures script no longer counts comment mentions of the listener annotation as consumers, so it reports the real consumer count.

@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
@@ -208,10 +209,19 @@ class GorseRebuildServiceImplTest {
         GorseRebuildRun run = newRun(GorseRebuildPhase.FEEDBACK);
         stubCatalogue();
         when(clickHouse.isReady()).thenReturn(false, false, true);
+        List<Integer> pausesWhenSuspended = new ArrayList<>();
+        doAnswer(
+                        invocation -> {
+                            pausesWhenSuspended.add(pauses.size());
+                            return null;
+                        })
+                .when(controller)
+                .suspend("gorse-rebuild");
 
         service.execute(run);
 
         assertThat(pauses).containsExactly(1_000L, 1_000L);
+        assertThat(pausesWhenSuspended).containsExactly(0);
         verify(gorsePurger, never()).purge();
         verify(userEvents, atLeastOnce()).findFeedbackTotals(any());
     }
