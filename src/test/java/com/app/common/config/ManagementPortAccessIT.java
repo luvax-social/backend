@@ -20,6 +20,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.app.testsupport.TestContainerImages;
+
 /**
  * Pins which port serves which actuator endpoint, and to whom, now that actuator moved off the
  * application port entirely (D5). Replaces {@code ActuatorEndpointAccessIT}: the switch this class
@@ -47,7 +49,8 @@ import org.testcontainers.utility.DockerImageName;
 class ManagementPortAccessIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

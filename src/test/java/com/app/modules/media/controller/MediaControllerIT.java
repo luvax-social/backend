@@ -41,6 +41,7 @@ import com.app.modules.mail.service.MailService;
 import com.app.modules.media.config.MediaProperties;
 import com.app.modules.media.storage.ObjectStorageMetadataService;
 import com.app.modules.media.validation.MediaMetadataValidator;
+import com.app.testsupport.TestContainerImages;
 import com.zaxxer.hikari.HikariDataSource;
 
 @SpringBootTest(
@@ -56,7 +57,8 @@ import com.zaxxer.hikari.HikariDataSource;
 class MediaControllerIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

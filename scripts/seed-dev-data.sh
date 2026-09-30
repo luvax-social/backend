@@ -60,11 +60,15 @@
 #   a database somebody is working in, while giving end-to-end scripts one place to reset from
 #   instead of each carrying its own block that drifts as tables are added.
 #
-#   Cleared: user_events, platform_stats, user_strikes, user_warnings, notifications, reports,
-#   admin_actions, post_hashtags, hashtag_trending, hashtags, post_edit_history, posts,
-#   outbox_events, processed_messages. Accounts, credentials and the follow graph are left alone,
-#   since the seed recreates them idempotently anyway and deleting an account would cascade far
-#   wider than a reset should reach.
+#   Cleared: user_strikes, user_warnings, notifications, reports, admin_actions, post_hashtags,
+#   hashtag_trending, hashtags, post_edit_history, posts, outbox_events, processed_messages.
+#   Accounts, credentials and the follow graph are left alone, since the seed recreates them
+#   idempotently anyway and deleting an account would cascade far wider than a reset should reach.
+#
+#   The analytics tables live in ClickHouse, not PostgreSQL, and are truncated too: user_events,
+#   admin_actions and platform_stats in luvax_analytics, as the migrator user, over the HTTP port on
+#   127.0.0.1:8123. If ClickHouse does not answer, the reset still completes and prints a warning
+#   naming the tables left stale, because the PostgreSQL half has already been cleared by then.
 #
 # SAFETY
 #
@@ -107,6 +111,9 @@ read_env() {
 POSTGRES_URL="$(read_env POSTGRES_URL)"
 POSTGRES_USER="$(read_env POSTGRES_USER)"
 POSTGRES_DB="$(read_env POSTGRES_DB)"
+ANALYTICS_MIGRATOR_USERNAME="$(read_env ANALYTICS_CLICKHOUSE_MIGRATOR_USERNAME)"
+ANALYTICS_MIGRATOR_USERNAME="${ANALYTICS_MIGRATOR_USERNAME:-luvax_analytics_migrator}"
+ANALYTICS_MIGRATOR_PASSWORD="$(read_env ANALYTICS_CLICKHOUSE_MIGRATOR_PASSWORD)"
 
 [[ -n "$POSTGRES_URL"  ]] || fail "POSTGRES_URL is not set in .env."
 [[ -n "$POSTGRES_USER" ]] || fail "POSTGRES_USER is not set in .env."
@@ -127,6 +134,25 @@ case "$docker_endpoint" in
     *) fail "refusing to run. The Docker endpoint is '$docker_endpoint', which is not local." ;;
 esac
 
+# The migrator is the only ClickHouse user allowed to truncate. Its credentials go to curl on stdin
+# as a config, so the password never appears in a process listing.
+truncate_analytics_tables() {
+    local table stale=()
+    for table in user_events admin_actions platform_stats; do
+        if ! printf 'user = "%s:%s"\n' "$ANALYTICS_MIGRATOR_USERNAME" "$ANALYTICS_MIGRATOR_PASSWORD" \
+            | curl -sf -K - "http://127.0.0.1:8123/" \
+                --data-binary "TRUNCATE TABLE luvax_analytics.${table}" >/dev/null; then
+            stale+=("$table")
+        fi
+    done
+    if [[ ${#stale[@]} -gt 0 ]]; then
+        echo "seed-dev-data: WARNING - ClickHouse did not truncate: ${stale[*]}." >&2
+        echo "seed-dev-data: those luvax_analytics tables still hold rows from before the reset." >&2
+    else
+        echo "seed-dev-data: truncated the luvax_analytics tables in ClickHouse"
+    fi
+}
+
 psql_exec() {
     docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
 }
@@ -144,8 +170,6 @@ if [[ "$RESET" == true ]]; then
     # ahead of posts keeps the order readable rather than relying on which cascades exist.
     psql_exec <<'SQL'
 BEGIN;
-DELETE FROM user_events;
-DELETE FROM platform_stats;
 DELETE FROM user_strikes;
 DELETE FROM user_warnings;
 DELETE FROM notifications;
@@ -165,6 +189,7 @@ UPDATE users
  WHERE email LIKE '%@seed.local';
 COMMIT;
 SQL
+    truncate_analytics_tables
 fi
 
 echo "seed-dev-data: seeding $POSTGRES_DB via the compose postgres service"

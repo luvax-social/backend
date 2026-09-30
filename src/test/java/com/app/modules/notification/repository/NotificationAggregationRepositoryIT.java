@@ -37,6 +37,7 @@ import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.repository.NotificationAggregationRepository.GroupWrite;
 import com.app.modules.notification.repository.NotificationAggregationRepository.Removal;
 import com.app.modules.notification.service.NotificationDraft;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Exercises the aggregation SQL against PostgreSQL: opening and joining a group, a repeated actor,
@@ -58,7 +59,8 @@ import com.app.modules.notification.service.NotificationDraft;
 class NotificationAggregationRepositoryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private static final Duration WINDOW = Duration.ofHours(24);
 

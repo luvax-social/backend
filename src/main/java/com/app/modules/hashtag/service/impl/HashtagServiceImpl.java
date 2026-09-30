@@ -165,6 +165,21 @@ public class HashtagServiceImpl implements HashtagService {
         return hashtagRepository.findNamesByPostId(postId);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, List<String>> getHashtagNamesForPosts(Collection<UUID> postIds) {
+        if (postIds.isEmpty()) {
+            return Map.of();
+        }
+        return hashtagRepository.findNamesByPostIds(postIds).stream()
+                .collect(
+                        Collectors.groupingBy(
+                                PostHashtagNameProjection::getPostId,
+                                LinkedHashMap::new,
+                                Collectors.mapping(
+                                        PostHashtagNameProjection::getName, Collectors.toList())));
+    }
+
     private LinkedHashSet<String> normalizedSet(Collection<String> rawTags) {
         LinkedHashSet<String> names = new LinkedHashSet<>();
         for (String raw : rawTags) {

@@ -26,6 +26,7 @@ import com.app.common.inbox.enums.ProcessedMessageResult;
 import com.app.common.inbox.observability.InboxMetrics;
 import com.app.common.inbox.repository.ProcessedMessageRepository;
 import com.app.common.inbox.service.ProcessedMessageService;
+import com.app.testsupport.TestContainerImages;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -44,7 +45,8 @@ class ProcessedMessageServiceImplIT {
     private static final String EVENT_TYPE = "user.registered.v1";
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @TestConfiguration
     static class MetricsTestConfig {

@@ -1,5 +1,6 @@
 package com.app.common.seed.outbox;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,8 +13,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.app.common.outbox.entity.OutboxEvent;
 import com.app.common.outbox.service.OutboxService;
+import com.app.modules.admin.messaging.AdminEventTypes;
+import com.app.modules.admin.messaging.PlatformStatsCollectedEvent;
 import com.app.modules.comment.consumer.CommentNotificationConsumer;
 import com.app.modules.post.consumer.PostNotificationConsumer;
+import com.app.modules.recommendation.enums.UserEventType;
+import com.app.modules.recommendation.messaging.RecommendationEventTypes;
+import com.app.modules.recommendation.messaging.UserEventImportedEvent;
 
 import lombok.RequiredArgsConstructor;
 
@@ -52,6 +58,7 @@ public class SeedOutboxBatchWriter {
     private static final String POST_VIEWED_V1 = "post.viewed.v1";
     private static final String POST_SHARED_V1 = "post.shared.v1";
     private static final String COMMENT_CREATED_V1 = "comment.created.v1";
+    private static final long HALF_HOUR_SECONDS = 1800L;
 
     private final OutboxService outboxService;
     private final JdbcTemplate jdbc;
@@ -99,6 +106,102 @@ public class SeedOutboxBatchWriter {
     @Transactional
     void emitShareBatch(List<SeedOutboxEmitter.ShareRow> batch) {
         batch.forEach(this::enqueueShare);
+    }
+
+    /**
+     * One behavioural event to import, with the identifier it keeps for its whole life.
+     *
+     * @param eventId identifier of the row and of the outbox event, so a repeat is absorbed
+     * @param userId account the event is attributed to
+     * @param eventType what happened
+     * @param entityType kind of thing acted on, null when none
+     * @param entityId thing acted on, null when none
+     * @param createdAt when the event happened
+     */
+    public record UserEventImport(
+            UUID eventId,
+            UUID userId,
+            UserEventType eventType,
+            String entityType,
+            UUID entityId,
+            Instant createdAt) {}
+
+    /**
+     * Enqueues one import event per behavioural event, in a single transaction, under the event's
+     * own identifier so that emitting the same event twice enqueues it once. Public because {@code
+     * AnalyticsSeedWriter} calls it from another package, and it must go through this bean's proxy
+     * so that {@code OutboxService.enqueueOnce} finds a transaction.
+     *
+     * @return how many events this call enqueued
+     */
+    @Transactional
+    public int emitUserEventImportBatch(List<UserEventImport> batch) {
+        int enqueued = 0;
+        for (UserEventImport row : batch) {
+            boolean added =
+                    outboxService.enqueueOnce(
+                            row.eventId(),
+                            RecommendationEventTypes.USER_EVENT_IMPORTED_V1,
+                            RecommendationEventTypes.USER_EVENT_IMPORTED_V1,
+                            UserEventImportedEvent.AGGREGATE_TYPE,
+                            row.userId(),
+                            row.userId(),
+                            UserEventImportedEvent.payload(
+                                    row.eventType(),
+                                    row.entityType(),
+                                    row.entityId(),
+                                    null,
+                                    row.createdAt()));
+            if (added) {
+                enqueued++;
+            }
+        }
+        return enqueued;
+    }
+
+    /**
+     * Enqueues one {@code admin.action.recorded.v1} per audit row, in a single transaction, the
+     * same event {@code AdminActionRecorder} enqueues for a live action. Public because the emitter
+     * calls it from another package, through this bean's proxy so that {@code
+     * OutboxService.enqueue} finds a transaction.
+     */
+    @Transactional
+    public void emitAdminActionReplicationBatch(List<SeedOutboxEmitter.AdminActionRow> batch) {
+        for (SeedOutboxEmitter.AdminActionRow row : batch) {
+            outboxService.enqueue(
+                    AdminEventTypes.ACTION_RECORDED_V1,
+                    AdminEventTypes.ACTION_RECORDED_V1,
+                    "admin_action",
+                    row.actionId(),
+                    row.adminId(),
+                    Map.of("adminActionId", row.actionId().toString()));
+        }
+    }
+
+    /**
+     * Enqueues one collected-bucket event per platform statistics bucket, in a single transaction.
+     * Public because {@code AnalyticsSeedWriter} calls it from another package, and it must go
+     * through this bean's proxy so that {@code OutboxService.enqueue} finds a transaction.
+     */
+    @Transactional
+    public void emitPlatformStatsBatch(List<PlatformStatsCollectedEvent.Bucket> batch) {
+        batch.forEach(this::enqueuePlatformStats);
+    }
+
+    // The same shape PlatformStatsCollectionServiceImpl enqueues, built through the same event
+    // class, so the consumer cannot tell a seeded bucket from a collected one.
+    private void enqueuePlatformStats(PlatformStatsCollectedEvent.Bucket bucket) {
+        outboxService.enqueue(
+                AdminEventTypes.PLATFORM_STATS_COLLECTED_V1,
+                AdminEventTypes.PLATFORM_STATS_COLLECTED_V1,
+                PlatformStatsCollectedEvent.AGGREGATE_TYPE,
+                PlatformStatsCollectedEvent.aggregateId(bucket.bucketStart()),
+                null,
+                PlatformStatsCollectedEvent.payload(
+                        bucket.bucketStart(),
+                        HALF_HOUR_SECONDS,
+                        bucket.computedAt(),
+                        bucket.rows()));
     }
 
     // Payload shape mirrors MessageServiceImpl's own post.shared.v1 enqueue: the aggregate is the

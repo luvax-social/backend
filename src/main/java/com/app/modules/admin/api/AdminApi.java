@@ -821,7 +821,10 @@ public interface AdminApi {
             summary = "List moderation audit events",
             description =
                     "An administrator sees every audit row. A moderator sees only the rows it"
-                            + " authored, whatever adminId filter it supplies.")
+                            + " authored, whatever adminId filter it supplies. The list is read from"
+                            + " an analytics replica that trails a committed action by a few"
+                            + " seconds, and from the transactional database when the replica is"
+                            + " unavailable; the detail endpoint always reads the source of truth.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "200",

@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.users.repository.UserRepository;
+import com.app.testsupport.TestContainerImages;
 
 @DataJpaTest(
         properties = {
@@ -30,7 +31,8 @@ import com.app.modules.users.repository.UserRepository;
 class UserSummaryServiceIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private final UserRepository userRepository;
     private final JdbcClient jdbcClient;
@@ -104,6 +106,16 @@ class UserSummaryServiceIT {
         assertThat(result.get(deleted).displayName())
                 .isEqualTo(UserSummaryServiceImpl.DELETED_DISPLAY_NAME);
         assertThat(result.get(deleted).username()).isNull();
+    }
+
+    @Test
+    void exists_liveSoftDeletedAndUnknownAccounts_matchWhatTheForeignKeyWouldHaveAccepted() {
+        UUID live = insertUser("gina", "Gina", null, false, false);
+        UUID softDeleted = insertUser("hank", "Hank", null, false, true);
+
+        assertThat(service.exists(live)).isTrue();
+        assertThat(service.exists(softDeleted)).isTrue();
+        assertThat(service.exists(UUID.randomUUID())).isFalse();
     }
 
     @Test

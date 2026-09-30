@@ -31,6 +31,7 @@ import com.app.common.seed.writer.MediaSeedWriter;
 import com.app.common.seed.writer.PostSeedWriter;
 import com.app.common.seed.writer.UserSeedWriter;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves {@link CommentSeedWriter} and {@link EngagementSeedWriter} against a real Flyway-migrated
@@ -48,7 +49,8 @@ import com.app.modules.mail.service.MailService;
 class CommentAndEngagementSeedWriterIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

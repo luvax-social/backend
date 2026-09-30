@@ -65,6 +65,23 @@ public class RabbitMqTopologyConfig {
     public static final String RECOMMENDATION_FEEDBACK_DEAD_LETTER_ROUTING_KEY =
             "recommendation.feedback.dead-letter";
 
+    public static final String ADMIN_ACTION_REPLICATION_QUEUE = "admin.action.replication.queue";
+    public static final String ADMIN_ACTION_REPLICATION_DEAD_LETTER_QUEUE =
+            "admin.action.replication.dlq";
+    public static final String ADMIN_ACTION_REPLICATION_DEAD_LETTER_ROUTING_KEY =
+            "admin.action.replication.dead-letter";
+
+    public static final String PLATFORM_STATS_QUEUE = "admin.platform-stats.queue";
+    public static final String PLATFORM_STATS_DEAD_LETTER_QUEUE = "admin.platform-stats.dlq";
+    public static final String PLATFORM_STATS_DEAD_LETTER_ROUTING_KEY =
+            "admin.platform-stats.dead-letter";
+
+    public static final String USER_EVENT_IMPORT_QUEUE = "recommendation.user-event.import.queue";
+    public static final String USER_EVENT_IMPORT_DEAD_LETTER_QUEUE =
+            "recommendation.user-event.import.dlq";
+    public static final String USER_EVENT_IMPORT_DEAD_LETTER_ROUTING_KEY =
+            "recommendation.user-event.import.dead-letter";
+
     /**
      * Idle lifetime of a per-instance live fanout queue: removed by the broker after this long with
      * no consumer, so a queue left by an instance that died before its listener attached does not
@@ -301,6 +318,82 @@ public class RabbitMqTopologyConfig {
                         "x-dead-letter-routing-key",
                         RECOMMENDATION_FEEDBACK_DEAD_LETTER_ROUTING_KEY)
                 .build();
+    }
+
+    // The replication consumer nacks a rejected message without requeue, so the queue carries the
+    // dead-letter arguments and the broker routes the rejection itself. An outage is different: the
+    // consumer requeues, and the ingestion controller stops it, so messages wait here instead.
+    @Bean
+    Queue adminActionReplicationQueue() {
+        return QueueBuilder.durable(ADMIN_ACTION_REPLICATION_QUEUE)
+                .withArgument("x-dead-letter-exchange", SOCIAL_EVENTS_DEAD_LETTER_EXCHANGE)
+                .withArgument(
+                        "x-dead-letter-routing-key",
+                        ADMIN_ACTION_REPLICATION_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    Queue adminActionReplicationDeadLetterQueue() {
+        return QueueBuilder.durable(ADMIN_ACTION_REPLICATION_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    Binding adminActionReplicationDeadLetterBinding(
+            Queue adminActionReplicationDeadLetterQueue,
+            TopicExchange socialEventsDeadLetterExchange) {
+        return BindingBuilder.bind(adminActionReplicationDeadLetterQueue)
+                .to(socialEventsDeadLetterExchange)
+                .with(ADMIN_ACTION_REPLICATION_DEAD_LETTER_ROUTING_KEY);
+    }
+
+    // Same arrangement as the audit replication queue: a rejected bucket dead-letters through the
+    // queue's own arguments, and an outage requeues while the ingestion controller stops the
+    // listener, so buckets wait here rather than reaching the dead-letter queue.
+    @Bean
+    Queue platformStatsQueue() {
+        return QueueBuilder.durable(PLATFORM_STATS_QUEUE)
+                .withArgument("x-dead-letter-exchange", SOCIAL_EVENTS_DEAD_LETTER_EXCHANGE)
+                .withArgument("x-dead-letter-routing-key", PLATFORM_STATS_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    Queue platformStatsDeadLetterQueue() {
+        return QueueBuilder.durable(PLATFORM_STATS_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    Binding platformStatsDeadLetterBinding(
+            Queue platformStatsDeadLetterQueue, TopicExchange socialEventsDeadLetterExchange) {
+        return BindingBuilder.bind(platformStatsDeadLetterQueue)
+                .to(socialEventsDeadLetterExchange)
+                .with(PLATFORM_STATS_DEAD_LETTER_ROUTING_KEY);
+    }
+
+    // Same arrangement as the audit replication queue: a rejected import dead-letters through the
+    // queue's own arguments, and an outage requeues while the ingestion controller stops the
+    // listener, so imports wait here rather than reaching the dead-letter queue.
+    @Bean
+    Queue userEventImportQueue() {
+        return QueueBuilder.durable(USER_EVENT_IMPORT_QUEUE)
+                .withArgument("x-dead-letter-exchange", SOCIAL_EVENTS_DEAD_LETTER_EXCHANGE)
+                .withArgument(
+                        "x-dead-letter-routing-key", USER_EVENT_IMPORT_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    Queue userEventImportDeadLetterQueue() {
+        return QueueBuilder.durable(USER_EVENT_IMPORT_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    Binding userEventImportDeadLetterBinding(
+            Queue userEventImportDeadLetterQueue, TopicExchange socialEventsDeadLetterExchange) {
+        return BindingBuilder.bind(userEventImportDeadLetterQueue)
+                .to(socialEventsDeadLetterExchange)
+                .with(USER_EVENT_IMPORT_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean

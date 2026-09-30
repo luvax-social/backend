@@ -21,6 +21,7 @@ import com.app.modules.report.entity.Report;
 import com.app.modules.report.enums.ReportReason;
 import com.app.modules.report.enums.ReportStatus;
 import com.app.modules.report.enums.ReportType;
+import com.app.testsupport.TestContainerImages;
 
 @DataJpaTest(
         properties = {
@@ -31,7 +32,8 @@ import com.app.modules.report.enums.ReportType;
 class ReportRepositoryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Autowired private ReportRepository reportRepository;
     @Autowired private JdbcClient jdbcClient;

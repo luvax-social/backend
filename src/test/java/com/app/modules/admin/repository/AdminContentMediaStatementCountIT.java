@@ -22,6 +22,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.admin.dto.response.AdminPostSummaryResponse;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Pins that reading an account's posts costs the same number of statements at one row and at
@@ -42,7 +43,8 @@ import com.app.modules.admin.dto.response.AdminPostSummaryResponse;
 class AdminContentMediaStatementCountIT {
 
     @Container @ServiceConnection
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    static final PostgreSQLContainer<?> POSTGRES =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     // The autowired DataSource is only here to make the slice start, which is what runs Flyway
     // and gives the container its schema.

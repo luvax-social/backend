@@ -7,7 +7,8 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /**
- * Every metric {@code platform_stats} carries, with the statement that computes it.
+ * Every platform statistics metric, with the statement that computes it in PostgreSQL. The values
+ * are stored in ClickHouse under {@link #key()}.
  *
  * <p>Each statement selects exactly two columns, a dimension and a value, so one insert template
  * serves all of them. A metric with no breakdown selects the empty string as its dimension. {@code
@@ -108,7 +109,8 @@ public enum PlatformMetric {
                     + " WHERE created_at >= ? AND created_at < ? GROUP BY action_type");
 
     /**
-     * How a metric behaves under aggregation, which is the only thing the roll-up needs to know.
+     * How a metric behaves under aggregation, which is what a daily figure needs to know: a flow is
+     * summed over the day, a gauge is read from its last bucket.
      */
     public enum Kind {
         GAUGE,
@@ -126,7 +128,7 @@ public enum PlatformMetric {
     }
 
     /**
-     * The metric's wire form, which is also its {@code platform_stats.metric_key} value.
+     * The metric's wire form, which is also the metric key stored with each value.
      *
      * <p>Annotated so the enum crosses the wire as its key rather than its Java constant name, and
      * so the generated document enumerates the closed set instead of describing it in prose.

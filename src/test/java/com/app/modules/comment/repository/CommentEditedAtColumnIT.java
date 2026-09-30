@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.comment.entity.Comment;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Guards the {@code comments.edited_at} column added by V45 at the schema level.
@@ -41,7 +42,8 @@ import com.app.modules.comment.entity.Comment;
 class CommentEditedAtColumnIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private final CommentRepository commentRepository;
     private final JdbcClient jdbcClient;

@@ -11,7 +11,10 @@ import com.app.modules.comment.messaging.CommentEventTypes;
 import com.app.modules.message.messaging.MessageEventTypes;
 import com.app.modules.post.messaging.PostEventTypes;
 
-/** Binds engagement events consumed as recommender feedback to the recommendation queue. */
+/**
+ * Binds engagement events consumed as recommender feedback to the recommendation queue, and
+ * imported behavioural events to the queue that stores them in ClickHouse.
+ */
 @Configuration
 public class RecommendationRabbitBindingConfig {
 
@@ -53,6 +56,14 @@ public class RecommendationRabbitBindingConfig {
         return BindingBuilder.bind(recommendationFeedbackQueue)
                 .to(socialEventsExchange)
                 .with(CommentEventTypes.COMMENT_LIKED_V1);
+    }
+
+    @Bean
+    Binding userEventImportedBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return BindingBuilder.bind(userEventImportQueue)
+                .to(socialEventsExchange)
+                .with(RecommendationEventTypes.USER_EVENT_IMPORTED_V1);
     }
 
     @Bean

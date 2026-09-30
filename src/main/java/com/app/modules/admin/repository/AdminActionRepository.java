@@ -51,4 +51,29 @@ public interface AdminActionRepository
     Optional<AdminAction> findMostRecentAppealable(
             @Param("targetUserId") UUID targetUserId,
             @Param("appealableTypes") Collection<String> appealableTypes);
+
+    /**
+     * The current state of one audit row, in the shape the ClickHouse replica stores.
+     *
+     * <p>Read by the replication consumer after an event names the row, so what reaches ClickHouse
+     * is always the row as PostgreSQL holds it now, never the state at the time of the event. The
+     * action type and metadata are cast to text and the aliases are quoted, because PostgreSQL
+     * folds an unquoted alias to lowercase and the projection matches property names exactly.
+     *
+     * @param id the audit row identifier
+     * @return the row, or empty when it no longer exists, for example after a reseed truncated it
+     */
+    @Query(
+            value =
+                    "SELECT a.id AS \"id\", a.admin_id AS \"adminId\","
+                            + " CAST(a.action_type AS text) AS \"actionType\","
+                            + " a.target_user_id AS \"targetUserId\","
+                            + " a.target_entity_type AS \"targetEntityType\","
+                            + " a.target_entity_id AS \"targetEntityId\","
+                            + " a.report_id AS \"reportId\", a.reason AS \"reason\","
+                            + " CAST(a.metadata AS text) AS \"metadata\","
+                            + " a.created_at AS \"createdAt\", a.row_version AS \"rowVersion\""
+                            + " FROM admin_actions a WHERE a.id = :id",
+            nativeQuery = true)
+    Optional<AdminActionReplicaRow> findReplicaRow(@Param("id") UUID id);
 }

@@ -28,6 +28,7 @@ import com.app.common.response.CursorPageResponse;
 import com.app.common.response.UserListItemResponse;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.social.service.SocialService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves blocked-list membership, direction, viewer state, the deleted-user placeholder, and that a
@@ -47,7 +48,8 @@ import com.app.modules.social.service.SocialService;
 class BlockedListIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

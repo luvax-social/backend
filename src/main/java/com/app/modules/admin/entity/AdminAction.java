@@ -73,4 +73,11 @@ public class AdminAction {
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    /**
+     * Change counter a trigger bumps on every real update, read by the ClickHouse replica so the
+     * newest state of a row wins. Never written from Java.
+     */
+    @Column(name = "row_version", insertable = false, updatable = false)
+    private Long rowVersion;
 }

@@ -33,6 +33,29 @@ class UserSummaryServiceImplTest {
     }
 
     @Test
+    void exists_rowPresent_isTrueWhetherOrNotItIsSoftDeleted() {
+        UUID id = UUID.randomUUID();
+        when(userRepository.existsIncludingSoftDeleted(id)).thenReturn(true);
+
+        assertThat(service.exists(id)).isTrue();
+    }
+
+    @Test
+    void exists_rowAbsent_isFalse() {
+        UUID id = UUID.randomUUID();
+        when(userRepository.existsIncludingSoftDeleted(id)).thenReturn(false);
+
+        assertThat(service.exists(id)).isFalse();
+    }
+
+    @Test
+    void exists_nullId_isFalseWithoutQuery() {
+        assertThat(service.exists(null)).isFalse();
+        verify(userRepository, times(0))
+                .existsIncludingSoftDeleted(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void loadSummaries_emptyInput_returnsEmptyWithoutQuery() {
         assertThat(service.loadSummaries(List.of())).isEmpty();
         verify(userRepository, times(0)).findSummariesByIdIn(anyCollection());

@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.media.entity.MediaAsset;
 import com.app.modules.media.enums.MediaType;
+import com.app.testsupport.TestContainerImages;
 
 @DataJpaTest(
         properties = {
@@ -31,7 +32,8 @@ import com.app.modules.media.enums.MediaType;
 class MediaAssetRepositoryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Autowired private MediaAssetRepository mediaAssetRepository;
     @Autowired private JdbcClient jdbcClient;

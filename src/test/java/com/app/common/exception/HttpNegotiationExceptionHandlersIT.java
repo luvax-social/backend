@@ -27,6 +27,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.response.ApiResponse;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves the three content-negotiation and missing-parameter failure shapes reach the {@link
@@ -49,7 +50,8 @@ import com.app.modules.mail.service.MailService;
 class HttpNegotiationExceptionHandlersIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

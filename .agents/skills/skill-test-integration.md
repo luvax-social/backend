@@ -36,7 +36,7 @@ Writing end-to-end tests for any class in `modules/{module}/controller/`.
 3. Declare containers as `static` fields:
    ```java
    @Container @ServiceConnection
-   static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+   static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine");
 
    @Container
    static GenericContainer<?> redis =
@@ -102,7 +102,7 @@ Writing end-to-end tests for any class in `modules/{module}/controller/`.
 
 - `@SpringBootTest(webEnvironment = RANDOM_PORT)` with dev profile and Rabbit excluded
 - `@Testcontainers @AutoConfigureTestRestTemplate`
-- `postgres:16-alpine` with `@ServiceConnection`; `redis:7-alpine` with `@DynamicPropertySource`
+- `postgres:18-alpine` with `@ServiceConnection`; `redis:7-alpine` with `@DynamicPropertySource`
 - All required env vars in `@DynamicPropertySource`
 - `MailService` stubbed with `@MockitoBean`
 - DB state verified via repository after key mutations
@@ -112,7 +112,7 @@ Writing end-to-end tests for any class in `modules/{module}/controller/`.
 
 - [ ] `@SpringBootTest(webEnvironment = RANDOM_PORT)` with correct `properties`
 - [ ] `@Testcontainers @AutoConfigureTestRestTemplate` present
-- [ ] PostgreSQL `postgres:16-alpine` with `@ServiceConnection`
+- [ ] PostgreSQL `postgres:18-alpine` with `@ServiceConnection`
 - [ ] Redis `redis:7-alpine` with `@DynamicPropertySource` for host/port
 - [ ] All required env vars in `@DynamicPropertySource`
 - [ ] `MailService` stubbed with `@MockitoBean`

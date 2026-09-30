@@ -1,6 +1,7 @@
 package com.app.modules.recommendation.client.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -8,6 +9,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +21,7 @@ import org.springframework.web.client.RestClient;
 
 import com.app.modules.recommendation.client.dto.GorseFeedback;
 import com.app.modules.recommendation.client.dto.GorseItem;
+import com.app.modules.recommendation.client.dto.GorseItemPage;
 import com.app.modules.recommendation.client.dto.GorseScore;
 import com.app.modules.recommendation.client.dto.GorseUser;
 
@@ -121,6 +124,64 @@ class GorseClientImplTest {
     }
 
     @Test
+    void upsertFeedback_putsFeedbackBatchWithAuthHeader() {
+        OffsetDateTime at = OffsetDateTime.parse("2026-09-01T10:00:00Z");
+        server.expect(requestTo("http://gorse.test/api/feedback"))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(header("X-API-Key", API_KEY))
+                .andExpect(
+                        content()
+                                .json(
+                                        "[{\"FeedbackType\":\"like\",\"UserId\":\"u1\","
+                                                + "\"ItemId\":\"i1\",\"Value\":2.5}]"))
+                .andRespond(withSuccess("{\"RowAffected\":1}", MediaType.APPLICATION_JSON));
+
+        client.upsertFeedback(List.of(new GorseFeedback("like", "u1", "i1", at, 2.5)));
+
+        server.verify();
+    }
+
+    @Test
+    void listItems_firstPage_sendsNoCursorAndParsesItemsWithTheNextCursor() {
+        server.expect(requestTo("http://gorse.test/api/items?n=2"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-API-Key", API_KEY))
+                .andRespond(
+                        withSuccess(
+                                "{\"Cursor\":\"next\",\"Items\":["
+                                        + "{\"ItemId\":\"i1\",\"IsHidden\":false,"
+                                        + "\"Categories\":[],\"Labels\":[\"a\"],"
+                                        + "\"Timestamp\":\"2026-09-01T10:00:00Z\","
+                                        + "\"Comment\":\"\"},"
+                                        + "{\"ItemId\":\"i2\",\"IsHidden\":true,"
+                                        + "\"Categories\":[],\"Labels\":[],"
+                                        + "\"Timestamp\":\"2026-09-02T10:00:00Z\","
+                                        + "\"Comment\":\"\"}]}",
+                                MediaType.APPLICATION_JSON));
+
+        GorseItemPage page = client.listItems(null, 2);
+
+        assertThat(page.cursor()).isEqualTo("next");
+        assertThat(page.items()).extracting(GorseItem::itemId).containsExactly("i1", "i2");
+        assertThat(page.items()).extracting(GorseItem::hidden).containsExactly(false, true);
+        server.verify();
+    }
+
+    @Test
+    void listItems_laterPage_sendsTheCursorAndAnEmptyBodyIsAnEmptyPage() {
+        server.expect(requestTo("http://gorse.test/api/items?n=5&cursor=next"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(
+                        withSuccess("{\"Cursor\":\"\",\"Items\":[]}", MediaType.APPLICATION_JSON));
+
+        GorseItemPage page = client.listItems("next", 5);
+
+        assertThat(page.cursor()).isEmpty();
+        assertThat(page.items()).isEmpty();
+        server.verify();
+    }
+
+    @Test
     void upsertItems_postsItemBatch() {
         GorseItem item =
                 new GorseItem(
@@ -160,6 +221,40 @@ class GorseClientImplTest {
 
         client.hideItem("item-1");
 
+        server.verify();
+    }
+
+    @Test
+    void getFeedback_tupleHeld_readsTheUsersListOfThatTypeAndPicksTheItemIgnoringExtraFields() {
+        server.expect(requestTo("http://gorse.test/api/user/user-1/feedback/read"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-API-Key", API_KEY))
+                .andRespond(
+                        withSuccess(
+                                "[{\"FeedbackType\":\"read\",\"UserId\":\"user-1\","
+                                        + "\"ItemId\":\"other\",\"Value\":1,"
+                                        + "\"Timestamp\":\"2026-01-02T00:00:00Z\","
+                                        + "\"Updated\":\"2026-01-02T00:00:00Z\","
+                                        + "\"Comment\":\"\"},"
+                                        + "{\"FeedbackType\":\"read\",\"UserId\":\"user-1\","
+                                        + "\"ItemId\":\"item-1\",\"Value\":3.5,"
+                                        + "\"Timestamp\":\"2026-01-02T00:00:00Z\","
+                                        + "\"Updated\":\"2026-01-02T00:00:00Z\","
+                                        + "\"Comment\":\"\"}]",
+                                MediaType.APPLICATION_JSON));
+
+        Optional<GorseFeedback> held = client.getFeedback("read", "user-1", "item-1");
+
+        assertThat(held).get().extracting(GorseFeedback::value).isEqualTo(3.5);
+        server.verify();
+    }
+
+    @Test
+    void getFeedback_unknownUserOrTuple_isEmptyRatherThanAFailure() {
+        server.expect(requestTo("http://gorse.test/api/user/nobody/feedback/like"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        assertThat(client.getFeedback("like", "nobody", "item-1")).isEmpty();
         server.verify();
     }
 }

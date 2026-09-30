@@ -35,10 +35,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  * writer, so a log showing only three kinds of row is the system working as designed and not a
  * defect. A view of one's own profile is deliberately not recorded.
  *
- * <p>The time window is mandatory. {@code user_events} is partitioned by month on the event
- * timestamp, so a window is the only thing that limits how much of the table a query reads; a
- * request bounded only by account would read every partition ever created. An investigator works a
- * month at a time.
+ * <p>The time window is mandatory. {@code user_events} is stored in ClickHouse, partitioned by
+ * month on the event timestamp, so a window is the only thing that limits how much of the table a
+ * query reads; a request bounded only by account would read every partition that account has rows
+ * in. An investigator works a month at a time. While ClickHouse is unavailable the log answers 503
+ * {@code ANALYTICS_UNAVAILABLE}: it has no other store to fall back to.
  */
 @Tag(name = "Administration", description = "Moderation actions and immutable audit history")
 @RequestMapping(ApiConstants.Admin.ROOT)
@@ -71,6 +72,13 @@ public interface AdminUserEventApi {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "403",
                 description = "Administrator role required",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "503",
+                description = "Analytics are temporarily unavailable (ANALYTICS_UNAVAILABLE)",
                 content =
                         @Content(
                                 mediaType = "application/json",

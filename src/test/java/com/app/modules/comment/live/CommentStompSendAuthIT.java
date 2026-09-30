@@ -41,6 +41,7 @@ import com.app.modules.users.entity.User;
 import com.app.modules.users.enums.UserRole;
 import com.app.modules.users.enums.UserStatus;
 import com.app.modules.users.repository.UserRepository;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves the audit's F-1.2-b exploit no longer reproduces: a STOMP SEND to {@code
@@ -68,7 +69,8 @@ import com.app.modules.users.repository.UserRepository;
 class CommentStompSendAuthIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

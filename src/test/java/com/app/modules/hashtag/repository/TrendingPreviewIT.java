@@ -18,6 +18,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.app.testsupport.TestContainerImages;
+
 /**
  * The in-feed trending card shows one cover image per tag, and this query is where that cover is
  * chosen. It carries the whole privacy surface of the card: the thumbnail is rendered without any
@@ -32,7 +34,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class TrendingPreviewIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Autowired private HashtagTrendingRepository hashtagTrendingRepository;
     @Autowired private JdbcClient jdbcClient;

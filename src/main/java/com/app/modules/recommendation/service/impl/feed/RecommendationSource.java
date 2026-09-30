@@ -14,11 +14,12 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
+import com.app.common.analytics.ClickHouseException;
 import com.app.modules.recommendation.client.GorseClient;
 import com.app.modules.recommendation.client.dto.GorseScore;
 import com.app.modules.recommendation.config.RecommendationProperties;
 import com.app.modules.recommendation.enums.UserEventType;
-import com.app.modules.recommendation.repository.UserEventRepository;
+import com.app.modules.recommendation.repository.UserEventAnalyticsRepository;
 
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -42,15 +43,15 @@ public class RecommendationSource {
     public static final char SOURCE_POPULAR = 'p';
 
     private final GorseClient gorseClient;
-    private final UserEventRepository userEventRepository;
+    private final UserEventAnalyticsRepository userEventAnalyticsRepository;
     private final RecommendationProperties recommendationProperties;
 
     public RecommendationSource(
             GorseClient gorseClient,
-            UserEventRepository userEventRepository,
+            UserEventAnalyticsRepository userEventAnalyticsRepository,
             RecommendationProperties recommendationProperties) {
         this.gorseClient = gorseClient;
-        this.userEventRepository = userEventRepository;
+        this.userEventAnalyticsRepository = userEventAnalyticsRepository;
         this.recommendationProperties = recommendationProperties;
     }
 
@@ -151,7 +152,10 @@ public class RecommendationSource {
             // an unread candidate beyond the shortfall, or a read candidate scanned past while
             // filling from unread, is not retried on a later page. See the plan's Finding 7.
             return new TopUpResult(candidates, chunk.size());
-        } catch (RestClientException | DataAccessException e) {
+        } catch (RestClientException | DataAccessException | ClickHouseException e) {
+            // A ClickHouse failure lands here too, and never reaches the gorse breaker: the
+            // read-set only enriches a successful Gorse answer, so losing it costs the unread
+            // ordering of the topup and nothing else.
             log.warn(
                     "Recommendation topup unavailable for user {}, serving gorse results only: {}",
                     viewerId,
@@ -164,7 +168,7 @@ public class RecommendationSource {
         OffsetDateTime to = OffsetDateTime.now();
         OffsetDateTime from = to.minus(recommendationProperties.getReadSetWindow());
         List<UUID> recentReads =
-                userEventRepository.findRecentEntityIds(
+                userEventAnalyticsRepository.findRecentEntityIds(
                         viewerId,
                         UserEventType.POST_VIEW,
                         from,

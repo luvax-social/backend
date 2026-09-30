@@ -35,6 +35,7 @@ import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.recommendation.client.GorseClient;
 import com.app.modules.recommendation.client.dto.GorseScore;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Covers the {@code excludeFollowed} discovery ("Explore") variant of the recommendation feed
@@ -59,7 +60,8 @@ class RecommendationControllerIT {
             "/api/v1/recommendations/feed?limit=20&excludeFollowed=true";
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

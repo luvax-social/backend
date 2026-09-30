@@ -3,6 +3,7 @@ package com.app.modules.admin.service.impl;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,6 +13,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.app.common.analytics.ClickHouseUnavailableException;
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
 import com.app.modules.admin.config.StatsProperties;
@@ -21,24 +23,28 @@ import com.app.modules.admin.dto.response.StatPointResponse;
 import com.app.modules.admin.dto.response.TopHashtagResponse;
 import com.app.modules.admin.enums.PlatformMetric;
 import com.app.modules.admin.enums.StatGranularity;
-import com.app.modules.admin.repository.PlatformStatsRepository;
-import com.app.modules.admin.repository.PlatformStatsRepository.StatRow;
+import com.app.modules.admin.repository.PlatformStatsAnalyticsRepository;
+import com.app.modules.admin.repository.PlatformStatsAnalyticsRepository.SeriesPoint;
+import com.app.modules.admin.repository.PlatformStatsAnalyticsRepository.StatRow;
 import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.admin.service.AdminStatsService;
 import com.app.modules.hashtag.repository.HashtagRepository;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Service
 public class AdminStatsServiceImpl implements AdminStatsService {
 
     private static final int TOP_HASHTAG_LIMIT = 10;
 
-    private final PlatformStatsRepository platformStatsRepository;
+    private final PlatformStatsAnalyticsRepository platformStatsRepository;
     private final HashtagRepository hashtagRepository;
     private final StatsProperties properties;
     private final AdminAuthorizationService adminAuthorizationService;
 
     public AdminStatsServiceImpl(
-            PlatformStatsRepository platformStatsRepository,
+            PlatformStatsAnalyticsRepository platformStatsRepository,
             HashtagRepository hashtagRepository,
             StatsProperties properties,
             AdminAuthorizationService adminAuthorizationService) {
@@ -52,14 +58,17 @@ public class AdminStatsServiceImpl implements AdminStatsService {
     @Transactional(readOnly = true)
     public AdminStatsCurrentResponse getCurrent(UUID actorId) {
         adminAuthorizationService.assertActorIsAdministrator(actorId);
-        Optional<OffsetDateTime> newest =
-                platformStatsRepository.findNewestBucket(StatGranularity.HALF_HOUR);
-        List<StatRow> rows =
-                newest.map(
-                                bucket ->
-                                        platformStatsRepository.findBucket(
-                                                StatGranularity.HALF_HOUR, bucket))
-                        .orElseGet(List::of);
+        // Every ClickHouse read happens before the live hashtag list, so an outage answers the
+        // whole
+        // request with the typed error instead of a snapshot with half its figures missing.
+        Optional<OffsetDateTime> newest;
+        List<StatRow> rows;
+        try {
+            newest = platformStatsRepository.findNewestBucket();
+            rows = newest.map(platformStatsRepository::findBucket).orElseGet(List::of);
+        } catch (ClickHouseUnavailableException ex) {
+            throw unavailable(ex);
+        }
         Map<String, Map<String, Long>> byMetric = new LinkedHashMap<>();
         OffsetDateTime computedAt = null;
         for (StatRow row : rows) {
@@ -109,31 +118,69 @@ public class AdminStatsServiceImpl implements AdminStatsService {
         validateWindow(effectiveFrom, effectiveTo);
 
         StatGranularity effectiveGranularity = resolveGranularity(granularity, effectiveFrom, now);
-        List<StatPointResponse> points =
-                platformStatsRepository
-                        .findSeries(metric.key(), effectiveGranularity, effectiveFrom, effectiveTo)
-                        .stream()
-                        .map(
-                                row ->
-                                        new StatPointResponse(
-                                                row.bucketStart(), row.dimension(), row.value()))
-                        .toList();
+        List<SeriesPoint> points;
+        try {
+            points = readSeries(metric, effectiveGranularity, effectiveFrom, effectiveTo, now);
+        } catch (ClickHouseUnavailableException ex) {
+            throw unavailable(ex);
+        }
         return new AdminStatsTimeseriesResponse(
-                metric.key(), effectiveGranularity, effectiveFrom, effectiveTo, points);
+                metric.key(),
+                effectiveGranularity,
+                effectiveFrom,
+                effectiveTo,
+                points.stream()
+                        .map(
+                                point ->
+                                        new StatPointResponse(
+                                                point.bucketStart(),
+                                                point.dimension(),
+                                                point.value()))
+                        .toList());
     }
 
-    // Fine buckets survive only inside the fine retention window, so a window whose lower bound is
-    // older than that has nothing fine left to read and must be served from the daily rows.
+    private List<SeriesPoint> readSeries(
+            PlatformMetric metric,
+            StatGranularity granularity,
+            OffsetDateTime from,
+            OffsetDateTime to,
+            OffsetDateTime now) {
+        if (granularity == StatGranularity.HALF_HOUR) {
+            return platformStatsRepository.findHalfHourSeries(metric.key(), from, to);
+        }
+        // A day belongs to a daily series when its UTC midnight falls inside [from, to), and the
+        // day still in progress is never served as though it were complete.
+        OffsetDateTime firstDay = ceilToUtcDay(from);
+        OffsetDateTime endDay = min(ceilToUtcDay(to), now.truncatedTo(ChronoUnit.DAYS));
+        if (!firstDay.isBefore(endDay)) {
+            return List.of();
+        }
+        return metric.kind() == PlatformMetric.Kind.FLOW
+                ? platformStatsRepository.findDailyFlowSeries(metric.key(), firstDay, endDay)
+                : platformStatsRepository.findDailyGaugeSeries(metric.key(), firstDay, endDay);
+    }
+
+    private static OffsetDateTime ceilToUtcDay(OffsetDateTime instant) {
+        OffsetDateTime utc = instant.withOffsetSameInstant(ZoneOffset.UTC);
+        OffsetDateTime floor = utc.truncatedTo(ChronoUnit.DAYS);
+        return floor.equals(utc) ? floor : floor.plusDays(1);
+    }
+
+    private static OffsetDateTime min(OffsetDateTime a, OffsetDateTime b) {
+        return a.isBefore(b) ? a : b;
+    }
+
+    // Half-hour points are served for a window that starts inside the horizon; a window reaching
+    // further back is read at day width, so a chart never asks for a year of half-hour points.
     private StatGranularity granularityFor(OffsetDateTime from, OffsetDateTime now) {
-        return from.isBefore(now.minus(properties.fineRetention()))
+        return from.isBefore(now.minus(properties.halfHourHorizon()))
                 ? StatGranularity.DAY
                 : StatGranularity.HALF_HOUR;
     }
 
-    // A requested granularity is honoured where the rows exist and refused where they do not.
-    // Answering an unavailable request with an empty series would be worse than refusing it: the
-    // caller cannot tell a stretch that was rolled up and deleted from one in which nothing
-    // happened, and the response's own granularity field would contradict what was asked for.
+    // A requested granularity is honoured where the horizon allows it and refused where it does
+    // not. Half-hour rows are kept, but a window reaching past the horizon at that width would be
+    // thousands of points, and answering it at day width instead would contradict what was asked.
     private StatGranularity resolveGranularity(
             StatGranularity requested, OffsetDateTime from, OffsetDateTime now) {
         StatGranularity available = granularityFor(from, now);
@@ -143,10 +190,9 @@ public class AdminStatsServiceImpl implements AdminStatsService {
         if (requested == StatGranularity.HALF_HOUR && available == StatGranularity.DAY) {
             throw new AppException(
                     ApiErrorCode.BAD_REQUEST,
-                    "Fine buckets are kept for "
-                            + properties.fineRetention().toDays()
-                            + " days; a window reaching further back can only be read at day"
-                            + " granularity");
+                    "Half-hour points are served for windows starting within the last "
+                            + properties.halfHourHorizon().toDays()
+                            + " days");
         }
         return requested;
     }
@@ -159,6 +205,11 @@ public class AdminStatsServiceImpl implements AdminStatsService {
             throw new AppException(
                     ApiErrorCode.BAD_REQUEST, "The window may span at most one year");
         }
+    }
+
+    private static AppException unavailable(ClickHouseUnavailableException cause) {
+        log.warn("Platform statistics unavailable: {}", cause.getMessage());
+        return new AppException(ApiErrorCode.ANALYTICS_UNAVAILABLE);
     }
 
     private List<TopHashtagResponse> topHashtags() {

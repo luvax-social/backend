@@ -29,6 +29,7 @@ import com.app.common.response.UserListItemResponse;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.post.service.PostLikeService;
 import com.app.modules.social.service.SocialService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves the viewer's follow/block relationship to each row is resolved with a constant query count
@@ -50,7 +51,8 @@ import com.app.modules.social.service.SocialService;
 class SocialRelationshipIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

@@ -32,6 +32,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.notification.messaging.NotificationEventTypes;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Pins the banned-hashtag boundary on every post write path, and the line that boundary must not
@@ -51,7 +52,8 @@ import com.app.modules.notification.messaging.NotificationEventTypes;
 class PostBannedHashtagIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

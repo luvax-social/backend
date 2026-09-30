@@ -1,12 +1,11 @@
 package com.app.common.seed.writer;
 
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -16,38 +15,42 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import com.app.common.seed.outbox.SeedOutboxBatchWriter;
 import com.app.common.seed.time.SeedTimeline;
+import com.app.modules.admin.messaging.PlatformStatsCollectedEvent;
+import com.app.modules.recommendation.enums.UserEventType;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Seeds {@code platform_stats} (90 daily buckets plus 30 days of half-hour buckets) and {@code
- * user_events} (~10,000 rows across the last 3 months).
+ * Seeds platform statistics (90 days of half-hour buckets) and behavioural events (~10,000 rows
+ * across the last 3 months).
  *
- * <p><b>{@code platform_stats}</b>: every bucket this writer inserts is fully closed before {@code
- * referenceNow} - a daily bucket's start is at least one full day back, a half-hour bucket's start
- * is at least one full half-hour back, so {@code bucket_start + granularity} never exceeds {@code
- * referenceNow} and this writer never writes "the bucket a process starts inside", matching {@code
- * admin/DATA_RULES.md}'s stated rule for {@link
- * com.app.modules.admin.service.impl.StatsCollectionJob}. Day boundaries are truncated in UTC
- * ({@link Instant#truncatedTo}), not the JVM's default zone, per the same rule. Every metric key
- * this writer inserts is one of {@link com.app.modules.admin.enums.PlatformMetric}'s own wire keys,
- * verbatim - the two do not share a source, so the key strings must be kept in sync by hand. Eight
- * gauge metrics ({@code users_total}, {@code posts_total}, {@code comments_total}, {@code
- * stories_total}, and the four dimensioned breakdowns {@code users_by_status}, {@code
- * users_by_role}, {@code reports_by_status}, {@code reports_by_reason}) are written as synthetic
- * monotonically-increasing snapshots anchored on the real final row counts this seed run produced -
- * never by differencing two gauges, which is exactly the mistake {@code admin/DATA_RULES.md}
- * documents as having shipped once already. A dimensioned gauge writes one row per dimension value
- * actually present in the final distribution, never an explicit zero row for a value nobody holds,
- * matching {@code PlatformMetric}'s own "GROUP BY produces no row for an empty group" rule. Five
- * flow metrics ({@code registrations}, {@code posts_created}, {@code comments_created}, {@code
- * follows_created}, {@code likes_created}) are independent per-bucket random counts, never derived
- * from the gauge series; {@code PlatformMetric} also declares a sixth flow, {@code
+ * <p><b>Platform statistics</b>: each bucket is enqueued as one {@code
+ * admin.platform-stats.collected.v1} outbox event, the event the collection job raises, so the
+ * seeded series reaches ClickHouse through the same consumer production uses. Only half-hour
+ * buckets are seeded, because a daily figure is computed from them when a series is read. Every
+ * bucket this writer produces is fully closed before {@code referenceNow}: a bucket's start is at
+ * least one full half-hour back, so it never writes "the bucket a process starts inside", matching
+ * {@code admin/DATA_RULES.md}'s stated rule for {@link
+ * com.app.modules.admin.service.impl.StatsCollectionJob}. Every metric key this writer produces is
+ * one of {@link com.app.modules.admin.enums.PlatformMetric}'s own wire keys, verbatim - the two do
+ * not share a source, so the key strings must be kept in sync by hand. Eight gauge metrics ({@code
+ * users_total}, {@code posts_total}, {@code comments_total}, {@code stories_total}, and the four
+ * dimensioned breakdowns {@code users_by_status}, {@code users_by_role}, {@code reports_by_status},
+ * {@code reports_by_reason}) are written as synthetic monotonically-increasing snapshots anchored
+ * on the real final row counts this seed run produced - never by differencing two gauges, which is
+ * exactly the mistake {@code admin/DATA_RULES.md} documents as having shipped once already. A
+ * dimensioned gauge writes one row per dimension value actually present in the final distribution,
+ * never an explicit zero row for a value nobody holds, matching {@code PlatformMetric}'s own "GROUP
+ * BY produces no row for an empty group" rule. Five flow metrics ({@code registrations}, {@code
+ * posts_created}, {@code comments_created}, {@code follows_created}, {@code likes_created}) are
+ * independent draws, never derived from the gauge series: each UTC day draws a total from its
+ * per-day range and spreads it over the day's 48 buckets, so the daily figure computed from the
+ * buckets lands inside that range. {@code PlatformMetric} also declares a sixth flow, {@code
  * admin_actions_by_type}, which this writer does not populate; see this class's "Known gap" note
- * below. The insert uses {@code ON CONFLICT (bucket_start, granularity, metric_key, dimension) DO
- * UPDATE}, the same idempotency pattern the real jobs rely on for a safe re-run.
+ * below.
  *
  * <p><b>Known gap</b>: {@code admin_actions_by_type} is not seeded. Synthesizing a plausible
  * 90-day/half-hour distribution across all 27 {@code admin_action_type} values from the roughly 178
@@ -55,12 +58,18 @@ import lombok.extern.slf4j.Slf4j;
  * representation of that data, so the timeseries endpoint reads back empty for that one metric
  * specifically; every other {@code PlatformMetric} value is populated.
  *
- * <p><b>{@code user_events}</b>: every row's {@code created_at} comes from {@link
- * SeedTimeline#userEventCreatedAt}, bounded to the last 90 days - comfortably inside the partition
- * range {@code database/schema.sql} declares through 2026-09, so no row here can land in {@code
- * user_events_default}. {@code entity_id} references a real {@code posts}/{@code users}/{@code
+ * <p><b>Behavioural events</b>: each one is enqueued as one {@code
+ * recommendation.user-event.imported.v1} outbox event, under its own identifier, and reaches
+ * ClickHouse's {@code user_events} through the import consumer, which stores it without a Gorse
+ * feedback type so it is never replayed into the recommender. Every event's time comes from {@link
+ * SeedTimeline#userEventCreatedAt}, bounded to the last 90 days, comfortably inside the table's
+ * 12-month retention. {@code entity_id} references a real {@code posts}/{@code users}/{@code
  * hashtags}/{@code stories} row read back from the database for every event type that carries one,
- * so a downstream reader resolving {@code entity_id} never dereferences a dangling id.
+ * so a downstream reader resolving {@code entity_id} never dereferences a dangling id. Before
+ * anything is enqueued, every event type except {@code post_view} is asserted to appear at least
+ * {@value #MIN_EVENTS_PER_TYPE} times: that is the coverage {@code SeedRunner} used to check
+ * against the PostgreSQL table, which no longer exists. {@code post_view} is produced by the
+ * recommendation consumer draining {@code post.viewed.v1}, asynchronously after the run.
  */
 @Slf4j
 @Service
@@ -72,11 +81,16 @@ public class AnalyticsSeedWriter {
     // stream drives metric-value magnitudes and every user_events field but created_at.
     private static final long ANALYTICS_RANDOM_SEED = 8_836_215L;
 
-    private static final int DAILY_BUCKET_COUNT = 90;
-    private static final int HALF_HOUR_DAY_COUNT = 30;
+    private static final int BUCKET_DAYS = 90;
+    private static final int BUCKETS_PER_DAY = 48;
+    private static final int BUCKET_EVENTS_PER_TRANSACTION = 300;
     private static final Duration HALF_HOUR = Duration.ofMinutes(30);
     private static final int USER_EVENT_TARGET = 10_000;
     private static final int USER_EVENT_LOOKBACK_DAYS = 90;
+    private static final int USER_EVENTS_PER_TRANSACTION = 300;
+
+    /** Fewest events of each produced type a seed run must contain. */
+    static final int MIN_EVENTS_PER_TYPE = 5;
 
     // Every key below is a com.app.modules.admin.enums.PlatformMetric wire key, verbatim - the
     // seed writer and the real StatsCollectionJob/AdminStatsService must agree on these or the
@@ -132,29 +146,20 @@ public class AnalyticsSeedWriter {
                     "profile_follow",
                     "profile_unfollow",
                     "message_send");
-    private static final List<String> PLATFORMS = List.of("ios", "android", "web");
-
-    private static final String UPSERT_PLATFORM_STAT_SQL =
-            "INSERT INTO platform_stats (bucket_start, granularity, metric_key, dimension, value,"
-                    + " computed_at) VALUES (?, ?::stat_granularity, ?, ?, ?, ?) ON CONFLICT"
-                    + " (bucket_start, granularity, metric_key, dimension) DO UPDATE SET value ="
-                    + " EXCLUDED.value, computed_at = EXCLUDED.computed_at";
-    private static final String INSERT_USER_EVENT_SQL =
-            "INSERT INTO user_events (id, user_id, session_id, event_type, entity_type, entity_id,"
-                    + " platform, created_at) VALUES (?, ?, ?, ?::event_type, ?, ?, ?, ?)";
 
     private final JdbcTemplate jdbc;
+    private final SeedOutboxBatchWriter outboxBatchWriter;
 
     /**
-     * Inserts {@value #DAILY_BUCKET_COUNT} daily and {@code HALF_HOUR_DAY_COUNT * 48} half-hour
-     * {@code platform_stats} buckets, and roughly {@value #USER_EVENT_TARGET} {@code user_events}
-     * rows spread across the last {@value #USER_EVENT_LOOKBACK_DAYS} days.
+     * Enqueues {@code BUCKET_DAYS * BUCKETS_PER_DAY} half-hour platform statistics buckets, and
+     * roughly {@value #USER_EVENT_TARGET} behavioural events spread across the last {@value
+     * #USER_EVENT_LOOKBACK_DAYS} days.
      *
-     * <p>Must run last: {@code platform_stats}'s gauge series anchors on the final row counts every
-     * earlier writer produced, and {@code user_events}'s entity references are read back from
-     * {@code posts}, {@code hashtags} and {@code stories}.
+     * <p>Must run last: the statistics gauge series anchors on the final row counts every earlier
+     * writer produced, and the events' entity references are read back from {@code posts}, {@code
+     * hashtags} and {@code stories}.
      */
-    public void write(SeedTimeline timeline) {
+    public AnalyticsCounts write(SeedTimeline timeline) {
         Random random = new Random(ANALYTICS_RANDOM_SEED);
 
         FinalCounts finalCounts =
@@ -170,26 +175,21 @@ public class AnalyticsSeedWriter {
                         countsByColumn("reports", "status", null),
                         countsByColumn("reports", "report_reason", null));
 
-        int dailyRows =
-                writeBuckets(
-                        "day",
-                        DAILY_BUCKET_COUNT,
-                        Duration.ofDays(1),
-                        finalCounts,
-                        timeline,
-                        random);
-        int halfHourBuckets = HALF_HOUR_DAY_COUNT * 48;
-        int halfHourRows =
-                writeBuckets(
-                        "half_hour", halfHourBuckets, HALF_HOUR, finalCounts, timeline, random);
-        log.info(
-                "[seed] platform_stats: {} daily rows written, {} half_hour rows written",
-                dailyRows,
-                halfHourRows);
+        int buckets = writeBuckets(finalCounts, timeline, random);
+        log.info("[seed] platform_stats: {} half_hour bucket events enqueued", buckets);
 
-        int eventRows = writeUserEvents(timeline, random);
-        log.info("[seed] user_events: {} rows written", eventRows);
+        int events = writeUserEvents(timeline, random);
+        log.info("[seed] user_events: {} import events enqueued", events);
+        return new AnalyticsCounts(buckets, events);
     }
+
+    /**
+     * What one run enqueued.
+     *
+     * @param statsBuckets half-hour platform statistics buckets
+     * @param userEventImports behavioural events to import
+     */
+    public record AnalyticsCounts(int statsBuckets, int userEventImports) {}
 
     // The real final row counts every bucket's gauge ramps toward, dimensioned exactly the way
     // com.app.modules.admin.enums.PlatformMetric's GROUP BY queries dimension them - one map entry
@@ -226,155 +226,98 @@ public class AnalyticsSeedWriter {
                 });
     }
 
-    // Writes both gauge metrics and every flow metric for bucketCount buckets of the given
-    // granularity, each bucket ending strictly before referenceNow. The gauge curve is a linear
+    // Builds every gauge and flow row of 90 days of half-hour buckets, each ending strictly before
+    // referenceNow, and enqueues one collected-bucket event per bucket. The gauge curve is a linear
     // ramp toward the real final counts with a small random jitter layered on top, oldest bucket
-    // first; the flow counts are independent random draws scaled down for half-hour buckets versus
-    // daily ones.
-    private int writeBuckets(
-            String granularity,
-            int bucketCount,
-            Duration bucketSpan,
-            FinalCounts finalCounts,
-            SeedTimeline timeline,
-            Random random) {
-        Instant bucketFloor = alignedFloor(timeline.referenceNow(), bucketSpan);
-        double scaleFactor = bucketSpan.toMinutes() / (24.0 * 60.0);
-
-        List<Object[]> rows = new ArrayList<>();
+    // first. A flow is drawn once per UTC day and spread over that day's buckets, so the daily sum
+    // the read path computes falls inside the per-day range.
+    private int writeBuckets(FinalCounts finalCounts, SeedTimeline timeline, Random random) {
+        int bucketCount = BUCKET_DAYS * BUCKETS_PER_DAY;
+        Instant bucketFloor = alignedFloor(timeline.referenceNow(), HALF_HOUR);
+        List<PlatformStatsCollectedEvent.Bucket> buckets = new ArrayList<>(bucketCount);
+        Instant currentDay = null;
+        Map<String, int[]> dayFlows = Map.of();
         // i = 1 is the most recently completed bucket, i = bucketCount the oldest; the loop walks
         // oldest-to-newest so the gauge ramp's progress fraction increases monotonically with time.
         for (int i = bucketCount; i >= 1; i--) {
-            Instant bucketStart = bucketFloor.minus(bucketSpan.multipliedBy(i));
-            Instant computedAt = bucketStart.plus(bucketSpan);
+            Instant bucketStart = bucketFloor.minus(HALF_HOUR.multipliedBy(i));
+            Instant computedAt = bucketStart.plus(HALF_HOUR).plus(Duration.ofMinutes(1));
             double progress = 1.0 - ((double) (i - 1) / bucketCount);
+            Instant day = bucketStart.truncatedTo(ChronoUnit.DAYS);
+            if (!day.equals(currentDay)) {
+                currentDay = day;
+                dayFlows = drawDayFlows(random);
+            }
+            int slot = (int) Duration.between(day, bucketStart).dividedBy(HALF_HOUR);
 
-            rows.add(
-                    dimensionlessGaugeRow(
-                            bucketStart,
-                            granularity,
-                            USERS_TOTAL_METRIC,
-                            finalCounts.users(),
-                            progress,
-                            computedAt,
-                            random));
-            rows.add(
-                    dimensionlessGaugeRow(
-                            bucketStart,
-                            granularity,
-                            POSTS_TOTAL_METRIC,
-                            finalCounts.posts(),
-                            progress,
-                            computedAt,
-                            random));
-            rows.add(
-                    dimensionlessGaugeRow(
-                            bucketStart,
-                            granularity,
-                            COMMENTS_TOTAL_METRIC,
-                            finalCounts.comments(),
-                            progress,
-                            computedAt,
-                            random));
-            rows.add(
-                    dimensionlessGaugeRow(
-                            bucketStart,
-                            granularity,
-                            STORIES_TOTAL_METRIC,
-                            finalCounts.stories(),
-                            progress,
-                            computedAt,
-                            random));
-
+            List<PlatformStatsCollectedEvent.Row> rows = new ArrayList<>();
+            rows.add(gaugeRow(USERS_TOTAL_METRIC, "", finalCounts.users(), progress, random));
+            rows.add(gaugeRow(POSTS_TOTAL_METRIC, "", finalCounts.posts(), progress, random));
+            rows.add(gaugeRow(COMMENTS_TOTAL_METRIC, "", finalCounts.comments(), progress, random));
+            rows.add(gaugeRow(STORIES_TOTAL_METRIC, "", finalCounts.stories(), progress, random));
+            addDimensionedGaugeRows(
+                    rows, USERS_BY_STATUS_METRIC, finalCounts.usersByStatus(), progress, random);
+            addDimensionedGaugeRows(
+                    rows, USERS_BY_ROLE_METRIC, finalCounts.usersByRole(), progress, random);
             addDimensionedGaugeRows(
                     rows,
-                    bucketStart,
-                    granularity,
-                    USERS_BY_STATUS_METRIC,
-                    finalCounts.usersByStatus(),
-                    progress,
-                    computedAt,
-                    random);
-            addDimensionedGaugeRows(
-                    rows,
-                    bucketStart,
-                    granularity,
-                    USERS_BY_ROLE_METRIC,
-                    finalCounts.usersByRole(),
-                    progress,
-                    computedAt,
-                    random);
-            addDimensionedGaugeRows(
-                    rows,
-                    bucketStart,
-                    granularity,
                     REPORTS_BY_STATUS_METRIC,
                     finalCounts.reportsByStatus(),
                     progress,
-                    computedAt,
                     random);
             addDimensionedGaugeRows(
                     rows,
-                    bucketStart,
-                    granularity,
                     REPORTS_BY_REASON_METRIC,
                     finalCounts.reportsByReason(),
                     progress,
-                    computedAt,
                     random);
-
             for (String flowMetric : FLOW_METRICS) {
-                int[] dailyRange = FLOW_RANGE_PER_DAY.get(flowMetric);
-                int scaledMin = Math.max(0, (int) Math.round(dailyRange[0] * scaleFactor));
-                int scaledMax =
-                        Math.max(scaledMin + 1, (int) Math.round(dailyRange[1] * scaleFactor));
-                long flowValue = scaledMin + random.nextInt(scaledMax - scaledMin);
                 rows.add(
-                        bucketRow(bucketStart, granularity, flowMetric, "", flowValue, computedAt));
+                        new PlatformStatsCollectedEvent.Row(
+                                flowMetric, "", dayFlows.get(flowMetric)[slot]));
             }
+            buckets.add(new PlatformStatsCollectedEvent.Bucket(bucketStart, computedAt, rows));
         }
-        jdbc.batchUpdate(UPSERT_PLATFORM_STAT_SQL, rows, rows.size(), this::bindPlatformStatRow);
-        return rows.size();
+        for (int from = 0; from < buckets.size(); from += BUCKET_EVENTS_PER_TRANSACTION) {
+            int to = Math.min(from + BUCKET_EVENTS_PER_TRANSACTION, buckets.size());
+            outboxBatchWriter.emitPlatformStatsBatch(buckets.subList(from, to));
+        }
+        return buckets.size();
     }
 
-    private Object[] dimensionlessGaugeRow(
-            Instant bucketStart,
-            String granularity,
-            String metricKey,
-            long finalCount,
-            double progress,
-            Instant computedAt,
-            Random random) {
-        return bucketRow(
-                bucketStart,
-                granularity,
-                metricKey,
-                "",
-                rampedGauge(finalCount, progress, random),
-                computedAt);
+    // One UTC day of every flow metric: a total drawn from the metric's per-day range, then spread
+    // over the day's 48 buckets one unit at a time.
+    private Map<String, int[]> drawDayFlows(Random random) {
+        Map<String, int[]> flows = new java.util.LinkedHashMap<>();
+        for (String flowMetric : FLOW_METRICS) {
+            int[] dailyRange = FLOW_RANGE_PER_DAY.get(flowMetric);
+            int total = dailyRange[0] + random.nextInt(Math.max(1, dailyRange[1] - dailyRange[0]));
+            int[] perBucket = new int[BUCKETS_PER_DAY];
+            for (int unit = 0; unit < total; unit++) {
+                perBucket[random.nextInt(BUCKETS_PER_DAY)]++;
+            }
+            flows.put(flowMetric, perBucket);
+        }
+        return flows;
+    }
+
+    private PlatformStatsCollectedEvent.Row gaugeRow(
+            String metricKey, String dimension, long finalCount, double progress, Random random) {
+        return new PlatformStatsCollectedEvent.Row(
+                metricKey, dimension, rampedGauge(finalCount, progress, random));
     }
 
     // One row per dimension value actually present in the final distribution - a value with zero
     // final rows gets no row at any bucket, matching PlatformMetric's own "GROUP BY produces no row
     // for an empty group" rule rather than writing an explicit zero.
     private void addDimensionedGaugeRows(
-            List<Object[]> rows,
-            Instant bucketStart,
-            String granularity,
+            List<PlatformStatsCollectedEvent.Row> rows,
             String metricKey,
             Map<String, Long> finalByDimension,
             double progress,
-            Instant computedAt,
             Random random) {
         for (Map.Entry<String, Long> entry : finalByDimension.entrySet()) {
-            rows.add(
-                    bucketRow(
-                            bucketStart,
-                            granularity,
-                            metricKey,
-                            entry.getKey(),
-                            rampedGauge(entry.getValue(), progress, random),
-                            computedAt));
+            rows.add(gaugeRow(metricKey, entry.getKey(), entry.getValue(), progress, random));
         }
     }
 
@@ -387,28 +330,8 @@ public class AnalyticsSeedWriter {
 
     private Instant alignedFloor(Instant instant, Duration span) {
         long spanSeconds = span.getSeconds();
-        if (spanSeconds >= Duration.ofDays(1).getSeconds()) {
-            return instant.truncatedTo(ChronoUnit.DAYS);
-        }
         long epochSeconds = instant.getEpochSecond();
         return Instant.ofEpochSecond(epochSeconds - (epochSeconds % spanSeconds));
-    }
-
-    private Object[] bucketRow(
-            Instant bucketStart,
-            String granularity,
-            String metricKey,
-            String dimension,
-            long value,
-            Instant computedAt) {
-        return new Object[] {
-            Timestamp.from(bucketStart),
-            granularity,
-            metricKey,
-            dimension,
-            value,
-            Timestamp.from(computedAt)
-        };
     }
 
     private int writeUserEvents(SeedTimeline timeline, Random random) {
@@ -422,31 +345,80 @@ public class AnalyticsSeedWriter {
                             + " AnalyticsSeedWriter");
         }
 
-        List<Object[]> rows = new ArrayList<>();
+        List<SeedOutboxBatchWriter.UserEventImport> events =
+                generateUserEvents(timeline, random, userIds, postIds, hashtagIds, storyIds);
+        assertEveryProducedTypeCovered(events);
+
+        int enqueued = 0;
+        for (int from = 0; from < events.size(); from += USER_EVENTS_PER_TRANSACTION) {
+            int to = Math.min(from + USER_EVENTS_PER_TRANSACTION, events.size());
+            enqueued += outboxBatchWriter.emitUserEventImportBatch(events.subList(from, to));
+        }
+        return enqueued;
+    }
+
+    /**
+     * Draws {@value #USER_EVENT_TARGET} events. Each event's identifier is derived from its
+     * position, so a repeat of the emission maps to the same identifiers and is absorbed by {@code
+     * enqueueOnce} instead of doubling the events.
+     */
+    List<SeedOutboxBatchWriter.UserEventImport> generateUserEvents(
+            SeedTimeline timeline,
+            Random random,
+            List<UUID> userIds,
+            List<UUID> postIds,
+            List<UUID> hashtagIds,
+            List<UUID> storyIds) {
+        List<SeedOutboxBatchWriter.UserEventImport> events = new ArrayList<>(USER_EVENT_TARGET);
         for (int i = 0; i < USER_EVENT_TARGET; i++) {
             UUID userId = userIds.get(random.nextInt(userIds.size()));
             String eventType =
                     WEIGHTED_EVENT_TYPES.get(random.nextInt(WEIGHTED_EVENT_TYPES.size()));
-            String platform = PLATFORMS.get(random.nextInt(PLATFORMS.size()));
             Instant createdAt = timeline.userEventCreatedAt(USER_EVENT_LOOKBACK_DAYS);
 
             EntityRef entityRef =
                     resolveEntityRef(
                             eventType, postIds, hashtagIds, storyIds, userIds, userId, random);
-            rows.add(
-                    new Object[] {
-                        UUID.randomUUID(),
-                        userId,
-                        UUID.randomUUID(),
-                        eventType,
-                        entityRef == null ? null : entityRef.entityType(),
-                        entityRef == null ? null : entityRef.entityId(),
-                        platform,
-                        Timestamp.from(createdAt)
-                    });
+            events.add(
+                    new SeedOutboxBatchWriter.UserEventImport(
+                            UUID.nameUUIDFromBytes(
+                                    ("seed_user_event:" + i).getBytes(StandardCharsets.UTF_8)),
+                            userId,
+                            UserEventType.fromJson(eventType),
+                            entityRef == null ? null : entityRef.entityType(),
+                            entityRef == null ? null : entityRef.entityId(),
+                            createdAt));
         }
-        jdbc.batchUpdate(INSERT_USER_EVENT_SQL, rows, rows.size(), this::bindUserEventRow);
-        return rows.size();
+        return events;
+    }
+
+    /**
+     * Fails the run when any event type the seed produces has fewer than {@value
+     * #MIN_EVENTS_PER_TYPE} events. {@code post_view} is exempt: the recommendation consumer writes
+     * those, asynchronously, from {@code post.viewed.v1}.
+     */
+    static void assertEveryProducedTypeCovered(List<SeedOutboxBatchWriter.UserEventImport> events) {
+        Map<UserEventType, Integer> counts = new EnumMap<>(UserEventType.class);
+        for (SeedOutboxBatchWriter.UserEventImport event : events) {
+            counts.merge(event.eventType(), 1, Integer::sum);
+        }
+        List<String> uncovered = new ArrayList<>();
+        for (UserEventType type : UserEventType.values()) {
+            if (type == UserEventType.POST_VIEW) {
+                continue;
+            }
+            int count = counts.getOrDefault(type, 0);
+            if (count < MIN_EVENTS_PER_TYPE) {
+                uncovered.add(type.toJson() + "=" + count);
+            }
+        }
+        if (!uncovered.isEmpty()) {
+            throw new IllegalStateException(
+                    "AnalyticsSeedWriter: event types below "
+                            + MIN_EVENTS_PER_TYPE
+                            + " events: "
+                            + uncovered);
+        }
     }
 
     private record EntityRef(String entityType, UUID entityId) {}
@@ -511,33 +483,5 @@ public class AnalyticsSeedWriter {
 
     private List<UUID> fetchIds(String sql) {
         return jdbc.query(sql, (rs, rowNum) -> (UUID) rs.getObject("id"));
-    }
-
-    private void bindPlatformStatRow(PreparedStatement ps, Object[] row) throws SQLException {
-        ps.setTimestamp(1, (Timestamp) row[0]);
-        ps.setString(2, (String) row[1]);
-        ps.setString(3, (String) row[2]);
-        ps.setString(4, (String) row[3]);
-        ps.setLong(5, (Long) row[4]);
-        ps.setTimestamp(6, (Timestamp) row[5]);
-    }
-
-    private void bindUserEventRow(PreparedStatement ps, Object[] row) throws SQLException {
-        ps.setObject(1, row[0]);
-        ps.setObject(2, row[1]);
-        ps.setObject(3, row[2]);
-        ps.setString(4, (String) row[3]);
-        if (row[4] == null) {
-            ps.setNull(5, java.sql.Types.VARCHAR);
-        } else {
-            ps.setString(5, (String) row[4]);
-        }
-        if (row[5] == null) {
-            ps.setNull(6, java.sql.Types.OTHER);
-        } else {
-            ps.setObject(6, row[5]);
-        }
-        ps.setString(7, (String) row[6]);
-        ps.setTimestamp(8, (Timestamp) row[7]);
     }
 }

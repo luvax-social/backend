@@ -5,7 +5,10 @@ import java.util.Locale;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
-/** Bucket widths persisted in the PostgreSQL {@code stat_granularity} enum. */
+/**
+ * Bucket widths a statistics series can be read at. Only half-hour buckets are stored; a day is
+ * computed from them when a series is read.
+ */
 public enum StatGranularity {
     HALF_HOUR,
     DAY;

@@ -27,10 +27,9 @@ These tables cannot be rebuilt from any other source if lost.
 | `posts.like_count` | `posts` table | `COUNT(*)` from `post_likes` where `post_id = post.id` | Trigger `trg_post_like_count` (V16) |
 | `posts.comment_count` | `posts` table | `COUNT(*)` from `comments` where `post_id = post.id` and `deleted_at IS NULL` | Trigger `trg_post_comment_count` (V16) |
 | `posts.save_count` | `posts` table | `COUNT(*)` from `post_saves` where `post_id = post.id` | Trigger `trg_post_save_count` (V16) |
-| `posts.view_count` | `posts` table | No trigger; intended to be updated by a background job | `[NOT YET IMPLEMENTED]` — `POST /api/v1/posts/{postId}/view` records a `post.viewed.v1` event (consumed into `user_events` as `post_view`), but no job yet aggregates it back into this counter, so `view_count` still never changes from its default |
+| `posts.view_count` | `posts` table | No trigger; intended to be updated by a background job | `[NOT YET IMPLEMENTED]` - `POST /api/v1/posts/{postId}/view` records a `post.viewed.v1` event (consumed into the ClickHouse `user_events` table as `post_view`), but no job yet aggregates it back into this counter, so `view_count` still never changes from its default |
 | `posts.updated_at` | `posts` table | Auto-maintained | Trigger `trg_posts_updated_at` (V16) |
 | `users.post_count` | `users` table | `COUNT(*)` from `posts` where `user_id` matches, `status='published'`, `deleted_at IS NULL` | Trigger `trg_post_count` (V16) |
-| `post_interaction_scores` | `post_interaction_scores` table | Computed from `post_likes`, `comments`, `post_saves`, `user_events` by background scheduler | Scheduled background job |
 
 ---
 
@@ -141,6 +140,6 @@ A change that made carousels type-homogeneous would break a client feature built
 | `social` | inbound | Follow/block state governs post visibility; no direct FK dependency |
 | `notification` | outbound | `post.liked.v1` and `post.unliked.v1` drive `like_post` notifications through `PostNotificationConsumer` on `post.notification.queue` (DLQ `post.notification.dlq`), enabled by `app.post.notification-consumer.enabled`; an unlike retracts the liker from the group. Caption mentions still produce nothing. |
 | `notification` | inbound | `PostPreviewService` gives the notification feed each post's availability to the viewer and its first media as a thumbnail, in one query per page |
-| `recommendation` | inbound | `post_categories` and `post_interaction_scores` reference `posts.id` |
+| `recommendation` | inbound | `post_categories` references `posts.id`; ClickHouse `user_events` rows carry post ids in `entity_id` with no foreign key |
 | `report` | inbound | Reports can target a post via polymorphic `entity_id` |
 | `message` | inbound | Messages can share a post via `shared_post_id` (SET NULL on post delete) |

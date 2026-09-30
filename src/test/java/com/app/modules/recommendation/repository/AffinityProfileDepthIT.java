@@ -16,6 +16,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.app.testsupport.TestContainerImages;
+
 /**
  * What the viewer-profile bound in {@code findAffinityCandidates} actually costs.
  *
@@ -39,7 +41,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class AffinityProfileDepthIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private final UserSuggestionRepository userSuggestionRepository;
     private final JdbcClient jdbcClient;

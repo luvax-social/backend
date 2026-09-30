@@ -285,22 +285,20 @@ app:
       # answering promptly and wrongly with success: false.
       enabled: ${TURNSTILE_AUTH_ENABLED:true}
 
-  # Platform statistics collection and roll-up.
+  # Platform statistics collection.
   #
   # A single application instance is assumed. There is no distributed scheduler lock in this
-  # codebase, so two instances would each run both jobs; the composite primary key on
-  # platform_stats with ON CONFLICT DO UPDATE keeps that harmless rather than duplicative, but it
-  # is an assumption to revisit before scaling out.
+  # codebase, so two instances would each collect every bucket; both describe the same bucket and
+  # the analytics store keeps the one computed last, which makes that harmless rather than
+  # duplicative, but it is an assumption to revisit before scaling out.
   #
-  # There is no backfill. A bucket that was never collected can never be collected later, and a
-  # daily row deleted by retention is gone, so fine-retention and daily-retention are the real
-  # limits of what can ever be charted.
+  # There is no backfill. A bucket that was never collected can never be collected later. Every
+  # half-hour bucket is kept for good; half-hour-horizon only bounds how far back a series may be
+  # requested at half-hour width.
   stats:
     enabled: ${STATS_ENABLED:true}
     interval: ${STATS_INTERVAL:PT30M}
-    fine-retention: ${STATS_FINE_RETENTION:P30D}
-    daily-retention: ${STATS_DAILY_RETENTION:P365D}
-    rollup-cron: ${STATS_ROLLUP_CRON:0 20 3 * * *}
+    half-hour-horizon: ${STATS_HALF_HOUR_HORIZON:P30D}
   story:
     consumer:
       enabled: ${STORY_CONSUMER_ENABLED:false}
@@ -311,6 +309,39 @@ app:
     idempotency-ttl-hours: ${MESSAGE_IDEMPOTENCY_TTL_HOURS:24}
     live:
       enabled: ${MESSAGE_LIVE_ENABLED:false}
+  # ClickHouse analytics store (database luvax_analytics). Defaults serve local development against
+  # the observability profile's ClickHouse on the host; production overrides through environment
+  # variables. Three application users each get a pool: the writer inserts, the reader serves
+  # request-path reads and, through the batch pool, long reads for jobs, and the migrator runs
+  # schema scripts and the seed reset's truncation. Tests pin ANALYTICS_ENABLED=false.
+  analytics:
+    enabled: ${ANALYTICS_ENABLED:true}
+    clickhouse:
+      url: ${ANALYTICS_CLICKHOUSE_URL:jdbc:clickhouse://localhost:8123/luvax_analytics}
+      # Also each pool's checkout timeout, so a starved pool fails fast instead of holding a
+      # listener thread for Hikari's default 30 seconds.
+      connection-timeout: ${ANALYTICS_CLICKHOUSE_CONNECTION_TIMEOUT:PT2S}
+      writer:
+        username: ${ANALYTICS_CLICKHOUSE_WRITER_USERNAME:luvax_analytics_writer}
+        password: ${ANALYTICS_CLICKHOUSE_WRITER_PASSWORD:}
+        pool-size: ${ANALYTICS_CLICKHOUSE_WRITER_POOL_SIZE:12}
+        socket-timeout: ${ANALYTICS_CLICKHOUSE_WRITER_SOCKET_TIMEOUT:PT10S}
+      reader:
+        username: ${ANALYTICS_CLICKHOUSE_READER_USERNAME:luvax_analytics_reader}
+        password: ${ANALYTICS_CLICKHOUSE_READER_PASSWORD:}
+        pool-size: ${ANALYTICS_CLICKHOUSE_READER_POOL_SIZE:6}
+        # Above the reader profile's server-side max_execution_time of 20 seconds, so the server's
+        # typed timeout arrives before the client gives up.
+        socket-timeout: ${ANALYTICS_CLICKHOUSE_READER_SOCKET_TIMEOUT:PT25S}
+      # Uses the reader's credentials.
+      batch:
+        pool-size: ${ANALYTICS_CLICKHOUSE_BATCH_POOL_SIZE:2}
+        socket-timeout: ${ANALYTICS_CLICKHOUSE_BATCH_SOCKET_TIMEOUT:PT5M}
+      migrator:
+        username: ${ANALYTICS_CLICKHOUSE_MIGRATOR_USERNAME:luvax_analytics_migrator}
+        password: ${ANALYTICS_CLICKHOUSE_MIGRATOR_PASSWORD:}
+    migration:
+      retry-interval: ${ANALYTICS_MIGRATION_RETRY_INTERVAL:PT30S}
   gorse:
     base-url: ${APP_GORSE_BASE_URL:http://localhost:8088}
     api-key: ${GORSE_API_KEY:}
@@ -320,14 +351,23 @@ app:
   recommendation:
     consumer:
       enabled: ${RECOMMENDATION_CONSUMER_ENABLED:false}
+      # Feedback consumer threads. Each write waits for its part to be flushed and synced, which
+      # takes tens of milliseconds, and ordering does not matter to an append-only table.
+      concurrency: ${RECOMMENDATION_CONSUMER_CONCURRENCY:4}
     read-set-window: ${RECOMMENDATION_READ_SET_WINDOW:P90D}
     read-set-max-rows: ${RECOMMENDATION_READ_SET_MAX_ROWS:2000}
     top-up-overfetch-multiplier: ${RECOMMENDATION_TOPUP_OVERFETCH_MULTIPLIER:3}
+    # Pacing of the operator-triggered Gorse rebuild (GORSE_REBUILD, GORSE_REBUILD_TOKEN). None of
+    # these values changes what the rebuild produces, only how fast it pushes it.
+    gorse-rebuild:
+      requests-per-second: ${GORSE_REBUILD_REQUESTS_PER_SECOND:5}
+      user-batch-size: ${GORSE_REBUILD_USER_BATCH_SIZE:500}
+      item-batch-size: ${GORSE_REBUILD_ITEM_BATCH_SIZE:500}
+      feedback-batch-size: ${GORSE_REBUILD_FEEDBACK_BATCH_SIZE:1000}
     affinity:
       enabled: ${AFFINITY_JOB_ENABLED:true}
       # 90 days matches the read-set window above and the span the seeded dataset covers. It is
-      # also the bound that makes the user_events read prune to the two or three partitions it
-      # covers instead of scanning all twenty-four.
+      # also the bound that lets the ClickHouse read skip every monthly partition outside it.
       window: ${AFFINITY_WINDOW:P90D}
       # Three half-lives across the window: the far edge still contributes about an eighth rather
       # than falling off a cliff, while last week clearly outranks last month. A 7-day half-life

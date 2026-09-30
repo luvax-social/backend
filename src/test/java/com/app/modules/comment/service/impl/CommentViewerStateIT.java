@@ -28,6 +28,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.modules.comment.dto.response.CommentResponse;
 import com.app.modules.comment.service.CommentService;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves the viewer's comment-like state is resolved with a constant query count across page size,
@@ -50,7 +51,8 @@ import com.app.modules.mail.service.MailService;
 class CommentViewerStateIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

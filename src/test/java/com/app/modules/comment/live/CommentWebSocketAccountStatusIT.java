@@ -63,7 +63,8 @@ class CommentWebSocketAccountStatusIT {
             LoggerFactory.getLogger(CommentWebSocketAccountStatusIT.class);
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

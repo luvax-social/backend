@@ -32,6 +32,7 @@ import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.service.NotificationDraft;
 import com.app.modules.notification.service.NotificationService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * The activity feed over HTTP, the way a client uses it: the page shape, filters, head, state, the
@@ -58,7 +59,8 @@ class NotificationControllerIT {
     private static final String BASE = "/api/v1/notifications";
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

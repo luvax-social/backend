@@ -111,7 +111,13 @@ class AdminActionRecorderTest {
         recorder.record(ACTOR_ID, actionType, TARGET_ID, "user", TARGET_ID, null, "internal", null);
 
         verify(outboxService, never())
-                .enqueue(anyString(), anyString(), anyString(), any(), any(), any());
+                .enqueue(
+                        eq(AdminEventTypes.MODERATION_NOTICE_REQUESTED_V1),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        any(),
+                        any());
     }
 
     // A message whose sender's account was hard-deleted has no target user, so there is nobody to
@@ -129,7 +135,13 @@ class AdminActionRecorderTest {
                 null);
 
         verify(outboxService, never())
-                .enqueue(anyString(), anyString(), anyString(), any(), any(), any());
+                .enqueue(
+                        eq(AdminEventTypes.MODERATION_NOTICE_REQUESTED_V1),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        any(),
+                        any());
     }
 
     @Test
@@ -169,11 +181,49 @@ class AdminActionRecorderTest {
                 .containsOnlyKeys("userId", "actionType", "adminActionId");
     }
 
+    // Every audit row is replicated, whatever its type and whether or not it mails anyone, so the
+    // event is asserted across the whole enum rather than for a chosen few.
+    @ParameterizedTest
+    @EnumSource(AdminActionType.class)
+    void record_anyAction_enqueuesTheReplicationEventNamingTheRow(AdminActionType actionType) {
+        recorder.record(ACTOR_ID, actionType, TARGET_ID, "user", TARGET_ID, null, "internal", null);
+
+        verify(outboxService)
+                .enqueue(
+                        eq(AdminEventTypes.ACTION_RECORDED_V1),
+                        eq(AdminEventTypes.ACTION_RECORDED_V1),
+                        eq("admin_action"),
+                        eq(ACTION_ID),
+                        eq(ACTOR_ID),
+                        eq(Map.of("adminActionId", ACTION_ID.toString())));
+    }
+
+    @Test
+    void record_actionWithNoTargetUser_stillEnqueuesTheReplicationEvent() {
+        recorder.record(
+                null, AdminActionType.RESOLVE_REPORT, null, "report", TARGET_ID, null, "x", null);
+
+        verify(outboxService)
+                .enqueue(
+                        eq(AdminEventTypes.ACTION_RECORDED_V1),
+                        eq(AdminEventTypes.ACTION_RECORDED_V1),
+                        eq("admin_action"),
+                        eq(ACTION_ID),
+                        any(),
+                        eq(Map.of("adminActionId", ACTION_ID.toString())));
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> capturedPayload() {
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(outboxService)
-                .enqueue(anyString(), anyString(), anyString(), any(), any(), captor.capture());
+                .enqueue(
+                        eq(AdminEventTypes.MODERATION_NOTICE_REQUESTED_V1),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        any(),
+                        captor.capture());
         return captor.getValue();
     }
 

@@ -322,7 +322,7 @@ A public ticket that never resolved to an account gets no in-product notificatio
 | Depends on | For |
 |------------|-----|
 | `users` | The account, its role and its address |
-| `admin` | `admin_actions` for the appealed decision and for writing audit rows |
+| `admin` | `admin_actions` for the appealed decision and for writing audit rows. Every read of `admin_actions` in this module stays on PostgreSQL by design: the appeal-link recovery query joins it against `support_tickets`, the in-product appeal checks ownership and the conflict-of-interest rule reads the acting staff member, and each is a lookup by id or an anti-join that needs one consistent store. The ClickHouse replica of `admin_actions` lags writes by seconds and serves only the audit-log listing, so a lagging replica can never refuse a valid appeal |
 | `mail` | The notice mail and the confirmation mail |
 | `notification` | The in-product notification |
 | `common/security` | The Redis sliding window and `IpExtractor` |

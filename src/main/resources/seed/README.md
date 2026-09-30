@@ -2,8 +2,8 @@
 
 A seed run populates a local PostgreSQL instance with a full, internally consistent social-network
 dataset - 140 users, 746 posts, a weighted follow graph, comment threads, stories, direct messages,
-a moderation history with a working discipline ladder, verification badges, notifications, and 12
-months of analytics - so a developer or QA reviewer can exercise every surface of the application,
+a moderation history with a working discipline ladder, verification badges, notifications, and 90
+days of analytics - so a developer or QA reviewer can exercise every surface of the application,
 including the admin panel, against realistic data instead of an empty database.
 By default it refuses to run against anything but a local database, and every seed component is
 gated to the `dev` profile.
@@ -29,6 +29,9 @@ before reseeding.
 | Support tickets / verification requests | 70 / 16 |
 | Verification badges granted / still active | 18 / 13 |
 | Follow edges | ~5,500 |
+| Platform statistics buckets (half-hour, 90 days) | 4,320 |
+| Imported behavioural events (`user_events`, last 90 days) | ~10,000, plus `post_view` rows from the recommendation consumer |
+| Audit rows replicated to ClickHouse | every `admin_actions` row |
 | Personas | 14 |
 
 ## Running the seed
@@ -83,7 +86,12 @@ What happens on that run:
    their dead-letter queues, discovered from the `Queue` beans the topology config declares rather
    than a hardcoded list), deletes and recreates the `posts` and `hashtags` Elasticsearch indexes
    with their real mapping, truncates Gorse's own sibling Postgres database (`GORSE_DATA_STORE` in
-   `docker-compose.yaml`), and only then truncates every seedable domain table.
+   `docker-compose.yaml`), truncates the three ClickHouse analytics tables (`user_events`,
+   `admin_actions` and `platform_stats` in `luvax_analytics`) as the migrator user, and only then
+   truncates every seedable domain table.
+   A failed ClickHouse truncation fails the run, because a reseed that left the analytics tables
+   behind would silently disagree with the freshly truncated PostgreSQL rows.
+   With `ANALYTICS_ENABLED=false` there is no ClickHouse to truncate, and the reset logs a warning and continues.
    This is destructive: any local data, queued message, indexed document, or recommender state you
    had before the run is gone.
    The broker and search/recommender state are purged first, specifically so a message already in
@@ -97,9 +105,35 @@ What happens on that run:
    engagement events for every like, save, and comment) through the same transactional outbox
    every production write path uses, so the real Elasticsearch index-sync and Gorse recommendation
    consumers index and learn from the seeded dataset.
-4. The run asserts every value of 16 mandatory enum-typed columns (`user_status`, `post_type`,
-   `admin_action_type`, `event_type`, and so on) is represented on at least 5 rows, and fails loudly
+   The analytics data travels the same way.
+   Every `admin_actions` row is replayed as an `admin.action.recorded.v1` event.
+   Every one of the 4,320 half-hour statistics buckets is one `admin.platform-stats.collected.v1` event.
+   Every one of the roughly 10,000 behavioural events is one `recommendation.user-event.imported.v1` event.
+   The three analytics consumers stay enabled during the run, and they are the only path into ClickHouse.
+4. The run asserts every value of 15 mandatory enum-typed columns (`user_status`, `post_type`,
+   `admin_action_type`, and so on) is represented on at least 5 rows, and fails loudly
    if any value falls short.
+   Behavioural event types are asserted on the generated set before it is enqueued, because the
+   PostgreSQL `user_events` table that used to be counted no longer exists.
+   Every event type except `post_view` must appear at least 5 times.
+
+## Analytics after a seed run
+
+The run returns before the outbox publisher has drained, and ClickHouse only agrees with PostgreSQL once it has.
+At the publisher's default of 100 rows per second, the roughly 59,000 analytics events take about ten minutes.
+Wait until `outbox_events` has no `PENDING` row and the four analytics queues are empty, then check:
+
+```sql
+-- ClickHouse, database luvax_analytics: equals SELECT count(*) FROM admin_actions in PostgreSQL
+SELECT count() FROM admin_actions FINAL;
+-- 4,320, plus any bucket the statistics job collected since
+SELECT uniqExact(bucket_start) FROM platform_stats;
+-- at least 5 of every event type except post_view, which arrives from post.viewed.v1
+SELECT event_type, count() FROM user_events FINAL GROUP BY event_type;
+```
+
+`scripts/seed-dev-data.sh --reset` truncates the same three tables through ClickHouse's HTTP port on `127.0.0.1:8123`, using the migrator credentials from `.env`.
+It prints a warning naming the stale tables when ClickHouse does not answer.
 
 A seed run only ever executes once per JVM process: a marker system property is set the moment a
 run starts, so a Spring Boot DevTools hot restart (which reuses the same JVM and the same broker,
@@ -242,7 +276,7 @@ describes.
 | `com.app.common.seed.loader` | `SeedDataLoader` (reads and validates all seed JSON) and `SeedContent` (the loaded, typed result) |
 | `com.app.common.seed.model` | The 20 content record types the JSON files deserialize into |
 | `com.app.common.seed.time` | `SeedTimeline`, the deterministic timestamp generator |
-| `com.app.common.seed.reset` | `SeedResetService`, the pre-run table truncation |
+| `com.app.common.seed.reset` | `SeedResetService`, the pre-run truncation of PostgreSQL, the broker, Elasticsearch, Gorse and, through `AnalyticsStoreTruncator`, ClickHouse |
 | `com.app.common.seed.writer` | The 13 domain writers, one per subsystem |
 | `com.app.common.seed.outbox` | `SeedOutboxEmitter` / `SeedOutboxBatchWriter`, which replay seeded activity through the real transactional outbox |
 

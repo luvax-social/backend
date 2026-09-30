@@ -20,6 +20,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.app.modules.comment.entity.Comment;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Exercises the two SQL statements behind the pinned top-comments block against real PostgreSQL:
@@ -36,7 +37,8 @@ import com.app.modules.comment.entity.Comment;
 class CommentTopLikedQueryIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     private static final OffsetDateTime BASE =
             OffsetDateTime.of(2026, 1, 1, 12, 0, 0, 0, ZoneOffset.UTC);

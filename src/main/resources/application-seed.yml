@@ -4,17 +4,24 @@
 # those rows directly with historically correct timestamps instead. hashtag/post/recommendation
 # consumers stay enabled (inherited from application-dev.yml) because their side effects
 # (Elasticsearch sync, Gorse feedback, Gorse item labels) are safe to run during a seed.
-# The recommendation consumer now carries substantially more traffic than it used to:
+# The recommendation consumer carries substantially more traffic than it used to:
 # SeedOutboxEmitter emits one post.viewed.v1 per seeded view, measured at 21,967 additional events
-# on top of the like/save/comment volume (45,393 outbox rows in total for a full run), because the
-# factorization machine ranker needs read feedback as its negative training examples. The view
-# count exceeds the emitter's own VIEW_EVENT_TARGET because the read set is the union of that
-# band-weighted draw with every like and save pair, and those alone number over seventeen thousand. It stays enabled regardless - it is the only writer of those
-# user_events rows now that AnalyticsSeedWriter no longer draws post_view, so disabling it would
-# silently produce a seeded database with no read signal at all. Expect the outbox publisher to
-# take minutes rather than seconds to drain a seed run at its default 100-rows-per-second rate,
-# and note that user_events post_view coverage is therefore only true after that drain completes,
-# not when the seed run returns.
+# on top of the like/save/comment volume, because the factorization machine ranker needs read
+# feedback as its negative training examples. The view count exceeds the emitter's own
+# VIEW_EVENT_TARGET because the read set is the union of that band-weighted draw with every like
+# and save pair, and those alone number over seventeen thousand. It stays enabled regardless: it
+# is the only writer of the post_view rows in ClickHouse's user_events, since AnalyticsSeedWriter
+# does not draw post_view, so disabling it would silently produce a seeded database with no read
+# signal at all.
+# The three analytics consumers stay enabled too, and no property here needs to say so: they exist
+# whenever app.analytics.enabled is true and none of the flags below governs them. They are the
+# only path into ClickHouse for the rest of the seed - one admin.action.recorded.v1 per audit row,
+# one admin.platform-stats.collected.v1 per half-hour statistics bucket (4,320 of them) and one
+# recommendation.user-event.imported.v1 per behavioural event (about 10,000) - and none of them
+# writes a notification or sends mail, so the reasons that hold the consumers below off do not
+# apply. Expect the outbox publisher to take minutes rather than seconds to drain a seed run at
+# its default 100-rows-per-second rate, and note that ClickHouse therefore agrees with PostgreSQL
+# only after that drain completes, not when the seed run returns.
 # post.notification-consumer is held off for the notification reason above: SeedOutboxEmitter
 # replays post.liked.v1, and NotificationSeedWriter writes the like groups itself. The post index
 # consumer beside it stays enabled.

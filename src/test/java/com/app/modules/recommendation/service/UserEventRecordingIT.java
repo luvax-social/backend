@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.micrometer.tracing.opentelemetry.autoconfigure.SdkTracerProviderBuilderCustomizer;
@@ -24,18 +25,26 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.app.common.analytics.impl.ClickHouseOperationsImpl;
+import com.app.common.analytics.migration.AnalyticsSchemaGate;
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.ClickHouseTestSupport;
+import com.app.testsupport.TestContainerImages;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import io.opentelemetry.sdk.trace.data.SpanData;
@@ -45,8 +54,10 @@ import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
  * Proves the three write paths produce exactly the events they claim to, and that an analytics
  * failure never reaches the caller.
  *
- * <p>Every assertion is preceded by {@link UserEventRecorder#awaitQuiescence(Duration)}, which
- * settles by acquiring every in-flight permit rather than by sleeping or polling.
+ * <p>The rows land in ClickHouse. Every assertion is preceded by {@link
+ * UserEventRecorder#awaitQuiescence(Duration)}, which settles by acquiring every in-flight permit
+ * rather than by sleeping or polling, and then by flushing ClickHouse's asynchronous insert buffer,
+ * because the recorder does not wait for a flush and a row is visible only after one.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -54,17 +65,25 @@ import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
             "spring.profiles.active=dev",
             "spring.docker.compose.enabled=false",
             "spring.autoconfigure.exclude="
-                    + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration"
+                    + "org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration",
+            "management.health.elasticsearch.enabled=false",
+            // A paused server accepts the connection and never answers, so the socket timeout is
+            // what turns the hang into a drop the recorder can count.
+            "app.analytics.clickhouse.writer.socket-timeout=PT1S",
+            "app.analytics.clickhouse.connection-timeout=PT1S"
         })
 @Testcontainers
 @AutoConfigureTestRestTemplate
 class UserEventRecordingIT {
 
-    private static final Duration SETTLE = Duration.ofSeconds(10);
+    private static final Duration SETTLE = Duration.ofSeconds(20);
     private static final String PASSWORD = "SeedPass123!";
 
+    static final ClickHouseContainer clickhouse = ClickHouseTestSupport.startProvisioned();
+
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =
@@ -72,6 +91,7 @@ class UserEventRecordingIT {
 
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry registry) {
+        ClickHouseTestSupport.register(registry, clickhouse);
         // These tests drive login, register and report submission as setup, not as the
         // subject under test. The kill switch keeps them off the network: the dev profile
         // defaults the secret to Cloudflare's test key, and a real siteverify call would
@@ -123,13 +143,31 @@ class UserEventRecordingIT {
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private UserEventRecorder userEventRecorder;
     @Autowired private InMemorySpanExporter spanExporter;
+    @Autowired private AnalyticsSchemaGate gate;
+    @Autowired private CircuitBreakerRegistry breakers;
+    @Autowired private MeterRegistry meterRegistry;
+
+    private final JdbcClient clickHouse =
+            ClickHouseTestSupport.clientAs(
+                    clickhouse, clickhouse.getUsername(), clickhouse.getPassword());
 
     private record TestUser(UUID id, String username, String token) {}
+
+    @BeforeEach
+    void startFromAHealthyStore() {
+        assertThat(gate.attempt()).isTrue();
+        breakers.circuitBreaker(ClickHouseOperationsImpl.CIRCUIT_BREAKER_NAME).reset();
+    }
 
     @AfterEach
     void cleanup() {
         assertThat(userEventRecorder.awaitQuiescence(SETTLE)).isTrue();
-        jdbcTemplate.update("DELETE FROM user_events");
+        try {
+            clickhouse.getDockerClient().unpauseContainerCmd(clickhouse.getContainerId()).exec();
+        } catch (RuntimeException notPaused) {
+            // The container is not paused when a test failed before pausing it.
+        }
+        clickHouse.sql("TRUNCATE TABLE user_events").update();
         jdbcTemplate.update("DELETE FROM refresh_tokens");
         jdbcTemplate.update("DELETE FROM user_credentials");
         jdbcTemplate.update("DELETE FROM users");
@@ -249,26 +287,75 @@ class UserEventRecordingIT {
     }
 
     @Test
-    void analyticsWriteFailure_doesNotFailTheRequest() {
+    void recordedEvent_carriesTheRequestTimeAndAGeneratedId() {
+        TestUser viewer = createUser("evt_time_viewer", "user");
+        TestUser target = createUser("evt_time_target", "user");
+        java.time.Instant before = java.time.Instant.now();
+
+        getWithAuth("/api/v1/users/" + target.id(), viewer);
+
+        settle();
+        java.time.Instant after = java.time.Instant.now();
+        java.time.OffsetDateTime storedAt =
+                clickHouse
+                        .sql("SELECT created_at FROM user_events WHERE user_id = ?")
+                        .param(viewer.id())
+                        .query(java.time.OffsetDateTime.class)
+                        .single();
+        assertThat(storedAt.toInstant()).isBetween(before.minusSeconds(1), after.plusSeconds(1));
+        Long distinctIds =
+                clickHouse
+                        .sql("SELECT uniqExact(id) FROM user_events WHERE user_id = ?")
+                        .param(viewer.id())
+                        .query(Long.class)
+                        .single();
+        assertThat(distinctIds).isEqualTo(1L);
+    }
+
+    // The analytics store being down is the failure that matters: every request still succeeds,
+    // the rows are dropped, and each drop is counted by why, so an operator can tell an open
+    // breaker
+    // from a fault.
+    @Test
+    void clickHouseDown_everyRequestStillSucceedsAndTheDropsAreCountedByReason() {
         TestUser viewer = createUser("evt_fail_viewer", "user");
         TestUser target = createUser("evt_fail_target", "user");
-        // Force every insert to fail at the database, which is the realistic failure: the table is
-        // reachable but the write is refused. A dropped analytics row must never surface to a
-        // caller who asked for a profile. A check constraint is used rather than a rule because it
-        // makes the insert throw rather than silently discarding it, which is the case under test.
-        jdbcTemplate.execute("ALTER TABLE user_events ADD CONSTRAINT ue_reject CHECK (false)");
-        try {
-            ResponseEntity<Map> response = getWithAuth("/api/v1/users/" + target.id(), viewer);
+        double errorsBefore = dropped("error");
+        double openBefore = dropped("circuit_open");
 
+        clickhouse.getDockerClient().pauseContainerCmd(clickhouse.getContainerId()).exec();
+        for (int i = 0; i < 6; i++) {
+            ResponseEntity<Map> response = getWithAuth("/api/v1/users/" + target.id(), viewer);
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            settle();
-            assertThat(eventTypesFor(viewer.id())).isEmpty();
-        } finally {
-            jdbcTemplate.execute("ALTER TABLE user_events DROP CONSTRAINT ue_reject");
         }
+        awaitRecorder();
+        // The breaker has now seen enough failures to open, so the next request is refused before
+        // it reaches the network.
+        ResponseEntity<Map> afterOpen = getWithAuth("/api/v1/users/" + target.id(), viewer);
+        assertThat(afterOpen.getStatusCode()).isEqualTo(HttpStatus.OK);
+        awaitRecorder();
+
+        assertThat(dropped("error") - errorsBefore).isGreaterThanOrEqualTo(1.0);
+        assertThat(dropped("circuit_open") - openBefore).isGreaterThanOrEqualTo(1.0);
+    }
+
+    private double dropped(String reason) {
+        return meterRegistry
+                .get("luvax.analytics.user_events.dropped")
+                .tag("reason", reason)
+                .counter()
+                .count();
     }
 
     private void settle() {
+        awaitRecorder();
+        // A row the recorder inserted without waiting is visible only after the buffer is flushed.
+        clickHouse.sql("SYSTEM FLUSH ASYNC INSERT QUEUE").update();
+    }
+
+    // For a test that pauses ClickHouse: nothing can be flushed on a paused server, and the admin
+    // connection has no timeout of its own, so a flush there would wait forever.
+    private void awaitRecorder() {
         assertThat(userEventRecorder.awaitQuiescence(SETTLE)).isTrue();
     }
 
@@ -308,25 +395,31 @@ class UserEventRecordingIT {
     }
 
     private List<String> eventTypesFor(UUID userId) {
-        return jdbcTemplate.queryForList(
-                "SELECT CAST(event_type AS text) FROM user_events WHERE user_id = ? "
-                        + "ORDER BY created_at",
-                String.class,
-                userId);
+        return clickHouse
+                .sql(
+                        "SELECT toString(event_type) FROM user_events WHERE user_id = ? ORDER BY"
+                                + " created_at")
+                .param(userId)
+                .query(String.class)
+                .list();
     }
 
     private List<String> metadataFieldFor(UUID userId, String field) {
-        return jdbcTemplate.queryForList(
-                "SELECT metadata ->> ? FROM user_events WHERE user_id = ? ORDER BY created_at",
-                String.class,
-                field,
-                userId);
+        return clickHouse
+                .sql(
+                        "SELECT JSONExtractString(metadata, ?) FROM user_events WHERE user_id = ?"
+                                + " ORDER BY created_at")
+                .param(field)
+                .param(userId)
+                .query(String.class)
+                .list();
     }
 
     private List<UUID> entityIdsFor(UUID userId) {
-        return jdbcTemplate.queryForList(
-                "SELECT entity_id FROM user_events WHERE user_id = ? ORDER BY created_at",
-                UUID.class,
-                userId);
+        return clickHouse
+                .sql("SELECT entity_id FROM user_events WHERE user_id = ? ORDER BY created_at")
+                .param(userId)
+                .query(UUID.class)
+                .list();
     }
 }

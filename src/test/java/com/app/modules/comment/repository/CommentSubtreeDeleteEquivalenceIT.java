@@ -18,6 +18,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.app.testsupport.TestContainerImages;
+
 /**
  * Differential guard over {@link CommentRepository#softDeleteSubtree}: the statement is bounded to
  * the target's own thread through {@code root_id} rather than walking {@code parent_id} across the
@@ -42,7 +44,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class CommentSubtreeDeleteEquivalenceIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     /**
      * Distinct from any pre-existing soft delete, so the rows this call touched are identifiable.

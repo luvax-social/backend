@@ -19,24 +19,25 @@ public interface UserHashtagAffinityRepository
         extends JpaRepository<UserHashtagAffinity, UserHashtagAffinityId> {
 
     /**
-     * Recomputes affinity for every user with activity in the window, in one statement.
+     * Recomputes affinity for every user with activity in the window, in one statement, from the
+     * signals staged in {@code affinity_signal_stage}.
      *
-     * <p>Every read of {@code user_events} here is bounded by {@code created_at} on both sides.
-     * That table is partitioned by month with a {@code DEFAULT} catch-all, so a predicate on {@code
-     * user_id} alone prunes nothing and touches every partition ever declared; the bound is what
-     * makes this a scan of the two or three partitions the window covers instead of all
-     * twenty-four.
+     * <p>The behavioural events live in ClickHouse, so the per-user contributions are read there
+     * and staged in a temporary table of the current transaction; this statement only joins them to
+     * the hashtags of each post. Event types were weighted by intent and decayed exponentially
+     * toward the end of the window on the ClickHouse side, and a reversal cancels its own action
+     * exactly - {@code post_unsave} carries the negation of {@code post_save}, {@code post_unlike}
+     * of {@code post_like} - so a user who liked and then unliked a post contributes nothing from
+     * that pair. A hashtag whose contributions sum to zero or below is dropped rather than stored
+     * at zero.
      *
-     * <p>Event types are weighted by intent rather than counted equally, and each contribution
-     * decays exponentially toward the end of the window so recent activity outranks old activity. A
-     * reversal cancels its own action exactly - {@code post_unsave} carries the negation of {@code
-     * post_save}, {@code post_unlike} of {@code post_like} - so a user who liked and then unliked a
-     * post contributes nothing from that pair. A hashtag whose contributions sum to zero or below
-     * is dropped rather than stored at zero.
+     * <p>Summing per (user, post) first and joining afterwards gives the same {@code weight} as
+     * weighting each (event, hashtag) pair, and {@code SUM(event_count)} gives the same count of
+     * (event, hashtag) pairs a row-per-event join would.
      *
-     * <p>{@code hashtag_click} is unioned in separately because its {@code entity_id} is already a
-     * hashtag: it needs no join through {@code post_hashtags} and is the most direct statement of
-     * interest available.
+     * <p>A staged {@code hashtag} signal is a hashtag click: its target is already a hashtag, so it
+     * needs no join through {@code post_hashtags} and is the most direct statement of interest
+     * available.
      *
      * <p>Banned and deleted hashtags are excluded here, at write time, not merely filtered on read.
      * A suggestion surface that offered one would produce a caption the post write path then
@@ -47,12 +48,11 @@ public interface UserHashtagAffinityRepository
      * ranking would measure activity volume rather than interest.
      *
      * <p>{@code ON CONFLICT DO UPDATE} against the composite key is what keeps a double run
-     * harmless rather than duplicative, following {@code platform_stats}. This system assumes a
-     * single application instance and has no distributed scheduler lock.
+     * harmless rather than duplicative. This system assumes a single application instance and has
+     * no distributed scheduler lock.
      *
-     * @param windowStart inclusive lower bound on {@code user_events.created_at}
-     * @param windowEnd exclusive upper bound, and the point decay is measured back from
-     * @param halfLifeSeconds age at which a contribution is worth half its original weight
+     * @param windowStart inclusive lower bound of the window the staged signals were read for
+     * @param windowEnd exclusive upper bound of that window
      * @param computedAt stamp written on every row this run touches; the sweep uses it to find rows
      *     this run did not refresh
      * @return number of affinity rows inserted or updated
@@ -62,45 +62,20 @@ public interface UserHashtagAffinityRepository
             value =
                     """
 					WITH signals AS (
-						SELECT ue.user_id,
-							ph.hashtag_id,
-							w.weight * exp(ln(0.5)
-								* EXTRACT(EPOCH FROM (:windowEnd - ue.created_at))
-								/ :halfLifeSeconds) AS contribution
-						FROM user_events ue
-						JOIN (VALUES
-									('post_save',    4.0),
-									('post_share',   3.0),
-									('post_comment', 3.0),
-									('post_like',    2.0),
-									('post_view',    0.25),
-									('post_unsave', -4.0),
-									('post_unlike', -2.0)
-							) AS w(event_type, weight)
-							ON w.event_type = ue.event_type::text
-						JOIN post_hashtags ph ON ph.post_id = ue.entity_id
-						WHERE ue.created_at >= :windowStart
-						AND ue.created_at <  :windowEnd
-						AND ue.entity_type = 'post'
-						AND ue.entity_id IS NOT NULL
+						SELECT s.user_id, ph.hashtag_id, s.contribution, s.event_count
+						FROM affinity_signal_stage s
+						JOIN post_hashtags ph ON ph.post_id = s.target_id
+						WHERE s.target_kind = 'post'
 						UNION ALL
-						SELECT ue.user_id,
-							ue.entity_id AS hashtag_id,
-							3.0 * exp(ln(0.5)
-								* EXTRACT(EPOCH FROM (:windowEnd - ue.created_at))
-								/ :halfLifeSeconds) AS contribution
-						FROM user_events ue
-						WHERE ue.created_at >= :windowStart
-						AND ue.created_at <  :windowEnd
-						AND ue.event_type = 'hashtag_click'
-						AND ue.entity_type = 'hashtag'
-						AND ue.entity_id IS NOT NULL
+						SELECT s.user_id, s.target_id, s.contribution, s.event_count
+						FROM affinity_signal_stage s
+						WHERE s.target_kind = 'hashtag'
 					),
 					per_tag AS (
 						SELECT s.user_id,
 							s.hashtag_id,
 							SUM(s.contribution) AS weight,
-							COUNT(*)            AS event_count
+							SUM(s.event_count)  AS event_count
 						FROM signals s
 						JOIN hashtags h ON h.id = s.hashtag_id AND h.status = 'active'
 						GROUP BY s.user_id, s.hashtag_id
@@ -132,10 +107,9 @@ public interface UserHashtagAffinityRepository
 						computed_at  = EXCLUDED.computed_at
 					""",
             nativeQuery = true)
-    int recomputeWindow(
+    int recomputeFromStage(
             @Param("windowStart") OffsetDateTime windowStart,
             @Param("windowEnd") OffsetDateTime windowEnd,
-            @Param("halfLifeSeconds") long halfLifeSeconds,
             @Param("computedAt") OffsetDateTime computedAt);
 
     /**
@@ -143,8 +117,8 @@ public interface UserHashtagAffinityRepository
      *
      * <p>A user who stopped engaging, or a hashtag that left circulation, must lose its rows rather
      * than keep a score frozen at whatever it held when the job last saw it. Run in the same
-     * transaction as {@link #recomputeWindow}, so a reader sees either the whole previous state or
-     * the whole new one and never a mixture.
+     * transaction as {@link #recomputeFromStage}, so a reader sees either the whole previous state
+     * or the whole new one and never a mixture.
      *
      * @param computedAt stamp of the current run; rows older than this were not refreshed
      * @return number of stale rows removed

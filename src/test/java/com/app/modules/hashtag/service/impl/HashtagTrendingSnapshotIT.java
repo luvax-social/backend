@@ -33,6 +33,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.modules.hashtag.entity.HashtagTrending;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves the audit's F-2.2-a concern is disproved for a genuine same-key collision while locking in
@@ -59,7 +60,8 @@ import com.app.modules.mail.service.MailService;
 class HashtagTrendingSnapshotIT {
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

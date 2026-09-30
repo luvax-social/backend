@@ -42,6 +42,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.admin.service.SuspensionExpiryService;
 import com.app.modules.mail.service.MailService;
+import com.app.testsupport.TestContainerImages;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 @SpringBootTest(
@@ -60,7 +61,8 @@ class AdminUserControllerIT {
     private static final String JWT_ISSUER = "https://admin-user.it.local";
 
     @Container @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
 
     @Container
     static GenericContainer<?> redis =

@@ -26,6 +26,10 @@ These tables cannot be rebuilt from any other source if lost.
 - `message` is the reason text a moderator gave, where the producer sends one.
 - `admin_action_id` links a moderation notice to the `admin_actions` row it reports; that link is what offers an appeal.
   A support answer has none.
+  Since V128 it is a foreign key to `admin_actions.id` with `ON DELETE SET NULL`.
+  V128 archives any orphan into `archived_notification_admin_action_orphans`, clears it, and adds the constraint `NOT VALID` so the migration never scans the table under a write-blocking lock; V129 validates it in its own transaction.
+  No writer references an audit row before it exists: `AdminServiceImpl` writes the notice in the same transaction after the audit row is flushed, `AdminNotificationConsumer` writes after commit, and the seed writes notifications after the moderation writers.
+  The audit row is always read from PostgreSQL by id, never from the ClickHouse listing replica, so a notice renders the instant it exists.
 - `aggregation_key` is `{type}:{targetId}` for `like_post`, `like_comment` and `story_view`, and `follow` for `follow`; null for every other type.
 - `is_group_open` and `group_started_at` define the aggregation window (Section 3C).
 - `actor_count` is maintained by trigger `trg_notification_actor_count` from `notification_actors`, per the denormalised counter policy.
