@@ -8,7 +8,7 @@ import com.app.common.seed.loader.SeedContent;
 import com.app.common.seed.loader.SeedDataLoader;
 
 /**
- * Loads the real seed JSON files under {@code src/main/resources/seed/} to prove Task 1/2's content
+ * Loads the real seed JSON files under {@code src/main/resources/seed/} to prove the seed content
  * is internally consistent by this loader's rules. Not a fixture test — a failure here means the
  * actual seed data is broken, not the loader.
  */

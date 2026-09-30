@@ -27,7 +27,7 @@ import com.app.testsupport.TestContainerImages;
  * last-active-profile-wins rule on faith.
  *
  * <p>This matters because {@code application-dev.yml} sets every {@code app.*.consumer.enabled}
- * property as a plain literal boolean, not an env-var-driven placeholder — Task 9 proved
+ * property as a plain literal boolean, not an env-var-driven placeholder. A live check showed
  * empirically that an environment variable of the same name has no effect against a plain literal.
  * The only remaining unverified assumption was whether a second, later-listed profile's YAML file
  * actually overrides a plain literal from an earlier-listed profile's YAML file for the same key.
@@ -36,8 +36,8 @@ import com.app.testsupport.TestContainerImages;
  * with later-listed profiles taking precedence
  * (https://docs.spring.io/spring-boot/reference/features/external-config.html, "Profile Specific
  * Files" — "profiles are applied in the order in which they are defined") — this test activates
- * {@code dev,seed} exactly as {@code SeedRunner} (Task 8) will, and asserts the merge behaves that
- * way against the real files on the classpath instead of only against documentation.
+ * {@code dev,seed} exactly as {@code SeedRunner} does, and asserts the merge behaves that way
+ * against the real files on the classpath instead of only against documentation.
  */
 @SpringBootTest(
         properties = {

@@ -42,7 +42,7 @@ public class SeedTimeline {
     // jitter can never invert two messages whose scripted offsets actually differ.
     private static final int MESSAGE_JITTER_SECONDS_BOUND = 30;
 
-    // Approximates each Task-2 time_hint value as a day-of-week constraint (null = either) plus an
+    // Approximates each seed time_hint value as a day-of-week constraint (null = either) plus an
     // hour-of-day window; the exact clock minute/second within that window is still randomized.
     private static final Map<String, HourWindow> TIME_HINT_WINDOWS =
             Map.of(

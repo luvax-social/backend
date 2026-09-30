@@ -160,8 +160,8 @@ fixtures - every other account is generated content and should not be relied on 
 ## Admin conversations
 
 `admin` participates in 25 of the 85 seeded conversations - the other 60 are between generated
-accounts and never involve `admin` at all, which is why a pre-Phase-6 seed left `admin`'s own inbox
-empty.
+accounts and never involve `admin` at all. Before the admin conversation records were added, the
+seed left `admin`'s own inbox empty.
 The 25 partners are chosen deliberately, not drawn at random: every persona in `personas.json` is
 represented by at least one partner, and each conversation's subject matter matches its partner's
 persona (a photographer negotiates a shoot, a shop owner handles an order and exchange, a developer

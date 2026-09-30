@@ -196,7 +196,7 @@ app:
         max-attempts: 30
         window-seconds: 60
       "[/ws/**]":
-        # Measured against a real SockJS xhr-polling session (.workspace/reports/p8/ws_rate_limit_measurement.md):
+        # Measured against a real SockJS xhr-polling session:
         # one session costs ~7 requests in its first 60s (info + connect burst + 2 heartbeat
         # polls at the SockJS default 25s interval); a reconnect costs ~5 more each time. 60
         # covers one session's connect burst plus roughly 11 reconnect attempts inside the same

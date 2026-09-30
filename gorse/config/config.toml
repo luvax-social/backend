@@ -1,8 +1,8 @@
 # Gorse v0.5.11 configuration for the Luvax recommendation module.
 # Key names and accepted values are verified against the v0.5.11 binary's own struct tags and
 # config validator, not against public documentation: the image ships no config template, and
-# several keys moved between the 0.4.x and 0.5.x lines. See
-# .workspace/reports/rec_onboarding/gorse_0511_config_reference.md for the extraction method.
+# several keys moved between the 0.4.x and 0.5.x lines. These values were checked against
+# the binary's struct tags and config validator.
 # Connection strings and secrets are injected via GORSE_* env vars in docker-compose.yaml and
 # must never be committed to this file.
 
@@ -49,8 +49,7 @@ item_ttl = 0
 # against the running binary: an out-of-range decay here aborts startup with a validator error,
 # while the same key under [recommend] is silently ignored and the feature stays off with no
 # warning of any kind.
-# enable_replacement was true for one measurement cycle (see
-# .workspace/reports/rec_onboarding/prompt1_verification.md, section G5). Measured against the
+# enable_replacement was true for one measurement cycle. Measured against the
 # seeded dataset: replacement reintroduces read items immediately rather than on exhaustion (65 of
 # the top 200 were already-read for a user with 244 of 773 posts read) and ranks them slightly
 # ahead of unread items (mean rank 92.2 vs 103.0), the opposite of the intended behaviour.

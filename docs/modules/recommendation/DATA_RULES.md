@@ -72,7 +72,7 @@ Story views are recorded in `user_events` only.
 
 `enable_replacement` is `false`.
 It was measured on, once, against the seeded dataset: 65 of the top 200 personalized results for a test user were already-read and ranked ahead of unread items (mean rank 92.2 versus 103.0), which reintroduces read items immediately rather than only once the unread catalogue is exhausted.
-See `.workspace/reports/rec_onboarding/prompt1_verification.md` section G5 for the full measurement.
+The measurement used a user who had read 244 of 773 seeded posts.
 
 Exhaustion is instead handled in `RecommendationSource`, the candidate-source pipeline stage.
 Gorse's personalized list excludes read items outright with replacement off.
@@ -98,7 +98,7 @@ Measured against a running stack: before a fix, paginating one viewer through th
 The topup now excludes the viewer's complete Gorse history up to the current page, not only the current round's results, which brought the measured duplicate count to zero across the same three-page run.
 The reverse direction is not closed: Gorse's own paginated output cannot be filtered against what the topup already showed on an earlier page, since Gorse's API accepts no exclusion list, so a full fix would require post-hoc filtering with the same precise offset accounting the topup fix required.
 This residual gap was not observed in the measured run and is documented here as a known limitation, not engineered around.
-See `.workspace/reports/rec_onboarding/prompt2_verification.md` for the numbers.
+The three-page sample contained 300 items; its duplicate count fell from 81 to zero after the topup exclusion change.
 
 ### Explore: excluding followed accounts
 

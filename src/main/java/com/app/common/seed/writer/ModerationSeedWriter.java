@@ -230,7 +230,7 @@ public class ModerationSeedWriter {
      * Inserts every {@code reports}, {@code admin_actions}, {@code user_warnings} and {@code
      * user_strikes} row {@code moderation_cases.json} describes, applying each action's side effect
      * to the row it targets, and returns every generated {@code reports.id} for {@link
-     * NotificationSeedWriter} and Task 9's enum-coverage cross-check.
+     * NotificationSeedWriter} and the notification enum coverage check.
      *
      * <p>Must run after {@link UserSeedWriter}, {@link PostSeedWriter}, {@link CommentSeedWriter},
      * {@link StorySeedWriter} and {@link MessageSeedWriter} - every synthetic target this writer
