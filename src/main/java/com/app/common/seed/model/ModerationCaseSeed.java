@@ -9,8 +9,8 @@ import java.util.Map;
  * <p>{@code reportedContent} and {@code timeline} are kept as raw key-value maps rather than typed
  * records: each timeline entry's shape varies by its {@code event} discriminator ({@code
  * report_submitted}, {@code report_status_changed}, {@code admin_action}), and typing that variance
- * precisely is deferred to Task 7's {@code ModerationSeedWriter}, the first consumer that actually
- * needs to branch on it.
+ * precisely is left to {@code ModerationSeedWriter}, the first consumer that actually needs to
+ * branch on it.
  */
 public record ModerationCaseSeed(
         String id,

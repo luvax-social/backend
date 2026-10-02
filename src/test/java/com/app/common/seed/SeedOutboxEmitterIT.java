@@ -38,14 +38,13 @@ import com.app.testsupport.TestContainerImages;
 
 /**
  * Proves {@link SeedOutboxEmitter} against a real Flyway-migrated schema, chained after every
- * domain writer whose rows it reads back, the same way Task 8's {@code SeedRunner} will chain it
- * last.
+ * domain writer whose rows it reads back, the same way {@code SeedRunner} chains it last.
  *
  * <p>This test only proves the {@code outbox_events} rows themselves are correctly shaped and
  * counted — it disables the outbox publisher and excludes RabbitMQ autoconfiguration, matching
  * every other seed writer IT's pattern. The live-stack drain through the real publisher and real
  * Elasticsearch/Gorse consumers (the mandatory envelope-correctness gate) was proven separately
- * against the local docker-compose stack; see the Task 9 report for that raw evidence.
+ * against the local docker-compose stack.
  */
 @SpringBootTest(
         properties = {

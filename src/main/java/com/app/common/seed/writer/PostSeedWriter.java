@@ -85,8 +85,8 @@ public class PostSeedWriter {
     /**
      * Inserts every post from {@code posts.json} (with its media and hashtag associations) and the
      * full {@code hashtags.json} registry, and returns the seed-id-to-generated-id mapping later
-     * writers ({@link CommentSeedWriter}, {@link EngagementSeedWriter}, Task 9's emitter) resolve
-     * post references through.
+     * writers ({@link CommentSeedWriter}, {@link EngagementSeedWriter}, {@link
+     * com.app.common.seed.outbox.SeedOutboxEmitter}) resolve post references through.
      *
      * @param usersByUsername username-to-id map produced by {@link UserSeedWriter#write}
      * @param mediaByCompositeKey composite-key map produced by {@link MediaSeedWriter#write}

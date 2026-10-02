@@ -42,7 +42,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
  * media manifest ids, topic tags).
  *
  * <p>Not wired as a Spring bean: it has no runtime dependency, so every writer and {@code
- * SeedRunner} (Task 8) construct it directly.
+ * SeedRunner} construct it directly.
  */
 public class SeedDataLoader {
 
