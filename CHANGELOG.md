@@ -921,6 +921,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- The draft restore test in the banned-hashtag suite expects the audit row's replication event alongside the restore notice, so it passes again now that every moderation action is replicated to ClickHouse.
 - The banned-hashtag restore test counts the notification outbox event by its current type, `notification.upserted.v1`.
 - A unit test asserts every live fanout queue auto-deletes and carries the idle expiry.
 - An integration test drives the post like notification consumer against a real database: group join, redelivery, stale likes, retraction, emptied groups and invalid payloads.
