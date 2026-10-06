@@ -4,8 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -13,9 +17,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -36,10 +44,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.app.common.inbox.service.ProcessedMessageService;
 import com.app.common.outbox.service.OutboxService;
 import com.app.common.security.jwt.JwtTokenProvider;
 import com.app.modules.auth.service.WebSocketTicketService;
 import com.app.modules.mail.service.impl.AbstractTemplateMailSender;
+import com.app.modules.post.consumer.PostNotificationConsumer;
 import com.app.modules.post.messaging.PostEventTypes;
 import com.app.testsupport.TestContainerImages;
 
@@ -129,6 +139,46 @@ class PostLikeLiveDeliveryIT {
     // assertion runs.
     @MockitoBean private AbstractTemplateMailSender mailSender;
 
+    @Autowired private ConcurrentMap<UUID, CompletableFuture<Void>> postNotificationEvents;
+
+    // Completes an event's future once PostNotificationConsumer's inbox transaction has finished
+    // with it, committed or not, so cleanup can wait for the consumer without polling.
+    @TestConfiguration
+    static class PostNotificationProbeConfig {
+
+        @Bean
+        ConcurrentMap<UUID, CompletableFuture<Void>> postNotificationEvents() {
+            return new ConcurrentHashMap<>();
+        }
+
+        @Bean
+        @Primary
+        ProcessedMessageService probingProcessedMessageService(
+                @Qualifier("processedMessageServiceImpl") ProcessedMessageService delegate,
+                ConcurrentMap<UUID, CompletableFuture<Void>> postNotificationEvents) {
+            return (consumerName, eventId, eventType, handler) -> {
+                if (!PostNotificationConsumer.CONSUMER_NAME.equals(consumerName)) {
+                    return delegate.processOnce(consumerName, eventId, eventType, handler);
+                }
+                try {
+                    return delegate.processOnce(consumerName, eventId, eventType, handler);
+                } finally {
+                    postNotificationEvents
+                            .computeIfAbsent(eventId, id -> new CompletableFuture<>())
+                            .complete(null);
+                }
+            };
+        }
+    }
+
+    private List<UUID> notificationEventIds() {
+        return jdbcTemplate.queryForList(
+                "SELECT event_id FROM outbox_events WHERE event_type IN (?, ?)",
+                UUID.class,
+                PostEventTypes.POST_LIKED_V1,
+                PostEventTypes.POST_UNLIKED_V1);
+    }
+
     private WebSocketStompClient stompClient;
     private StompSession session;
     private UUID owner;
@@ -144,9 +194,19 @@ class PostLikeLiveDeliveryIT {
     }
 
     @AfterEach
-    void tearDown() {
+    void tearDown() throws Exception {
         if (session != null && session.isConnected()) {
             session.disconnect();
+        }
+        // The assertions wait only for the live frame, which travels the fanout tier, while
+        // PostNotificationConsumer handles the same like or unlike on its own queue and writes a
+        // notification naming the viewer as actor. Deleting the users while it is still running
+        // deadlocks: the delete nulls notifications.actor_id while the consumer holds that row
+        // and waits on the user row the delete has already locked.
+        for (UUID eventId : notificationEventIds()) {
+            postNotificationEvents
+                    .computeIfAbsent(eventId, id -> new CompletableFuture<>())
+                    .get(30, TimeUnit.SECONDS);
         }
         jdbcTemplate.update("DELETE FROM outbox_events");
         jdbcTemplate.update("DELETE FROM post_likes");

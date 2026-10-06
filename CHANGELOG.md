@@ -921,6 +921,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- The post like live delivery test waits for the post notification consumer to finish before cleaning up, so its cleanup no longer deadlocks with a notification write still in flight.
 - The daily platform statistics test anchors its window to midnight UTC, so it no longer fails when it runs after 19:00 UTC.
 - The draft restore test in the banned-hashtag suite expects the audit row's replication event alongside the restore notice, so it passes again now that every moderation action is replicated to ClickHouse.
 - The banned-hashtag restore test counts the notification outbox event by its current type, `notification.upserted.v1`.
