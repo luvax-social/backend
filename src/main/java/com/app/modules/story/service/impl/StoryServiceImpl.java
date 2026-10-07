@@ -186,7 +186,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional(readOnly = true)
     public List<StoryFeedItemResponse> discoverStories(UUID viewerId, int limit) {
-        int bounded = Math.max(1, Math.min(limit, MAX_DISCOVERY_LIMIT));
+        int bounded = Math.clamp(limit, 1, MAX_DISCOVERY_LIMIT);
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         List<UUID> authorIds = storyRepository.findDiscoverableAuthors(viewerId, now, bounded);
         if (authorIds.isEmpty()) {

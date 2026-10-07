@@ -104,7 +104,7 @@ public class SuggestionServiceImpl implements SuggestionService {
     @Override
     @Transactional(readOnly = true)
     public List<SuggestedUserResponse> suggestionsFor(UUID viewerId, int limit) {
-        int size = Math.max(1, Math.min(limit, MAX_PAGE_SIZE));
+        int size = Math.clamp(limit, 1, MAX_PAGE_SIZE);
         List<UUID> ids = userSuggestionRepository.findVisibleSuggestions(viewerId, size);
         if (ids.isEmpty()) {
             // Cold start, and also the case where a whole precomputed list has since been followed
