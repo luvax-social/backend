@@ -562,6 +562,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The Gorse store purge now connects with the credentials of the application's live database connection, so the application context starts where `POSTGRES_USER` and `POSTGRES_PASSWORD` are unset and integration tests no longer reach Gorse with a developer's local credentials.
 - A Gorse rebuild resumed after a restart now holds the feedback listener before it waits for the ClickHouse schema, so no live feedback is applied in the gap between the listeners starting and the run suspending them.
 - A Gorse rebuild resumed after a restart no longer fails in its feedback phase because the ClickHouse schema check has not finished; every run waits for it before doing anything.
 - A Gorse rebuild started with the application no longer fails its preflight because the ClickHouse schema check has not finished yet; it waits up to two minutes for it.
@@ -920,6 +921,9 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- The post like live delivery test waits for the post notification consumer to finish before cleaning up, so its cleanup no longer deadlocks with a notification write still in flight.
+- The daily platform statistics test anchors its window to midnight UTC, so it no longer fails when it runs after 19:00 UTC.
+- The draft restore test in the banned-hashtag suite expects the audit row's replication event alongside the restore notice, so it passes again now that every moderation action is replicated to ClickHouse.
 - The banned-hashtag restore test counts the notification outbox event by its current type, `notification.upserted.v1`.
 - A unit test asserts every live fanout queue auto-deletes and carries the idle expiry.
 - An integration test drives the post like notification consumer against a real database: group join, redelivery, stale likes, retraction, emptied groups and invalid payloads.

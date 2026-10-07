@@ -30,6 +30,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.jwt.JwtTokenProvider;
+import com.app.modules.admin.messaging.AdminEventTypes;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.notification.messaging.NotificationEventTypes;
 import com.app.testsupport.TestContainerImages;
@@ -330,8 +331,11 @@ class PostBannedHashtagIT {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(statusOf(postId)).isEqualTo("draft");
         assertThat(associatedHashtagNames(postId)).isEmpty();
-        assertThat(countOutboxEvents()).isEqualTo(1);
+        // The restore notice and the audit row's replication event, and nothing that would mean a
+        // hashtag association or search document was re-derived for the draft.
+        assertThat(countOutboxEvents()).isEqualTo(2);
         assertThat(countOutboxEvents(NotificationEventTypes.NOTIFICATION_UPSERTED_V1)).isEqualTo(1);
+        assertThat(countOutboxEvents(AdminEventTypes.ACTION_RECORDED_V1)).isEqualTo(1);
         // Nothing was dropped because nothing was re-derived, which is not the same as a restore
         // that silently lost a tag, so the list is empty rather than naming the banned one.
         assertThat(dataOf(response).get("remainingBannedHashtags")).isEqualTo(List.of());
