@@ -27,7 +27,6 @@ import com.app.modules.hashtag.entity.HashtagTrending;
 import com.app.modules.hashtag.entity.HashtagTrendingId;
 import com.app.modules.hashtag.enums.HashtagStatus;
 import com.app.modules.hashtag.enums.TrendingSource;
-import com.app.modules.hashtag.mapper.HashtagMapper;
 import com.app.modules.hashtag.repository.HashtagRepository;
 import com.app.modules.hashtag.repository.HashtagTrendingRepository;
 
@@ -36,7 +35,6 @@ class HashtagTrendingServiceImplTest {
 
     @Mock private HashtagTrendingRepository hashtagTrendingRepository;
     @Mock private HashtagRepository hashtagRepository;
-    @Mock private HashtagMapper hashtagMapper;
     @Mock private HashtagProperties properties;
     @Mock private JdbcTemplate jdbcTemplate;
 
@@ -46,11 +44,7 @@ class HashtagTrendingServiceImplTest {
     void setUp() {
         service =
                 new HashtagTrendingServiceImpl(
-                        hashtagTrendingRepository,
-                        hashtagRepository,
-                        hashtagMapper,
-                        properties,
-                        jdbcTemplate);
+                        hashtagTrendingRepository, hashtagRepository, properties, jdbcTemplate);
     }
 
     @Test
@@ -132,6 +126,5 @@ class HashtagTrendingServiceImplTest {
 
         assertThat(page.getContent()).isEmpty();
         assertThat(page.getTotalElements()).isZero();
-        verifyNoInteractions(hashtagMapper);
     }
 }

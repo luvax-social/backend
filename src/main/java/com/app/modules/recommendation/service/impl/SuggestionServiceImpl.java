@@ -13,8 +13,6 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,8 +27,6 @@ import com.app.modules.users.service.UserSummaryService;
 
 @Service
 public class SuggestionServiceImpl implements SuggestionService {
-
-    private static final Logger log = LoggerFactory.getLogger(SuggestionServiceImpl.class);
 
     /**
      * Reciprocal-rank-fusion damping constant.
