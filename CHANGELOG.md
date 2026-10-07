@@ -562,6 +562,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- A WebSocket subscription or send with no authenticated principal is now rejected with the same not-permitted error as any other denial.
 - The Gorse store purge now connects with the credentials of the application's live database connection, so the application context starts where `POSTGRES_USER` and `POSTGRES_PASSWORD` are unset and integration tests no longer reach Gorse with a developer's local credentials.
 - A Gorse rebuild resumed after a restart now holds the feedback listener before it waits for the ClickHouse schema, so no live feedback is applied in the gap between the listeners starting and the run suspending them.
 - A Gorse rebuild resumed after a restart no longer fails in its feedback phase because the ClickHouse schema check has not finished; every run waits for it before doing anything.
