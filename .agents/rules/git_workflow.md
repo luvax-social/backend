@@ -6,7 +6,7 @@ description: Load when creating branches, writing commit messages, or opening pu
 # Git Workflow
 
 develop: Development branch (The main programming activities will be pushed here. Changes, updates, additions, and modifications will all be pushed here.)
-main: Production branch (This is the terminal branch, accessible only by the owner.)
+main: Production branch (This is the terminal branch. The owner may push to it directly, without a pull request.)
 
 ## Branch naming
 
@@ -110,8 +110,16 @@ Note: Only use short description
 
 - [ ] Before starting any task, checkout a new branch **from `develop`**: `git checkout develop && git pull && git checkout -b <type>/<scope>/<short-description>`.
 - [ ] All implementation work happens on that branch. Never commit directly to `develop`.
-- [ ] Push the branch and open a PR targeting `develop`. `main` is never a PR target for implementation work — it is owner-only, terminal.
+- [ ] Push the branch and open a PR targeting `develop`. The repository owner may instead push straight to `main` with no pull request; see "Direct pushes to main" below.
 - [ ] One branch per logical unit of work. Do not reuse a stale branch for an unrelated task — cut a new one from an up-to-date `develop`.
+
+## Direct pushes to main
+
+The repository owner may push to `main` without opening a pull request.
+`main` has no branch protection, so nothing blocks the push; this rule records that the owner does it deliberately and does not need to tag a reviewer.
+Everything else in this file still applies to the commits themselves: the one-line `<type>(<scope>): <subject>` format, `./mvnw spotless:check`, `./mvnw test`, and a `CHANGELOG.md` entry.
+Contributors other than the owner keep working through a branch from `develop` and a pull request targeting `develop`.
+`CODEOWNERS` lists the owner as the only code owner, so a pull request the owner did not author requests the owner's review and nobody else's.
 
 ## Commit granularity policy (mandatory)
 
@@ -154,7 +162,7 @@ Split large PRs proactively: keep feature PRs under `size/M` (≤ 1000 lines) as
 - [ ] `./mvnw spotless:apply` and `./mvnw test` both pass
 - [ ] PR template author checklist completed
 - [ ] PR title matches commit format (pr-lint will block merge otherwise)
-- [ ] At least one CODEOWNERS-assigned reviewer has approved
+- [ ] The owner, the only code owner, has approved (not needed for a pull request the owner authored)
 
 ## Pre-commit checklist
 - [ ] Commit type is one of the 8 allowed types
