@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- Retry backoff lookup widens the attempt number before subtracting, so an out-of-range attempt count clamps to the nearest backoff instead of wrapping around.
 - The repository owner is now the only code owner, so opening a pull request no longer requests a review from anyone else, and the git workflow rules let the owner push directly to `main` without a pull request.
 - Security configuration receives its JSON mapper through the constructor.
 - Removed unused fields, redundant casts and duplicate catch blocks, and replaced min/max pairs with `Math.clamp`.
