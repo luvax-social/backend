@@ -96,9 +96,7 @@ public class PostLiveFanoutConsumer {
                     resolveBlockedCounterparties(event));
             accessor.setLeaveMutable(true);
             messagingTemplate.convertAndSend(
-                    "/topic/posts." + postId + ".events",
-                    (Object) payload,
-                    accessor.getMessageHeaders());
+                    "/topic/posts." + postId + ".events", payload, accessor.getMessageHeaders());
         } catch (RuntimeException ex) {
             log.warn("Failed to push live post event: {}", ex.getMessage());
         } finally {

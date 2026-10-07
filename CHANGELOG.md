@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Security configuration receives its JSON mapper through the constructor.
+- Removed unused fields, redundant casts and duplicate catch blocks, and replaced min/max pairs with `Math.clamp`.
 - Seed, recommendation, and production configuration comments now describe the components and measured behavior directly instead of referring to private task reports.
 - The agent rules mirror now carries the same rule as the primary copy that branch, commit and pull request names must make sense to a reviewer.
 - The structure, testing and data-rule documents, and the recommendation guide, now describe the ClickHouse analytics tier: its tables, users, pools, failure model, schema runner, read routing and rollback script, and the operator runbook for the Gorse rebuild.

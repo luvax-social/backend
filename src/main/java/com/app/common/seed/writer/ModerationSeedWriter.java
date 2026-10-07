@@ -1161,7 +1161,7 @@ public class ModerationSeedWriter {
             SeedContent content,
             SeedTimeline timeline) {
         return switch (reportType) {
-            case "post" -> postIdBySeedId.get((String) reportedContentEntry.get("post_id"));
+            case "post" -> postIdBySeedId.get(reportedContentEntry.get("post_id"));
             case "comment" ->
                     resolveOrCreateComment(
                             (String) reportedContentEntry.get("comment_ref"),
@@ -1169,7 +1169,7 @@ public class ModerationSeedWriter {
                             postIdBySeedId,
                             content,
                             timeline);
-            case "story" -> storyIdByOwnerUsername.get((String) reportedContentEntry.get("owner"));
+            case "story" -> storyIdByOwnerUsername.get(reportedContentEntry.get("owner"));
             // A 'user' report's entity_id is the reported account's own id, not a piece of
             // content it authored (report/DATA_RULES.md Section 4).
             case "user" -> lookupUserByUsername((String) reportedContentEntry.get("owner"));
