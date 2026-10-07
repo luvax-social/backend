@@ -87,7 +87,9 @@ import com.app.testsupport.TestContainerImages;
             "app.admin.consumer.enabled=false",
             "app.hashtag.consumer.enabled=false",
             "app.post.consumer.enabled=false",
-            "app.recommendation.consumer.enabled=false"
+            "app.recommendation.consumer.enabled=false",
+            // The job would add an audit row mid-test and skew the Postgres/ClickHouse counts
+            "app.admin.suspension-expiry.enabled=false"
         })
 @Testcontainers
 @Import(SeedAnalyticsDrainIT.InboxProbeConfig.class)

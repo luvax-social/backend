@@ -6,7 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -43,7 +46,12 @@ import com.app.testsupport.TestContainerImages;
 
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.context.Context;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
+import io.opentelemetry.sdk.trace.ReadWriteSpan;
+import io.opentelemetry.sdk.trace.ReadableSpan;
+import io.opentelemetry.sdk.trace.SpanProcessor;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 
@@ -120,9 +128,19 @@ class OutboxTraceContinuityIT {
         }
 
         @Bean
+        ConsumerSpanSignal consumerSpanSignal() {
+            return new ConsumerSpanSignal();
+        }
+
+        // One customizer registers both processors so the exporter is guaranteed to run first:
+        // the SDK calls onEnd in registration order, so by the time the signal fires the consumer
+        // span is already in the exporter.
+        @Bean
         SdkTracerProviderBuilderCustomizer inMemorySpanExporterCustomizer(
-                InMemorySpanExporter exporter) {
-            return builder -> builder.addSpanProcessor(SimpleSpanProcessor.create(exporter));
+                InMemorySpanExporter exporter, ConsumerSpanSignal signal) {
+            return builder ->
+                    builder.addSpanProcessor(SimpleSpanProcessor.create(exporter))
+                            .addSpanProcessor(signal.processor());
         }
 
         @Bean
@@ -151,6 +169,7 @@ class OutboxTraceContinuityIT {
     @Autowired private OutboxEventRepository outboxEventRepository;
     @Autowired private Tracer tracer;
     @Autowired private InMemorySpanExporter spanExporter;
+    @Autowired private ConsumerSpanSignal consumerSpanSignal;
     @Autowired private PlatformTransactionManager transactionManager;
 
     @MockitoBean private MailService mailService;
@@ -197,7 +216,7 @@ class OutboxTraceContinuityIT {
 
         SpanData consumerSpan =
                 spans.stream()
-                        .filter(s -> s.getKind() == io.opentelemetry.api.trace.SpanKind.CONSUMER)
+                        .filter(s -> s.getKind() == SpanKind.CONSUMER)
                         .findFirst()
                         .orElseThrow(() -> new AssertionError("no consumer span exported"));
         assertThat(consumerSpan.getTraceId()).isEqualTo(originTraceId);
@@ -207,7 +226,7 @@ class OutboxTraceContinuityIT {
                         .filter(s -> s.getSpanId().equals(consumerSpan.getParentSpanId()))
                         .findFirst()
                         .orElseThrow(() -> new AssertionError("consumer span's parent not found"));
-        assertThat(producerSpan.getKind()).isEqualTo(io.opentelemetry.api.trace.SpanKind.PRODUCER);
+        assertThat(producerSpan.getKind()).isEqualTo(SpanKind.PRODUCER);
         assertThat(producerSpan.getParentSpanId()).isEqualTo(originSpanId);
 
         SpanData relaySpan =
@@ -218,29 +237,59 @@ class OutboxTraceContinuityIT {
                 .anyMatch(link -> link.getSpanContext().getTraceId().equals(originTraceId));
     }
 
-    private List<SpanData> awaitSpans(String originTraceId) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + 10_000;
-        while (System.currentTimeMillis() < deadline) {
-            List<SpanData> spans = spanExporter.getFinishedSpanItems();
-            boolean hasConsumer =
-                    spans.stream()
-                            .anyMatch(
-                                    s ->
-                                            s.getKind()
-                                                            == io.opentelemetry.api.trace.SpanKind
-                                                                    .CONSUMER
-                                                    && s.getTraceId().equals(originTraceId));
-            if (hasConsumer) {
-                return spans;
-            }
-            Thread.sleep(100);
-        }
-        throw new AssertionError("timed out waiting for the consumer span to export");
+    // The producer and relay spans end inside publishDueEvents on this thread, so the consumer
+    // span ending is the last span the assertions need.
+    private List<SpanData> awaitSpans(String originTraceId)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        consumerSpanSignal.consumerSpanEnded(originTraceId).get(10, TimeUnit.SECONDS);
+        return spanExporter.getFinishedSpanItems();
     }
 
     private java.util.Optional<SpanData> outboxRelaySpan(String eventType) {
         return spanExporter.getFinishedSpanItems().stream()
                 .filter(s -> s.getName().equals("outbox relay " + eventType))
                 .findFirst();
+    }
+
+    /**
+     * Completes a future when a consumer span of a given trace ends, because the in-memory exporter
+     * offers no completion hook of its own and the listener thread ends that span after the message
+     * has already been handed to the test. Deliberately not a {@link SpanProcessor} bean: Spring
+     * Boot registers every such bean ahead of the customizer, which would fire the signal before
+     * the exporter holds the span.
+     */
+    static final class ConsumerSpanSignal {
+
+        private final Map<String, CompletableFuture<SpanData>> consumerSpans =
+                new ConcurrentHashMap<>();
+
+        CompletableFuture<SpanData> consumerSpanEnded(String traceId) {
+            return consumerSpans.computeIfAbsent(traceId, id -> new CompletableFuture<>());
+        }
+
+        SpanProcessor processor() {
+            return new SpanProcessor() {
+                @Override
+                public void onStart(Context parentContext, ReadWriteSpan span) {}
+
+                @Override
+                public boolean isStartRequired() {
+                    return false;
+                }
+
+                @Override
+                public void onEnd(ReadableSpan span) {
+                    if (span.getKind() == SpanKind.CONSUMER) {
+                        consumerSpanEnded(span.getSpanContext().getTraceId())
+                                .complete(span.toSpanData());
+                    }
+                }
+
+                @Override
+                public boolean isEndRequired() {
+                    return true;
+                }
+            };
+        }
     }
 }

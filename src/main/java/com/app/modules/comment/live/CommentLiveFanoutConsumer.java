@@ -89,7 +89,7 @@ public class CommentLiveFanoutConsumer {
             accessor.setLeaveMutable(true);
             messagingTemplate.convertAndSend(
                     "/topic/comments." + UUID.fromString(postId.toString()) + ".events",
-                    (Object) payload,
+                    payload,
                     accessor.getMessageHeaders());
         } catch (RuntimeException ex) {
             metrics.wsPushFailure();

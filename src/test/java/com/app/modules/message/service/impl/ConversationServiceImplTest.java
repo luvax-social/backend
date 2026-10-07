@@ -32,7 +32,6 @@ import com.app.common.pagination.CursorCodec;
 import com.app.common.pagination.CursorScope;
 import com.app.common.pagination.TimeCursors;
 import com.app.common.response.CursorPageResponse;
-import com.app.modules.message.config.MessageProperties;
 import com.app.modules.message.dto.request.CreateDirectConversationRequest;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
@@ -76,7 +75,6 @@ class ConversationServiceImplTest {
                         userRepository,
                         userSettingsRepository,
                         socialService,
-                        new MessageProperties(24),
                         mapper,
                         mediaAssetRepository);
 

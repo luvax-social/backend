@@ -105,7 +105,9 @@ public class CommentWebSocketAuthInterceptor implements ChannelInterceptor {
     private void checkVisibility(Message<?> message, StompHeaderAccessor accessor, UUID postId) {
         UUID viewerId = resolveViewer(accessor);
         Post post = postRepository.findById(postId).orElse(null);
-        if (post == null || !postVisibilityService.isVisibleTo(viewerId, post)) {
+        if (viewerId == null
+                || post == null
+                || !postVisibilityService.isVisibleTo(viewerId, post)) {
             throw new MessageDeliveryException(message, "Subscription not permitted");
         }
     }

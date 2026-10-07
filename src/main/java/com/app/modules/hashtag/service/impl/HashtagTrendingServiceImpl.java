@@ -28,7 +28,6 @@ import com.app.modules.hashtag.entity.HashtagTrending;
 import com.app.modules.hashtag.entity.HashtagTrendingId;
 import com.app.modules.hashtag.enums.HashtagStatus;
 import com.app.modules.hashtag.enums.TrendingSource;
-import com.app.modules.hashtag.mapper.HashtagMapper;
 import com.app.modules.hashtag.repository.HashtagRepository;
 import com.app.modules.hashtag.repository.HashtagTrendingRepository;
 import com.app.modules.hashtag.service.HashtagTrendingService;
@@ -51,19 +50,16 @@ public class HashtagTrendingServiceImpl implements HashtagTrendingService {
 
     private final HashtagTrendingRepository hashtagTrendingRepository;
     private final HashtagRepository hashtagRepository;
-    private final HashtagMapper hashtagMapper;
     private final HashtagProperties properties;
     private final JdbcTemplate jdbcTemplate;
 
     public HashtagTrendingServiceImpl(
             HashtagTrendingRepository hashtagTrendingRepository,
             HashtagRepository hashtagRepository,
-            HashtagMapper hashtagMapper,
             HashtagProperties properties,
             JdbcTemplate jdbcTemplate) {
         this.hashtagTrendingRepository = hashtagTrendingRepository;
         this.hashtagRepository = hashtagRepository;
-        this.hashtagMapper = hashtagMapper;
         this.properties = properties;
         this.jdbcTemplate = jdbcTemplate;
     }

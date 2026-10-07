@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - The repository owner is now the only code owner, so opening a pull request no longer requests a review from anyone else, and the git workflow rules let the owner push directly to `main` without a pull request.
+- Security configuration receives its JSON mapper through the constructor.
+- Removed unused fields, redundant casts and duplicate catch blocks, and replaced min/max pairs with `Math.clamp`.
 - Seed, recommendation, and production configuration comments now describe the components and measured behavior directly instead of referring to private task reports.
 - The agent rules mirror now carries the same rule as the primary copy that branch, commit and pull request names must make sense to a reviewer.
 - The structure, testing and data-rule documents, and the recommendation guide, now describe the ClickHouse analytics tier: its tables, users, pools, failure model, schema runner, read routing and rollback script, and the operator runbook for the Gorse rebuild.
@@ -20,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The development seed writes 90 days of half-hour statistics buckets through the outbox, so the seeded series reaches ClickHouse through the same consumer as live collection.
 - The moderation audit log listing is now read from the ClickHouse replica and falls back to PostgreSQL when the replica is unavailable, under one cursor contract, so a page sequence continues across a switch; a new action can take a few seconds to appear in the list while the detail view still shows it at once.
 - Integration tests now run against PostgreSQL 18, the production major, through one shared image constant instead of PostgreSQL 16 named in each test class.
+- Allowed WebSocket origins for direct messages are now split without a backtracking-prone pattern, and empty entries in the list are ignored.
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
@@ -563,6 +566,8 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The public support-category check now reads inside a read-only transaction like the list it filters.
+- A WebSocket subscription or send with no authenticated principal is now rejected with the same not-permitted error as any other denial.
 - The Gorse store purge now connects with the credentials of the application's live database connection, so the application context starts where `POSTGRES_USER` and `POSTGRES_PASSWORD` are unset and integration tests no longer reach Gorse with a developer's local credentials.
 - A Gorse rebuild resumed after a restart now holds the feedback listener before it waits for the ClickHouse schema, so no live feedback is applied in the gap between the listeners starting and the run suspending them.
 - A Gorse rebuild resumed after a restart no longer fails in its feedback phase because the ClickHouse schema check has not finished; every run waits for it before doing anything.
@@ -922,6 +927,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- The broker send guard, comment STOMP send authorisation and outbox trace continuity integration tests wait on server-side signals instead of sleeping or polling.
 - The post like live delivery test waits for the post notification consumer to finish before cleaning up, so its cleanup no longer deadlocks with a notification write still in flight.
 - The daily platform statistics test anchors its window to midnight UTC, so it no longer fails when it runs after 19:00 UTC.
 - The draft restore test in the banned-hashtag suite expects the audit row's replication event alongside the restore notice, so it passes again now that every moderation action is replicated to ClickHouse.
@@ -1068,3 +1074,4 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Test totals: 115 tests run, 0 failures, 0 errors.
 - Unit tests added: `JwtTokenProviderTest` (HS256 happy path, expired-token rejection, tampered-signature rejection, wrong-algorithm rejection, wrong-issuer rejection, non-UUID subject rejection), `RefreshTokenServiceImplTest` (issue/hash, TTL, rotate happy path, expired/revoked/unknown rejection, concurrent-rotation theft detection, revoke idempotency, bulk revoke), `AuthServiceImplTest` (register conflicts, register success + mail dispatch, login timing-safe failure shapes, status branches, refresh, logout idempotency, forgot/reset flows).
 - Integration test added: `AuthControllerIT` boots the full Spring Boot context against a Testcontainers PostgreSQL container, runs Flyway migrations, and exercises 16 HTTP scenarios covering register, login, refresh rotation/replay, logout, JWT-protected endpoint validation, and email-verification / forgot-password contracts.
+- The seed analytics drain integration test no longer races the suspension expiry job, which inserted an audit row two minutes into the run.

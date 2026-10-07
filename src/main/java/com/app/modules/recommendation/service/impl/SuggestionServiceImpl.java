@@ -13,8 +13,6 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,8 +27,6 @@ import com.app.modules.users.service.UserSummaryService;
 
 @Service
 public class SuggestionServiceImpl implements SuggestionService {
-
-    private static final Logger log = LoggerFactory.getLogger(SuggestionServiceImpl.class);
 
     /**
      * Reciprocal-rank-fusion damping constant.
@@ -108,7 +104,7 @@ public class SuggestionServiceImpl implements SuggestionService {
     @Override
     @Transactional(readOnly = true)
     public List<SuggestedUserResponse> suggestionsFor(UUID viewerId, int limit) {
-        int size = Math.max(1, Math.min(limit, MAX_PAGE_SIZE));
+        int size = Math.clamp(limit, 1, MAX_PAGE_SIZE);
         List<UUID> ids = userSuggestionRepository.findVisibleSuggestions(viewerId, size);
         if (ids.isEmpty()) {
             // Cold start, and also the case where a whole precomputed list has since been followed

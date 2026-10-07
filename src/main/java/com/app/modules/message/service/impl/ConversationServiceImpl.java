@@ -30,7 +30,6 @@ import com.app.common.pagination.CursorScope;
 import com.app.common.pagination.TimeCursors;
 import com.app.common.response.CursorPageResponse;
 import com.app.modules.media.entity.MediaAsset;
-import com.app.modules.message.config.MessageProperties;
 import com.app.modules.message.dto.request.CreateDirectConversationRequest;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
@@ -68,7 +67,6 @@ public class ConversationServiceImpl implements ConversationService {
     private final MessageUserRepository userRepository;
     private final MessageUserSettingsRepository userSettingsRepository;
     private final SocialService socialService;
-    private final MessageProperties properties;
     private final MessageMapper mapper;
     // Read-only view of the media module, mirroring MessageServiceImpl. The conversation list
     // renders the newest message, which may be an attachment.
@@ -81,7 +79,6 @@ public class ConversationServiceImpl implements ConversationService {
             MessageUserRepository userRepository,
             MessageUserSettingsRepository userSettingsRepository,
             SocialService socialService,
-            MessageProperties properties,
             MessageMapper mapper,
             MessageMediaAssetRepository mediaAssetRepository) {
         this.conversationRepository = conversationRepository;
@@ -90,7 +87,6 @@ public class ConversationServiceImpl implements ConversationService {
         this.userRepository = userRepository;
         this.userSettingsRepository = userSettingsRepository;
         this.socialService = socialService;
-        this.properties = properties;
         this.mapper = mapper;
         this.mediaAssetRepository = mediaAssetRepository;
     }
