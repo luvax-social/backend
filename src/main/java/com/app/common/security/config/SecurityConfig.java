@@ -9,7 +9,6 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -94,8 +93,7 @@ public class SecurityConfig {
     private final OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
     private final CookieOAuth2AuthorizationRequestRepository
             cookieOAuth2AuthorizationRequestRepository;
-
-    @Autowired private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
     public SecurityConfig(
             JwtProperties jwtProperties,
@@ -105,7 +103,8 @@ public class SecurityConfig {
             CustomOidcUserService customOidcUserService,
             OAuth2AuthenticationSuccessHandler oAuth2AuthenticationSuccessHandler,
             OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler,
-            CookieOAuth2AuthorizationRequestRepository cookieOAuth2AuthorizationRequestRepository) {
+            CookieOAuth2AuthorizationRequestRepository cookieOAuth2AuthorizationRequestRepository,
+            ObjectMapper objectMapper) {
         this.jwtProperties = jwtProperties;
         this.corsProperties = corsProperties;
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
@@ -115,6 +114,7 @@ public class SecurityConfig {
         this.oAuth2AuthenticationFailureHandler = oAuth2AuthenticationFailureHandler;
         this.cookieOAuth2AuthorizationRequestRepository =
                 cookieOAuth2AuthorizationRequestRepository;
+        this.objectMapper = objectMapper;
     }
 
     @PostConstruct
