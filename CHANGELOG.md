@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The development seed writes 90 days of half-hour statistics buckets through the outbox, so the seeded series reaches ClickHouse through the same consumer as live collection.
 - The moderation audit log listing is now read from the ClickHouse replica and falls back to PostgreSQL when the replica is unavailable, under one cursor contract, so a page sequence continues across a switch; a new action can take a few seconds to appear in the list while the detail view still shows it at once.
 - Integration tests now run against PostgreSQL 18, the production major, through one shared image constant instead of PostgreSQL 16 named in each test class.
+- Allowed WebSocket origins for direct messages are now split without a backtracking-prone pattern, and empty entries in the list are ignored.
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
