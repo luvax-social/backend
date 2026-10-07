@@ -176,7 +176,7 @@ refactor(common): extract token blacklist TTL calculation
 3. Run `./mvnw spotless:apply && ./mvnw test` and confirm both pass.
 4. Complete every item in the author checklist in `.github/pull_request_template.md`.
 5. Open a PR against `main`. The PR title must conform to Conventional Commits — the `pr-lint` workflow enforces this.
-6. CODEOWNERS assigns reviewers automatically based on the files changed. At least one assigned reviewer must approve before merge.
+6. CODEOWNERS lists the repository owner as the only code owner, so the owner is the only reviewer requested automatically, and a pull request the owner authored requests no one. The owner's approval is the only approval required before merge.
 7. The `pr-size` workflow labels a PR by size and does not block on it (`fail_if_xl: false`);
    above 2000 changed lines it adds `size/XL` and a warning comment. Keep a feature PR under
    `size/M` (1000 changed lines) as a target and split it yourself when it grows past that.

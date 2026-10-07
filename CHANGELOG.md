@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- The repository owner is now the only code owner, so opening a pull request no longer requests a review from anyone else, and the git workflow rules let the owner push directly to `main` without a pull request.
 - Seed, recommendation, and production configuration comments now describe the components and measured behavior directly instead of referring to private task reports.
 - The agent rules mirror now carries the same rule as the primary copy that branch, commit and pull request names must make sense to a reviewer.
 - The structure, testing and data-rule documents, and the recommendation guide, now describe the ClickHouse analytics tier: its tables, users, pools, failure model, schema runner, read routing and rollback script, and the operator runbook for the Gorse rebuild.

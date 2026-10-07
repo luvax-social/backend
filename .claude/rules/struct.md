@@ -28,7 +28,7 @@ app/
 │   ├── workflows/                  # pr-lint.yml (Conventional Commits), pr-size.yml (PR size
 │   │                               # labels), sonarcloud.yml (static analysis)
 │   ├── ISSUE_TEMPLATE/             # bug_report.yml, feature_request.yml, config.yml
-│   ├── CODEOWNERS                  # Per-module review ownership
+│   ├── CODEOWNERS                  # Repository code ownership
 │   └── pull_request_template.md
 ├── database/
 │   └── schema.sql                  # Reference PostgreSQL final-state schema (not applied by Flyway)
