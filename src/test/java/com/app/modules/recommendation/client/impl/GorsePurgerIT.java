@@ -13,9 +13,9 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.jdbc.autoconfigure.JdbcConnectionDetails;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -80,9 +80,24 @@ class GorsePurgerIT {
         DriverManagerDataSource applicationDatabase =
                 new DriverManagerDataSource(
                         postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
-        purger = new GorsePurgerImpl(new JdbcTemplate(applicationDatabase));
-        ReflectionTestUtils.setField(purger, "datasourceUsername", ROLE);
-        ReflectionTestUtils.setField(purger, "datasourcePassword", ROLE_PASSWORD);
+        JdbcConnectionDetails restrictedRole =
+                new JdbcConnectionDetails() {
+                    @Override
+                    public String getUsername() {
+                        return ROLE;
+                    }
+
+                    @Override
+                    public String getPassword() {
+                        return ROLE_PASSWORD;
+                    }
+
+                    @Override
+                    public String getJdbcUrl() {
+                        return postgres.getJdbcUrl();
+                    }
+                };
+        purger = new GorsePurgerImpl(new JdbcTemplate(applicationDatabase), restrictedRole);
     }
 
     private static Connection connect(String database) throws SQLException {

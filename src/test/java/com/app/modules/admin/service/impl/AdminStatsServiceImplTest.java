@@ -63,11 +63,13 @@ class AdminStatsServiceImplTest {
         OffsetDateTime today = now.truncatedTo(ChronoUnit.DAYS);
         when(statsRepository.findDailyFlowSeries(anyString(), any(), any())).thenReturn(List.of());
 
+        // The lower bound is anchored to today's midnight, not to now: five hours past a moment
+        // later than 19:00 UTC is already the next day, which moved the expected first day.
         service.getTimeseries(
                 ADMIN,
                 PlatformMetric.REGISTRATIONS,
                 StatGranularity.DAY,
-                now.minusDays(3).plusHours(5),
+                today.minusDays(3).plusHours(5),
                 now.plusHours(1));
 
         ArgumentCaptor<OffsetDateTime> first = ArgumentCaptor.forClass(OffsetDateTime.class);

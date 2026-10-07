@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.jdbc.autoconfigure.JdbcConnectionDetails;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -42,11 +42,12 @@ public class GorsePurgerImpl implements GorsePurger {
 
     private final JdbcTemplate jdbc;
 
-    @Value("${spring.datasource.username}")
-    private String datasourceUsername;
-
-    @Value("${spring.datasource.password}")
-    private String datasourcePassword;
+    // The credentials the application's own pool was built from. In production these are the
+    // spring.datasource properties; under Testcontainers' @ServiceConnection they are the
+    // container's, while the properties keep application.yaml's ${POSTGRES_USER} and
+    // ${POSTGRES_PASSWORD} placeholders, which resolve against a developer's .env and cannot be
+    // resolved at all where no .env exists, such as CI.
+    private final JdbcConnectionDetails connectionDetails;
 
     @Override
     public List<String> findPurgeObstacles() {
@@ -113,6 +114,7 @@ public class GorsePurgerImpl implements GorsePurger {
                 JDBC_URL_DATABASE_NAME
                         .matcher(applicationUrl)
                         .replaceFirst("/" + GORSE_DATABASE_NAME);
-        return DriverManager.getConnection(gorseUrl, datasourceUsername, datasourcePassword);
+        return DriverManager.getConnection(
+                gorseUrl, connectionDetails.getUsername(), connectionDetails.getPassword());
     }
 }
