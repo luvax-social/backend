@@ -1,23 +1,11 @@
-# CODEOWNERS — GitHub Code Owners
+# CODEOWNERS - GitHub Code Owners
 #
 # Rules follow gitignore pattern semantics. The LAST matching pattern wins.
 #
-# Note: All 14 domain modules are owned by both maintainers via the global
-# fallback rule above. Per-module lines are omitted to avoid redundancy.
-# Add module-specific lines here if ownership splits in the future.
+# The repository owner is the only code owner, so a pull request the owner did not author
+# requests the owner's review and nobody else's. GitHub never requests a review from a pull
+# request's own author, so the owner's own pull requests request no one.
+#
+# Add narrower rules below if ownership splits in the future.
 
-# Global fallback — both owners review everything
-*  @NguyenMinh1301 @DucPhamNgoc08
-
-# .github directory — same owners, explicitly listed to protect governance files
-/.github/  @NguyenMinh1301 @DucPhamNgoc08
-
-# Build and infrastructure
-/pom.xml  @NguyenMinh1301 @DucPhamNgoc08
-/docker-compose.yaml  @NguyenMinh1301 @DucPhamNgoc08
-/mvnw  @NguyenMinh1301 @DucPhamNgoc08
-/mvnw.cmd  @NguyenMinh1301 @DucPhamNgoc08
-
-# Database migrations — high-impact, irreversible
-/src/main/resources/db/migration/  @NguyenMinh1301 @DucPhamNgoc08
-/database/  @NguyenMinh1301 @DucPhamNgoc08
+*  @NguyenMinh1301
