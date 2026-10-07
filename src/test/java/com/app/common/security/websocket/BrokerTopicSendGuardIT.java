@@ -1,32 +1,45 @@
 package com.app.common.security.websocket;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessageHandler;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.messaging.simp.annotation.support.SimpAnnotationMethodMessageHandler;
+import org.springframework.messaging.simp.broker.SimpleBrokerMessageHandler;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompFrameHandler;
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.simp.stomp.StompHeaders;
 import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
+import org.springframework.messaging.support.ExecutorChannelInterceptor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
+import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -74,6 +87,8 @@ import com.app.testsupport.TestContainerImages;
 @Testcontainers
 class BrokerTopicSendGuardIT {
 
+    private static final String SENTINEL = "SENTINEL PUBLISHED BY TEST";
+
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres =
             new PostgreSQLContainer<>(TestContainerImages.POSTGRES);
@@ -119,6 +134,7 @@ class BrokerTopicSendGuardIT {
     @Autowired private UserRepository userRepository;
     @Autowired private PostRepository postRepository;
     @Autowired private SimpMessagingTemplate messagingTemplate;
+    @Autowired private HandledFrameProbe handledFrameProbe;
     // The handshake accepts a single-use ticket, not a raw access token, so a test that opens a
     // real socket mints one the same way the client does.
     @Autowired private WebSocketTicketService webSocketTicketService;
@@ -160,11 +176,15 @@ class BrokerTopicSendGuardIT {
 
     @Test
     void sendToAnotherUsersNotificationTopic_rejectedAndVictimReceivesNothing() throws Exception {
-        CompletableFuture<byte[]> victimReceived = new CompletableFuture<>();
+        String topic = "/topic/notifications." + victim.getId();
+        List<String> victimFrames = new CopyOnWriteArrayList<>();
+        CompletableFuture<Void> sentinelArrived = new CompletableFuture<>();
         victimSession = connect(victim, null);
-        victimSession.subscribe(
-                "/topic/notifications." + victim.getId(), byteFrameHandler(victimReceived));
-        Thread.sleep(300); // allow SUBSCRIBE to register before the attacker's SEND races it
+        awaitSubscribed(
+                topic,
+                () ->
+                        victimSession.subscribe(
+                                topic, recordingFrameHandler(victimFrames, sentinelArrived)));
 
         CompletableFuture<Throwable> attackerError = new CompletableFuture<>();
         attackerSession = connect(attacker, attackerError);
@@ -177,18 +197,24 @@ class BrokerTopicSendGuardIT {
                 .as("a client SEND directly at another user's notification topic must be rejected")
                 .isNotNull();
 
-        assertThatThrownBy(() -> victimReceived.get(2, TimeUnit.SECONDS))
+        publishSentinel(topic, Map.of("message", SENTINEL));
+        sentinelArrived.get(10, TimeUnit.SECONDS);
+        assertThat(victimFrames)
                 .as("the victim must not receive the forged frame")
-                .isInstanceOf(TimeoutException.class);
+                .noneMatch(frame -> frame.contains("FORGED"));
     }
 
     @Test
     void sendToCommentEventsTopic_rejectedAndListenerReceivesNothing() throws Exception {
-        CompletableFuture<byte[]> listenerReceived = new CompletableFuture<>();
+        String topic = "/topic/comments." + post.getId() + ".events";
+        List<String> listenerFrames = new CopyOnWriteArrayList<>();
+        CompletableFuture<Void> sentinelArrived = new CompletableFuture<>();
         victimSession = connect(victim, null);
-        victimSession.subscribe(
-                "/topic/comments." + post.getId() + ".events", byteFrameHandler(listenerReceived));
-        Thread.sleep(300);
+        awaitSubscribed(
+                topic,
+                () ->
+                        victimSession.subscribe(
+                                topic, recordingFrameHandler(listenerFrames, sentinelArrived)));
 
         CompletableFuture<Throwable> attackerError = new CompletableFuture<>();
         attackerSession = connect(attacker, attackerError);
@@ -202,18 +228,21 @@ class BrokerTopicSendGuardIT {
                 .as("a client SEND directly at a post's comment-events topic must be rejected")
                 .isNotNull();
 
-        assertThatThrownBy(() -> listenerReceived.get(2, TimeUnit.SECONDS))
+        publishSentinel(
+                topic,
+                Map.of("eventType", "comment.created.v1", "data", Map.of("content", SENTINEL)));
+        sentinelArrived.get(10, TimeUnit.SECONDS);
+        assertThat(listenerFrames)
                 .as("the listener must not receive the forged comment event")
-                .isInstanceOf(TimeoutException.class);
+                .noneMatch(frame -> frame.contains("FORGED"));
     }
 
     @Test
     void genuineServerPublish_toNotificationTopic_stillReachesSubscriber() throws Exception {
         CompletableFuture<byte[]> received = new CompletableFuture<>();
         victimSession = connect(victim, null);
-        victimSession.subscribe(
-                "/topic/notifications." + victim.getId(), byteFrameHandler(received));
-        Thread.sleep(300);
+        String topic = "/topic/notifications." + victim.getId();
+        awaitSubscribed(topic, () -> victimSession.subscribe(topic, byteFrameHandler(received)));
 
         // The exact call NotificationLiveFanoutConsumer makes in production: SimpMessagingTemplate
         // writes directly to the broker's outbound channel and never traverses
@@ -235,9 +264,8 @@ class BrokerTopicSendGuardIT {
     void genuineServerPublish_toCommentEventsTopic_stillReachesSubscriber() throws Exception {
         CompletableFuture<byte[]> received = new CompletableFuture<>();
         victimSession = connect(victim, null);
-        victimSession.subscribe(
-                "/topic/comments." + post.getId() + ".events", byteFrameHandler(received));
-        Thread.sleep(300);
+        String topic = "/topic/comments." + post.getId() + ".events";
+        awaitSubscribed(topic, () -> victimSession.subscribe(topic, byteFrameHandler(received)));
 
         messagingTemplate.convertAndSend(
                 "/topic/comments." + post.getId() + ".events",
@@ -254,12 +282,59 @@ class BrokerTopicSendGuardIT {
         // /app/watch has its own visibility guard (CommentStompSendAuthIT); this only proves the
         // new broker-wide guard does not itself reject a legitimate /app-prefixed SEND before that
         // guard ever runs, by asserting the session survives it rather than being torn down.
-        victimSession.send("/app/watch/" + post.getId(), new byte[0]);
-        Thread.sleep(500);
+        String destination = "/app/watch/" + post.getId();
+        CompletableFuture<Void> handled =
+                handledFrameProbe.expect(
+                        StompCommand.SEND, destination, SimpAnnotationMethodMessageHandler.class);
+        victimSession.send(destination, new byte[0]);
+        // Reaching the @MessageMapping handler proves no inbound interceptor rejected the frame,
+        // since a rejection throws before the frame is dispatched to any handler.
+        handled.get(10, TimeUnit.SECONDS);
 
         assertThat(victimSession.isConnected())
                 .as("a SEND to an /app destination must not be rejected by the broker-wide guard")
                 .isTrue();
+    }
+
+    /**
+     * The simple broker sends no RECEIPT for SUBSCRIBE, so readiness is observed server-side: the
+     * future completes once the broker handler has registered the subscription.
+     */
+    private void awaitSubscribed(String topic, Runnable subscribe) throws Exception {
+        CompletableFuture<Void> registered =
+                handledFrameProbe.expect(
+                        StompCommand.SUBSCRIBE, topic, SimpleBrokerMessageHandler.class);
+        subscribe.run();
+        registered.get(10, TimeUnit.SECONDS);
+    }
+
+    /**
+     * The guard rejects a forged SEND before it is dispatched, so once the attacker's ERROR frame
+     * has arrived the forged frame can no longer be delivered; a server publish then reaching the
+     * subscriber proves the subscription was live, so the absence of the forged frame is observed
+     * without waiting out a timeout.
+     */
+    private void publishSentinel(String topic, Map<String, Object> payload) {
+        messagingTemplate.convertAndSend(topic, payload, Map.of());
+    }
+
+    private StompFrameHandler recordingFrameHandler(
+            List<String> frames, CompletableFuture<Void> sentinelArrived) {
+        return new StompFrameHandler() {
+            @Override
+            public Type getPayloadType(StompHeaders headers) {
+                return byte[].class;
+            }
+
+            @Override
+            public void handleFrame(StompHeaders headers, Object payload) {
+                String frame = new String((byte[]) payload, StandardCharsets.UTF_8);
+                frames.add(frame);
+                if (frame.contains(SENTINEL)) {
+                    sentinelArrived.complete(null);
+                }
+            }
+        };
     }
 
     private StompFrameHandler byteFrameHandler(CompletableFuture<byte[]> sink) {
@@ -319,5 +394,69 @@ class BrokerTopicSendGuardIT {
                         .isPrivate(false)
                         .isVerified(false)
                         .build());
+    }
+
+    @TestConfiguration
+    static class HandledFrameProbeConfig implements WebSocketMessageBrokerConfigurer {
+
+        private final HandledFrameProbe probe = new HandledFrameProbe();
+
+        @Bean
+        HandledFrameProbe handledFrameProbe() {
+            return probe;
+        }
+
+        @Override
+        public void configureClientInboundChannel(ChannelRegistration registration) {
+            registration.interceptors(probe);
+        }
+    }
+
+    /**
+     * Observes the inbound channel without altering it, completing a future once a given handler
+     * has finished processing a frame: the simple broker acknowledges neither a SUBSCRIBE nor a
+     * SEND to an application destination on the wire.
+     */
+    static final class HandledFrameProbe implements ExecutorChannelInterceptor {
+
+        private final Queue<Expectation> expectations = new ConcurrentLinkedQueue<>();
+
+        CompletableFuture<Void> expect(
+                StompCommand command,
+                String destination,
+                Class<? extends MessageHandler> handlerType) {
+            Expectation expectation =
+                    new Expectation(command, destination, handlerType, new CompletableFuture<>());
+            expectations.add(expectation);
+            return expectation.handled();
+        }
+
+        @Override
+        public void afterMessageHandled(
+                Message<?> message, MessageChannel channel, MessageHandler handler, Exception ex) {
+            StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+            for (Expectation expectation : expectations) {
+                if (expectation.matches(accessor, handler) && expectations.remove(expectation)) {
+                    if (ex == null) {
+                        expectation.handled().complete(null);
+                    } else {
+                        expectation.handled().completeExceptionally(ex);
+                    }
+                }
+            }
+        }
+
+        private record Expectation(
+                StompCommand command,
+                String destination,
+                Class<? extends MessageHandler> handlerType,
+                CompletableFuture<Void> handled) {
+
+            boolean matches(StompHeaderAccessor accessor, MessageHandler handler) {
+                return command == accessor.getCommand()
+                        && destination.equals(accessor.getDestination())
+                        && handlerType.isInstance(handler);
+            }
+        }
     }
 }

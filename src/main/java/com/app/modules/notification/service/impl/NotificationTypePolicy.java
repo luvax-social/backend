@@ -55,12 +55,11 @@ public class NotificationTypePolicy {
         }
         Set<NotificationType> disabled = EnumSet.noneOf(NotificationType.class);
         for (String key : notificationRepository.findDisabledTypeKeys()) {
-            // A config row whose key names no current type is ignored rather than failing every
-            // notification write.
             try {
                 disabled.add(NotificationType.valueOf(key.trim().toUpperCase(Locale.ROOT)));
             } catch (IllegalArgumentException ignored) {
-                continue;
+                // A config row whose key names no current type is ignored rather than failing
+                // every notification write.
             }
         }
         Snapshot fresh = new Snapshot(disabled, now);

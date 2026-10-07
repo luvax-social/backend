@@ -203,25 +203,26 @@ public class ClickHouseMigrationRunner {
 
     private void acquireLock(Connection connection) throws SQLException {
         long deadline = System.nanoTime() + lockWait.toNanos();
-        while (true) {
-            try (PreparedStatement statement =
-                    connection.prepareStatement("SELECT pg_try_advisory_lock(?)")) {
-                statement.setLong(1, ADVISORY_LOCK_KEY);
+        try (PreparedStatement statement =
+                connection.prepareStatement("SELECT pg_try_advisory_lock(?)")) {
+            statement.setLong(1, ADVISORY_LOCK_KEY);
+            while (true) {
                 try (ResultSet row = statement.executeQuery()) {
                     if (row.next() && row.getBoolean(1)) {
                         return;
                     }
                 }
-            }
-            if (System.nanoTime() >= deadline) {
-                throw new ClickHouseMigrationException(
-                        "Another ClickHouse migration run held the lock for over " + lockWait);
-            }
-            try {
-                Thread.sleep(LOCK_POLL_MILLIS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new ClickHouseMigrationException("Interrupted while waiting for the lock", e);
+                if (System.nanoTime() >= deadline) {
+                    throw new ClickHouseMigrationException(
+                            "Another ClickHouse migration run held the lock for over " + lockWait);
+                }
+                try {
+                    Thread.sleep(LOCK_POLL_MILLIS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ClickHouseMigrationException(
+                            "Interrupted while waiting for the lock", e);
+                }
             }
         }
     }

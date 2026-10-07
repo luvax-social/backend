@@ -1,5 +1,7 @@
 package com.app.modules.message.config;
 
+import java.util.Arrays;
+
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
@@ -59,11 +61,14 @@ public class MessageWebSocketConfig implements WebSocketMessageBrokerConfigurer 
         registration.interceptors(authInterceptor);
     }
 
-    private String[] allowedOrigins() {
+    String[] allowedOrigins() {
         String origins = corsProperties.allowedOrigins();
         if (origins == null || origins.isBlank()) {
             return new String[] {"http://localhost:*"};
         }
-        return origins.split("\\s*,\\s*");
+        return Arrays.stream(origins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toArray(String[]::new);
     }
 }

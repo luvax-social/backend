@@ -595,6 +595,6 @@ public class SupportTicketServiceImpl implements SupportTicketService {
     }
 
     private static int pageSize(int limit) {
-        return Math.max(1, Math.min(limit, MAX_PAGE_SIZE));
+        return Math.clamp(limit, 1, MAX_PAGE_SIZE);
     }
 }

@@ -130,8 +130,6 @@ public class PostIndexSyncConsumer {
             validateEnvelope(event);
             processWithRetry(event);
             ack(channel, deliveryTag);
-        } catch (PermanentMessageException ex) {
-            routeToDlqOrRequeue(message, channel, deliveryTag, ex);
         } catch (RuntimeException ex) {
             routeToDlqOrRequeue(message, channel, deliveryTag, ex);
         }

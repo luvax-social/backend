@@ -2,9 +2,11 @@ package com.app.modules.comment.live;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
@@ -12,17 +14,27 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessageHandler;
+import org.springframework.messaging.simp.annotation.support.SimpAnnotationMethodMessageHandler;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.stomp.StompCommand;
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.simp.stomp.StompHeaders;
 import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
+import org.springframework.messaging.support.ExecutorChannelInterceptor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
+import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -104,6 +116,7 @@ class CommentStompSendAuthIT {
     @Autowired private UserRepository userRepository;
     @Autowired private PostRepository postRepository;
     @Autowired private StringRedisTemplate redisTemplate;
+    @Autowired private HandledFrameProbe handledFrameProbe;
     // The handshake accepts a single-use ticket, not a raw access token, so a test that opens a
     // real socket mints one the same way the client does.
     @Autowired private WebSocketTicketService webSocketTicketService;
@@ -150,9 +163,10 @@ class CommentStompSendAuthIT {
     void sendWatch_blockedViewer_doesNotRegisterWatcher() throws Exception {
         long before = watcherCount(privatePost.getId());
 
-        session = connect(blockedViewer);
+        CompletableFuture<Throwable> rejected = new CompletableFuture<>();
+        session = connect(blockedViewer, rejected);
         session.send("/app/watch/" + privatePost.getId(), new byte[0]);
-        Thread.sleep(500); // the SEND is fire-and-forget; allow the server to process it
+        awaitRejection(rejected);
 
         assertThat(watcherCount(privatePost.getId()))
                 .as("a caller who cannot see the post must not be registered as a watcher")
@@ -164,8 +178,7 @@ class CommentStompSendAuthIT {
         long before = watcherCount(publicPost.getId());
 
         session = connect(permittedViewer);
-        session.send("/app/watch/" + publicPost.getId(), new byte[0]);
-        Thread.sleep(500);
+        sendAndAwaitHandled("/app/watch/" + publicPost.getId());
 
         assertThat(watcherCount(publicPost.getId()))
                 .as("a caller who can see the post must be registered as a watcher")
@@ -181,9 +194,10 @@ class CommentStompSendAuthIT {
         redisTemplate.opsForSet().add(key, "seed-session");
         redisTemplate.expire(key, java.time.Duration.ofSeconds(10));
 
-        session = connect(blockedViewer);
+        CompletableFuture<Throwable> rejected = new CompletableFuture<>();
+        session = connect(blockedViewer, rejected);
         session.send("/app/heartbeat/" + privatePost.getId(), new byte[0]);
-        Thread.sleep(500);
+        awaitRejection(rejected);
 
         Long ttl = redisTemplate.getExpire(key);
         assertThat(ttl)
@@ -198,8 +212,7 @@ class CommentStompSendAuthIT {
     void sendUnwatch_blockedViewer_stillPermitted() throws Exception {
         session = connect(blockedViewer);
         // Deliberately unguarded: must not throw and must not disconnect the session.
-        session.send("/app/unwatch/" + privatePost.getId(), new byte[0]);
-        Thread.sleep(500);
+        sendAndAwaitHandled("/app/unwatch/" + privatePost.getId());
 
         assertThat(session.isConnected())
                 .as("unwatch has no visibility guard by design; the session must survive it")
@@ -219,6 +232,28 @@ class CommentStompSendAuthIT {
                         "a comment-topic-shaped destination outside the full per-post pattern must be"
                                 + " rejected, closing the fail-open")
                 .isNotNull();
+    }
+
+    /**
+     * The visibility guard throws before the frame is dispatched to any handler, and the server
+     * sends its ERROR frame only after that, so once the ERROR has arrived the rejected frame can
+     * no longer have an effect and the negative assertion needs no timed wait.
+     */
+    private static void awaitRejection(CompletableFuture<Throwable> rejected) throws Exception {
+        rejected.get(10, TimeUnit.SECONDS);
+    }
+
+    /**
+     * A SEND is fire-and-forget on the wire, so completion is observed server-side: the future
+     * completes once the @MessageMapping handler has returned, which also proves no inbound
+     * interceptor rejected the frame.
+     */
+    private void sendAndAwaitHandled(String destination) throws Exception {
+        CompletableFuture<Void> handled =
+                handledFrameProbe.expect(
+                        StompCommand.SEND, destination, SimpAnnotationMethodMessageHandler.class);
+        session.send(destination, new byte[0]);
+        handled.get(10, TimeUnit.SECONDS);
     }
 
     private long watcherCount(UUID postId) {
@@ -291,5 +326,69 @@ class CommentStompSendAuthIT {
 
     private static String suffix() {
         return UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    @TestConfiguration
+    static class HandledFrameProbeConfig implements WebSocketMessageBrokerConfigurer {
+
+        private final HandledFrameProbe probe = new HandledFrameProbe();
+
+        @Bean
+        HandledFrameProbe handledFrameProbe() {
+            return probe;
+        }
+
+        @Override
+        public void configureClientInboundChannel(ChannelRegistration registration) {
+            registration.interceptors(probe);
+        }
+    }
+
+    /**
+     * Observes the inbound channel without altering it, completing a future once a given handler
+     * has finished processing a frame: the server acknowledges a SEND to an application destination
+     * on the wire only when it rejects it.
+     */
+    static final class HandledFrameProbe implements ExecutorChannelInterceptor {
+
+        private final Queue<Expectation> expectations = new ConcurrentLinkedQueue<>();
+
+        CompletableFuture<Void> expect(
+                StompCommand command,
+                String destination,
+                Class<? extends MessageHandler> handlerType) {
+            Expectation expectation =
+                    new Expectation(command, destination, handlerType, new CompletableFuture<>());
+            expectations.add(expectation);
+            return expectation.handled();
+        }
+
+        @Override
+        public void afterMessageHandled(
+                Message<?> message, MessageChannel channel, MessageHandler handler, Exception ex) {
+            StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+            for (Expectation expectation : expectations) {
+                if (expectation.matches(accessor, handler) && expectations.remove(expectation)) {
+                    if (ex == null) {
+                        expectation.handled().complete(null);
+                    } else {
+                        expectation.handled().completeExceptionally(ex);
+                    }
+                }
+            }
+        }
+
+        private record Expectation(
+                StompCommand command,
+                String destination,
+                Class<? extends MessageHandler> handlerType,
+                CompletableFuture<Void> handled) {
+
+            boolean matches(StompHeaderAccessor accessor, MessageHandler handler) {
+                return command == accessor.getCommand()
+                        && destination.equals(accessor.getDestination())
+                        && handlerType.isInstance(handler);
+            }
+        }
     }
 }

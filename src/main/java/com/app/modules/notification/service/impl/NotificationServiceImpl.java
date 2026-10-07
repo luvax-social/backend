@@ -224,12 +224,12 @@ public class NotificationServiceImpl implements NotificationService {
         // releases the row locks it took, so a prolific account never blocks writes to its own
         // notifications for the length of the full rewrite.
         do {
-            Integer batch =
-                    transactionTemplate.execute(
-                            status ->
-                                    aggregationRepository.resyncActorVerified(
-                                            actorId, verified, batchSize));
-            rewritten = batch == null ? 0 : batch;
+            rewritten =
+                    Objects.requireNonNull(
+                            transactionTemplate.execute(
+                                    status ->
+                                            aggregationRepository.resyncActorVerified(
+                                                    actorId, verified, batchSize)));
             total += rewritten;
         } while (rewritten == batchSize);
         return total;

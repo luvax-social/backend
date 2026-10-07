@@ -78,6 +78,7 @@ public class VocabularyServiceImpl implements VocabularyService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public boolean allowsPublicForm(String categoryKey) {
         if (categoryKey == null) {
             return false;

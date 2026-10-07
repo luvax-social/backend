@@ -27,7 +27,7 @@ public class ConsumerRetryProperties {
         if (retryBackoffs == null || retryBackoffs.isEmpty()) {
             return Duration.ZERO;
         }
-        int index = Math.max(0, Math.min(attempt - 1, retryBackoffs.size() - 1));
+        int index = Math.clamp(attempt - 1, 0, retryBackoffs.size() - 1);
         Duration backoff = retryBackoffs.get(index);
         if (backoff == null || backoff.isNegative()) {
             return Duration.ZERO;
