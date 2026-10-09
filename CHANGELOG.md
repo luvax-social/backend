@@ -569,6 +569,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Notification previews now hide blocked or unapproved comment and parent text from viewers who cannot see it.
 - A sender can no longer message a peer who left a conversation and then blocked them, and that peer's membership stays inactive.
 - Reusing a message send key with a different reply target now returns a conflict instead of replaying the earlier message.
 - The public support-category check now reads inside a read-only transaction like the list it filters.
@@ -932,6 +933,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- Comment preview integration coverage now checks moderation visibility and blocks in both directions.
 - The broker send guard, comment STOMP send authorisation and outbox trace continuity integration tests wait on server-side signals instead of sleeping or polling.
 - The post like live delivery test waits for the post notification consumer to finish before cleaning up, so its cleanup no longer deadlocks with a notification write still in flight.
 - The daily platform statistics test anchors its window to midnight UTC, so it no longer fails when it runs after 19:00 UTC.

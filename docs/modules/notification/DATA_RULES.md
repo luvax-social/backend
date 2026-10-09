@@ -123,7 +123,7 @@ The social module does not call this module directly, because this module alread
 | An approved request converts in place to `follow`: position, read state and seen state are kept | `resolveFollowRequest` |
 | Consumers act on the relationship as it stands when the event is processed (the like row exists, the follow status), not as the event described it, so redelivered or reordered pairs converge | `PostNotificationConsumer`, `CommentNotificationConsumer`, `SocialNotificationConsumer` |
 | A comment notification suppresses a mention of the same person in the same comment; a repeated handle is one mention | `CommentNotificationConsumer` |
-| Hydration goes through the owning module's service only: `PostPreviewService`, `CommentPreviewService`, `StoryPreviewService`, `SupportTicketPreviewService`, `ModerationNoticeService`, `UserSummaryService`, `SocialService`; no foreign repository is injected | `NotificationItemAssembler` |
+| Hydration goes through the owning module's service only: `PostPreviewService`, `CommentPreviewService`, `StoryPreviewService`, `SupportTicketPreviewService`, `ModerationNoticeService`, `UserSummaryService`, and `SocialService`, with comment and parent text withheld for blocks in either direction and for unapproved content unless the viewer authored it. | `NotificationItemAssembler` |
 | A moderation notice shows kind, date and a text snippet to the content's author only, never media | `ModerationNoticeService`, `NotificationItemAssembler` |
 
 ### D. Visibility

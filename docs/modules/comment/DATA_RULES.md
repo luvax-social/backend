@@ -147,6 +147,6 @@ The two sort modes therefore differ only in whether that block is computed, neve
 | `users` | inbound | Every comment belongs to a `user_id`; `@mention` usernames resolve against `users` |
 | `social` | inbound | Block and follow state reach comments through the post visibility policy |
 | `notification` | outbound | `comment.created.v1`, `comment.liked.v1` and `comment.unliked.v1` drive `comment_post`, `reply_comment`, `mention_comment` and `like_comment` notifications; a mention of the person the comment already notifies is dropped, and an unlike retracts the liker from the group |
-| `notification` | inbound | `CommentPreviewService` gives the notification feed each comment's snippet and tombstone state; `GET /api/v1/comments/{commentId}/context` returns a comment with every ancestor so a notification can open a reply wherever it sits |
+| `notification` | inbound | `CommentPreviewService` gives the notification feed viewer-specific comment and parent snippets, withholding text for tombstones, blocks in either direction, and unapproved comments except to their authors; `GET /api/v1/comments/{commentId}/context` returns a comment with every ancestor so a notification can open a reply wherever it sits. |
 | `report` | inbound | Reports can target a comment via polymorphic `entity_id` |
 | `admin` | inbound | Moderator remove and restore actions target comments and write an `admin_actions` audit row |

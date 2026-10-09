@@ -26,23 +26,36 @@ public class CommentPreviewServiceImpl implements CommentPreviewService {
 
     @Override
     @Transactional(readOnly = true)
-    public Map<UUID, CommentPreviewResponse> loadPreviews(Collection<UUID> commentIds) {
+    public Map<UUID, CommentPreviewResponse> loadPreviews(
+            UUID viewerId, Collection<UUID> commentIds) {
         Map<UUID, CommentPreviewResponse> previews = new HashMap<>();
         if (commentIds == null || commentIds.isEmpty()) {
             return previews;
         }
         Set<UUID> requested = Set.copyOf(commentIds);
-        for (CommentPreviewRow row : commentPreviewRepository.findPreviewRows(requested)) {
+        for (CommentPreviewRow row :
+                commentPreviewRepository.findPreviewRows(viewerId, requested)) {
             previews.put(
                     row.id(),
-                    row.hidden()
+                    unavailable(
+                                    row.hidden(),
+                                    row.moderationStatus(),
+                                    row.authorId(),
+                                    row.blocked(),
+                                    viewerId)
                             ? CommentPreviewResponse.unavailable(row.id(), row.postId())
                             : new CommentPreviewResponse(
                                     row.id(),
                                     row.postId(),
                                     row.parentId(),
                                     Snippets.of(row.content()),
-                                    row.parentId() == null || row.parentHidden()
+                                    row.parentId() == null
+                                                    || unavailable(
+                                                            row.parentHidden(),
+                                                            row.parentModerationStatus(),
+                                                            row.parentAuthorId(),
+                                                            row.parentBlocked(),
+                                                            viewerId)
                                             ? null
                                             : Snippets.of(row.parentContent()),
                                     true));
@@ -51,5 +64,16 @@ public class CommentPreviewServiceImpl implements CommentPreviewService {
             previews.putIfAbsent(id, CommentPreviewResponse.unavailable(id, null));
         }
         return previews;
+    }
+
+    private static boolean unavailable(
+            boolean tombstoned,
+            String moderationStatus,
+            UUID authorId,
+            boolean blocked,
+            UUID viewerId) {
+        return tombstoned
+                || blocked
+                || (!"approved".equals(moderationStatus) && !viewerId.equals(authorId));
     }
 }

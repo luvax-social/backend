@@ -122,7 +122,7 @@ class NotificationItemAssemblerTest {
         UUID post = UUID.randomUUID();
         UUID reply = UUID.randomUUID();
         FeedRow row = row(NotificationType.REPLY_COMMENT, reply, post, null, 1);
-        when(commentPreviewService.loadPreviews(Set.of(reply)))
+        when(commentPreviewService.loadPreviews(viewer, Set.of(reply)))
                 .thenReturn(
                         Map.of(
                                 reply,
@@ -150,7 +150,7 @@ class NotificationItemAssemblerTest {
         UUID post = UUID.randomUUID();
         UUID comment = UUID.randomUUID();
         FeedRow row = row(NotificationType.MENTION_COMMENT, comment, post, null, 1);
-        when(commentPreviewService.loadPreviews(Set.of(comment)))
+        when(commentPreviewService.loadPreviews(viewer, Set.of(comment)))
                 .thenReturn(
                         Map.of(
                                 comment,
