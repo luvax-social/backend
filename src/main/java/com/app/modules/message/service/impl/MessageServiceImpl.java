@@ -114,7 +114,9 @@ public class MessageServiceImpl implements MessageService {
                                 + "|"
                                 + request.sharedStoryId()
                                 + "|"
-                                + request.mediaAssetId());
+                                + request.mediaAssetId()
+                                + "|"
+                                + request.replyToId());
         if (idempotencyKey != null
                 && idempotencyRepository.insertIfAbsent(actorId, idempotencyKey, requestHash)
                         == 0) {

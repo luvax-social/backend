@@ -569,6 +569,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Reusing a message send key with a different reply target now returns a conflict instead of replaying the earlier message.
 - The public support-category check now reads inside a read-only transaction like the list it filters.
 - A WebSocket subscription or send with no authenticated principal is now rejected with the same not-permitted error as any other denial.
 - The Gorse store purge now connects with the credentials of the application's live database connection, so the application context starts where `POSTGRES_USER` and `POSTGRES_PASSWORD` are unset and integration tests no longer reach Gorse with a developer's local credentials.
