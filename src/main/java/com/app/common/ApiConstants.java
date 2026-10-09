@@ -47,6 +47,7 @@ public final class ApiConstants {
         public static final String ME_WARNINGS = "/me/warnings";
         public static final String ME_HIDDEN_WORDS = "/me/hidden-words";
         public static final String ME_HIDDEN_WORD_BY_ID = "/me/hidden-words/{entryId}";
+        public static final String ME_INTERACTION_LIMITS = "/me/interaction-limits";
     }
 
     public static final class Posts {
