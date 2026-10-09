@@ -120,7 +120,7 @@ The enforcement they call for is already in place, so adding that flow will not 
 | `updated_at` | Trigger `fn_update_updated_at` | Do not set in application code for tables that have this trigger |
 | `deleted_at` | Application code | Set to `NOW()` on soft delete; `NULL` to restore |
 
-Tables with `updated_at` triggers: `users` (`trg_users_updated_at`), `posts` (`trg_posts_updated_at`), `comments` (`trg_comments_updated_at`), `conversations` (`trg_conversations_updated_at`).
+Tables with `updated_at` triggers: `users` (`trg_users_updated_at`), `posts` (`trg_posts_updated_at`), `comments` (`trg_comments_updated_at`), `conversations` (`trg_conversations_updated_at`), `user_mutes` (`trg_user_mutes_updated_at`), `interaction_limits` (`trg_interaction_limits_updated_at`), `hidden_words` (`trg_hidden_words_updated_at`).
 
 All timestamps use `TIMESTAMPTZ` (timezone-aware). Store and compare in UTC.
 

@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
+- Mutes, show fewer, interaction limits, not-interested and hidden word lists now have database tables, and user settings gain a system hidden words toggle.
 - Hidden Words now share a text match contract for whole-token and contiguous phrase matching across Vietnamese accents, mention markers, and leetspeak.
 - A rollback script, `scripts/rollback/phase2_postgres_rollback.sql`, restores the PostgreSQL schema from V133 to V126 and forgets V127 to V133, so the release that moved analytics to ClickHouse can be abandoned; a test proves the result matches a V126 database, that a second run changes nothing and that the migrations then apply again.
 - `GORSE_REBUILD_REQUESTS_PER_SECOND`, `GORSE_REBUILD_USER_BATCH_SIZE`, `GORSE_REBUILD_ITEM_BATCH_SIZE` and `GORSE_REBUILD_FEEDBACK_BATCH_SIZE` configuration properties.

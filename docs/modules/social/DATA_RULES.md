@@ -11,6 +11,11 @@ The only outstanding rule is transitioning pending follow requests to accepted w
 |-------|-------------|-------|
 | `follows` | `follower_id`, `following_id`, `status`, `created_at`, `accepted_at` | Unidirectional follow relationships have pending status for unapproved private-account requests and record the acceptance time in `accepted_at`, which is null while pending. |
 | `blocks` | `blocker_id`, `blocked_id`, `created_at` | Block relationships. Bidirectional in effect: blocked user cannot follow, message, or see the blocker's content. |
+| `user_mutes` | `user_id`, `muted_user_id`, `mute_posts`, `mute_stories`, `created_at`, `updated_at` | One row per muting user and muted account (V138). At least one of the two scopes is true; a row with both scopes off is an unmute and is deleted instead. A self-mute is rejected. `updated_at` is maintained by trigger `trg_user_mutes_updated_at`. |
+| `account_show_fewer` | `user_id`, `author_id`, `created_at` | A user asking to see less of one author in recommendations (V138). A self row is rejected. |
+| `interaction_limits` | `user_id` (PK/FK), `limit_non_followers`, `limit_recent_followers`, `expires_at`, `created_at`, `updated_at` | At most one temporary interaction limit per user (V138). At least one toggle is true. A row past `expires_at` is inactive but may remain until replaced or removed. `updated_at` is maintained by trigger `trg_interaction_limits_updated_at`. |
+| `hidden_words` | `id`, `phrase`, `normalized_phrase`, `created_by`, `created_at`, `updated_at` | The platform-wide hidden word list that administrators maintain (V140). `normalized_phrase` is unique. `created_by` is set to null when the creating account is deleted. `updated_at` is maintained by trigger `trg_hidden_words_updated_at`. |
+| `user_hidden_words` | `id`, `user_id`, `phrase`, `normalized_phrase`, `created_at` | A user's personal hidden word list (V140). `(user_id, normalized_phrase)` is unique. The per-user entry limit is enforced by the service. |
 
 These tables cannot be rebuilt from any other source if lost.
 
