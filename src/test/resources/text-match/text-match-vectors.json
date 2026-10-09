@@ -1,0 +1,21 @@
+[
+  {"raw": "Đồ ngu", "tokens": ["do", "ngu"]},
+  {"raw": "ĐỒ NGU!!!", "tokens": ["do", "ngu"]},
+  {"raw": "đặng Đặng", "tokens": ["dang", "dang"]},
+  {"raw": "Tiếng Việt có dấu", "tokens": ["tieng", "viet", "co", "dau"]},
+  {"raw": "TÔI Ở HÀ NỘI!", "tokens": ["toi", "o", "ha", "noi"]},
+  {"raw": "h3ll0 w0rld", "tokens": ["hello", "world"]},
+  {"raw": "a$$ @lert !dea", "tokens": ["ass", "lert", "idea"]},
+  {"raw": "$hit", "tokens": ["shit"]},
+  {"raw": "@anna nice", "tokens": ["anna", "nice"]},
+  {"raw": "@ss a$$", "tokens": ["ss", "ass"]},
+  {"raw": "call 0912345678", "tokens": ["call", "0912345678"]},
+  {"raw": "x.y,z", "tokens": ["x", "y", "z"]},
+  {"raw": "classic", "tokens": ["classic"]},
+  {"raw": "hi 😀 there ✨ now", "tokens": ["hi", "there", "now"]},
+  {"raw": "a—b/c_b", "tokens": ["a", "b", "c", "b"]},
+  {"raw": "@@!!!", "tokens": []},
+  {"raw": "", "tokens": []},
+  {"raw": "🇻🇳❤️", "tokens": []},
+  {"raw": "abc123 123abc", "tokens": ["abci2e", "i2eabc"]}
+]

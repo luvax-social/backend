@@ -179,6 +179,23 @@ Post search sets it because it returns nothing at all.
 
 ---
 
+## Text match normalisation
+
+1. Normalise text to Unicode NFD, then remove every code point in `\p{M}`.
+2. Map `đ` and `Đ` to `d`.
+3. Lowercase with the root locale.
+4. Tokenise on maximal runs of `[\p{L}\p{N}@$!]`, treating everything else as a separator.
+5. Remove every leading `@` and trailing `!` from each token.
+6. If a token contains at least one letter, map `0→o 1→i 3→e 4→a 5→s 7→t @→a $→s !→i`; keep a token of only digits unchanged.
+7. Drop tokens that are empty after marker removal.
+8. Normalise a word or phrase entry into tokens the same way, and match it only when its tokens appear as a contiguous subsequence of the content tokens.
+
+An entry must contain 1 to 64 raw characters and 1 to 6 tokens after normalisation.
+Each user may have at most 200 personal entries.
+Reject entries with the same normalised form using `HIDDEN_WORD_DUPLICATE`.
+
+---
+
 ## Enum vs. Config Table Relationship
 
 Several domain tables use PostgreSQL enum types as the column type for classification fields:
