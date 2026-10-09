@@ -345,7 +345,8 @@ public class ConversationServiceImpl implements ConversationService {
      * already follow back; this is the "non-follower" gate the setting is meant to enforce.
      */
     private void assertMessageRequestAllowed(UUID actorId, UUID targetId) {
-        // NOBODY is treated like FOLLOWING until a dedicated message policy replaces this method.
+        // Only EVERYONE lets a non-followed account start a conversation; FOLLOWING and NOBODY
+        // both require the target to follow the actor back.
         boolean allowRequests =
                 userSettingsRepository
                         .findById(targetId)

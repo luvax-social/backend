@@ -20,7 +20,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** Per-user notification and privacy preferences. Defaults match the V03 schema. */
+/**
+ * Per-user notification and privacy preferences.
+ *
+ * <p>The field defaults apply when a row is built in code; the column defaults in the database
+ * (V03, V136, V137) apply to rows inserted by SQL, and the two are kept equal.
+ */
 @Entity
 @Table(name = "user_settings")
 @Getter

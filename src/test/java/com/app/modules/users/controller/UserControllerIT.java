@@ -393,6 +393,7 @@ class UserControllerIT {
         ResponseEntity<Map> reread = getWithAuth("/api/v1/users/me/settings", access);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody().get("code")).isEqualTo("MALFORMED_REQUEST_BODY");
         assertThat(((Map<?, ?>) reread.getBody().get("data")).get("messagePermission"))
                 .isEqualTo("everyone");
     }
