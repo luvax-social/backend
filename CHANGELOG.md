@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
+- One interaction policy now decides, in a fixed order of block, interaction limit, message permission, pending request and Hidden Words, whether a comment, mention, new conversation or message is allowed, hidden, routed to message requests or refused.
 - Each account can keep a personal Hidden Words list of up to 200 words or phrases through `GET` and `POST /users/me/hidden-words` and `DELETE /users/me/hidden-words/{entryId}`; entries are compared by their normalised form, and a duplicate, a full list or an unusable phrase answers `HIDDEN_WORD_DUPLICATE`, `HIDDEN_WORD_LIMIT_REACHED` or `HIDDEN_WORD_INVALID`.
 - Mutes, show fewer, interaction limits, not-interested and hidden word lists now have database tables, and user settings gain a system hidden words toggle.
 - Hidden Words now share a text match contract for whole-token and contiguous phrase matching across Vietnamese accents, mention markers, and leetspeak.

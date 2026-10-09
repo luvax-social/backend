@@ -1,6 +1,7 @@
 package com.app.modules.social.repository;
 
 import java.time.OffsetDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -39,6 +40,20 @@ public interface InteractionLimitRepository extends JpaRepository<InteractionLim
             @Param("limitNonFollowers") boolean limitNonFollowers,
             @Param("limitRecentFollowers") boolean limitRecentFollowers,
             @Param("expiresAt") OffsetDateTime expiresAt);
+
+    /**
+     * Returns the account's limit only while it is in force.
+     *
+     * <p>An expired row stays in the table until it is replaced or removed, so the expiry is part
+     * of the query rather than left to the caller. A primary key lookup.
+     *
+     * @param userId the account whose limit is read
+     * @param now the instant the limit must still be in force at
+     * @return the limit when {@code expires_at > now}, otherwise empty
+     */
+    @Query("select l from InteractionLimit l where l.userId = :userId and l.expiresAt > :now")
+    Optional<InteractionLimit> findActive(
+            @Param("userId") UUID userId, @Param("now") OffsetDateTime now);
 
     /**
      * Removes the account's limit.

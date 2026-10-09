@@ -114,6 +114,30 @@ See `docs/modules/users/DATA_RULES.md` Section 3D for the same entry from the pr
 - Block relationships have no expiry or appeal mechanism.
 - No "close friends" or restricted list features.
 
+### E. Interaction Policy
+
+`InteractionPolicyService.evaluate` decides every comment, mention, conversation initiation and message send in one rule chain, implemented in `social/policy`.
+The rules run in a fixed order, injected explicitly by `InteractionPolicyServiceImpl` rather than left to bean ordering: block, then the target's interaction limit, then message permission, then the pending-request rule, then Hidden Words.
+The block rule runs first and a deny stops the chain, so a blocked pair never reads a limit, a setting or a hidden word list.
+The block rule checks the target and every secondary target, such as the author of the comment being replied to, and answers `BLOCKED` for a block in either direction.
+The limit rule reads the target's limit through `InteractionLimitRepository.findActive`, which returns a row only while `expires_at` is after the evaluation instant.
+While a limit is in force, an actor with no accepted follow of the target is hidden when non-followers are limited, and an actor whose follow was accepted within the last 7 days is hidden when recent followers are limited.
+Follows are read through `FollowRepository.findAcceptedAt`, which ignores a pending request, so an account still awaiting approval counts as a non-follower.
+The message permission rule denies a new conversation when the recipient chose `nobody`, denies it under `following` unless the recipient follows the actor, and routes it to the recipient's requests under `everyone` when the recipient does not follow the actor.
+A requester's send into a pending conversation goes to the requests, and to the hidden requests when the request is already filed there.
+The pending-request rule lets the requester send one text message while the request is pending, and refuses anything more with `AWAITING_ACCEPTANCE`.
+A declined request answers `AWAITING_ACCEPTANCE` as well, so the requester cannot tell a decline from a pending request.
+The recipient's own send is allowed, and the message module treats it as accepting the request.
+The Hidden Words rule hides a comment, or a requester's first message, whose text matches the target's matcher from `HiddenWordService.matcherFor`.
+A send into an accepted conversation is subject to the block rule alone.
+The five outcomes are `ALLOW`, `ALLOW_HIDDEN`, `ROUTE_TO_REQUESTS`, `ROUTE_TO_HIDDEN_REQUESTS` and `DENY`.
+A hide is a conversion: it turns `ALLOW` into `ALLOW_HIDDEN` for a comment or a mention, turns `ROUTE_TO_REQUESTS` into `ROUTE_TO_HIDDEN_REQUESTS` for a message, and never changes an allowed message.
+The reported reason is the first deny, else the first hide that took effect, else the reason the base outcome was chosen, else `NONE`.
+An actor acting on themselves is allowed with reason `SELF` after a block check against the secondary targets alone.
+`TAG`, `STORY_REPLY` and `STORY_RESPONSE` are reserved: no rule lists them, so `evaluate` refuses them with `IllegalArgumentException("interaction not enabled: <TYPE>")` until a later change adds them to the rules that should govern them.
+Every time comparison in one evaluation uses the same instant.
+The policy only reads; the comment and message modules act on its decision.
+
 ---
 
 ## Section 4: Inter-Module Dependencies
@@ -124,5 +148,5 @@ See `docs/modules/users/DATA_RULES.md` Section 3D for the same entry from the pr
 | `notification` | outbound | Follow, request, unfollow, approve, reject and block events drive notification creation, retraction and in-place conversion |
 | `notification` | inbound | `SocialService` answers block checks, follow status, the relationship block of a feed row, and the pending-request summary of the pinned entry (`countPendingRequestsUpTo`, `summarizePendingFollowRequests`) |
 | `post` | inbound | Post visibility (private account) is gated by `follows.status = 'accepted'` |
-| `users` | outbound | `HiddenWordServiceImpl` reads `hidden_words_system_enabled` through `UserPrivacySettingsService`; the personal hidden words endpoints are served by the users module's `UserSafetyController` |
+| `users` | outbound | `HiddenWordServiceImpl` reads `hidden_words_system_enabled` and the interaction policy's message permission rule reads `message_permission`, both through `UserPrivacySettingsService`; the personal hidden words endpoints are served by the users module's `UserSafetyController` |
 | `message` | inbound | Messaging permissions depend on whether a block relationship exists |
