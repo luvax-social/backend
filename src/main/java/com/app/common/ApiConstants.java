@@ -308,6 +308,11 @@ public final class ApiConstants {
         public static final String HASHTAG_SEARCH = "/hashtags/search";
         public static final String HASHTAG_BY_ID = "/hashtags/{hashtagId}";
         public static final String HASHTAG_PIN = "/hashtags/{hashtagId}/pin";
+        // Administrator-only like the hashtag registry above, and for the same reason: it sits
+        // outside the "/users/**" sub-tree, so the broader "/api/v1/admin/**" matcher applies and
+        // admits a moderator, which the class-level @PreAuthorize on the controller then narrows.
+        public static final String HIDDEN_WORDS = "/hidden-words";
+        public static final String HIDDEN_WORD_BY_ID = "/hidden-words/{hiddenWordId}";
         // The content-inspection surface. Under /api/v1/admin/ and outside the /users/** sub-tree
         // for the same structural reason ACTIONS_FOR_USER is: that sub-tree is reserved for the
         // ADMIN-only matcher, and investigating an account's content is moderator work. Putting

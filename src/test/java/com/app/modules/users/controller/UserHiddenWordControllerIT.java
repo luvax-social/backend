@@ -209,6 +209,8 @@ class UserHiddenWordControllerIT {
                         Map.of("phrase", ""),
                         Map.of("phrase", "a".repeat(65)),
                         Map.of("phrase", "one two three four five six seven"),
+                        Map.of("phrase", "bad\u0000word"),
+                        Map.of("phrase", "tab\tseparated"),
                         Map.of())) {
             ResponseEntity<Map> response = post(HIDDEN_WORDS, body, account);
 

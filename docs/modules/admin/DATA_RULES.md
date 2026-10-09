@@ -38,7 +38,7 @@ The `admin_actions` replica, by contrast, can be rebuilt from PostgreSQL by publ
 
 | Rule | Enforced By |
 |------|-------------|
-| `action_type` must be one of the 36 values in `admin_action_type` enum | `admin_action_type` enum |
+| `action_type` must be one of the 41 values in `admin_action_type` enum; V141 added `create_hidden_word`, `edit_hidden_word`, `delete_hidden_word`, `remove_message_reaction` and `restore_message_reaction`, and `AdminActionType` carries the three hidden word values until the reaction moderation lands | `admin_action_type` enum |
 | `admin_actions` is an append-only log; there is no `updated_at` and no soft delete | Schema design — no such columns |
 | `target_user_id` becomes NULL if the target user's account is deleted | `ON DELETE SET NULL` on `target_user_id` FK |
 | `report_id` becomes NULL if the associated report is deleted | `ON DELETE SET NULL` on `report_id` FK |
@@ -74,6 +74,11 @@ The `admin_actions` replica, by contrast, can be rebuilt from PostgreSQL by publ
 | `create_hashtag`, `ban_hashtag`, `unban_hashtag`, `edit_hashtag` and `delete_hashtag` must write the decision onto the hashtag row in the same transaction as the audit row | `AdminHashtagServiceImpl` delegating to `HashtagLifecycleService`. The admin module owns the transition guard and the audit row; the hashtag module owns the table and every side effect, the same division `remove_post` uses with the post module |
 | The hashtag audit action follows the transition, not the target alone | `AdminHashtagServiceImpl.auditActionFor` - reaching `banned` is a ban and reaching `deleted` is a delete whichever state it came from, but reaching `active` is an unban only when it came from `banned`. Returning from `deleted` has no audit value of its own, and `edit_hashtag` is what that value is for |
 | `delete_hashtag` never removes the hashtag row | `HashtagLifecycleServiceImpl.changeStatus` - a physical delete cascades to `post_hashtags` and drives the `post_count` trigger over every post that used the tag, which rewrites history nothing asked to rewrite and cannot be undone |
+| `create_hidden_word`, `edit_hidden_word` and `delete_hidden_word` must change `hidden_words` in the same transaction as their audit row, which has `target_entity_type = 'hidden_word'`, the entry id as `target_entity_id`, and no target user or report | `AdminHiddenWordServiceImpl` delegating to `HiddenWordLifecycleService`. The admin module owns the administrator guard and the audit row; the social module owns the table and publishes `HiddenWordsChangedEvent` so the in-memory list reloads after commit |
+| The hidden word audit metadata is `{phrase, normalizedPhrase}`, plus `previousPhrase` and `previousNormalizedPhrase` on an edit, built from what the transaction established and never from the request body | `AdminHiddenWordServiceImpl.record` |
+| `delete_hidden_word` is a hard delete of a configuration row, not of user content, and the audit metadata is the only record of the phrase afterwards | `HiddenWordLifecycleServiceImpl.delete` |
+| Every hidden word endpoint is administrator-only and a moderator answers 403 | Class-level `@PreAuthorize("hasRole('ADMIN')")` on `AdminHiddenWordController`, plus `AdminAuthorizationService.assertActorIsAdministrator` in every `AdminHiddenWordServiceImpl` method |
+| A phrase that is invalid, or that duplicates another entry's normalised form, writes neither a row nor an audit row | The phrase checks run inside the same transaction before the audit write, so a refusal rolls the whole request back |
 | `remove_comment` action must set `comments.deleted_at = NOW()` in the same transaction | `AdminServiceImpl.removeComment` |
 | `restore_comment` action must clear `comments.deleted_at` in the same transaction | `AdminServiceImpl.restoreComment` |
 | `resolve_report` and `dismiss_report` must update `reports.status` and `reports.reviewed_by` / `reviewed_at` in the same transaction | `AdminServiceImpl.resolveReport`, `AdminServiceImpl.dismissReport` |
@@ -106,9 +111,9 @@ The `admin_actions` replica, by contrast, can be rebuilt from PostgreSQL by publ
 
 ### C. Scope Simplifications
 
-- Role-based action restrictions are coarse: an administrator may perform every `action_type`, and a moderator may perform every one except the four account-status transitions (`ban_user`, `unban_user`, `suspend_user`, `unsuspend_user`), `change_user_role`, `force_logout`, the warning and strike revocations, and the five hashtag lifecycle actions.
+- Role-based action restrictions are coarse: an administrator may perform every `action_type`, and a moderator may perform every one except the four account-status transitions (`ban_user`, `unban_user`, `suspend_user`, `unsuspend_user`), `change_user_role`, `force_logout`, the warning and strike revocations, the five hashtag lifecycle actions, and the three hidden word actions.
   The boundary was originally structural: every administrator-only endpoint lived under `/api/v1/admin/users/`, which a single matcher restricts to ADMIN.
-  That is no longer the whole of it. Endpoints a moderator must not reach but that are not account administration - the warning and strike revocations, and the hashtag registry - sit outside that sub-tree deliberately, because moving them under `/users/` would mean adding exceptions ahead of the ADMIN matcher and making authorization depend on matcher ordering.
+  That is no longer the whole of it. Endpoints a moderator must not reach but that are not account administration - the warning and strike revocations, the hashtag registry, and the hidden word registry - sit outside that sub-tree deliberately, because moving them under `/users/` would mean adding exceptions ahead of the ADMIN matcher and making authorization depend on matcher ordering.
   Those endpoints are narrowed by a class-level `@PreAuthorize` instead. The rule to follow is that the `/users/` sub-tree stays ADMIN-only with no exceptions, and anything else administrator-only declares it on the controller.
   There is still no finer-grained per-action permission model.
 - An administrator's account status cannot be changed through the API by anyone, so removing a rogue administrator is a database-level operation.
@@ -168,6 +173,7 @@ A `ClickHouseRequestRejectedException` from the listing is a bug and propagates 
 | `notification` | inbound | `ModerationNoticeService` gives the notification feed the kind, date, text snippet and appeal eligibility of the audit row a notice reports, to the content's author only |
 | `post` | outbound | `remove_post` / `restore_post` actions mutate `posts.status` and `posts.deleted_at` |
 | `hashtag` | outbound | The five hashtag lifecycle actions mutate `hashtags.status` and purge `hashtag_trending`, through `HashtagLifecycleService`. The statistics snapshot also reads the most-used active hashtags live |
+| `social` | outbound | The three hidden word actions change `hidden_words` through `HiddenWordLifecycleService`, which publishes `HiddenWordsChangedEvent` in the same transaction so the in-memory platform-wide list reloads after commit |
 | `recommendation` | inbound | The activity log reads the ClickHouse `user_events` table, which `recommendation` owns and is the sole writer of |
 | `comment` | outbound | `remove_comment` / `restore_comment` actions mutate `comments.deleted_at` |
 | `common/analytics` | outbound | Every ClickHouse read and write goes through `ClickHouseOperations`; `AdminActionReplicationConsumer` and `PlatformStatsIngestConsumer` are two of the four analytics listeners that `AnalyticsIngestionController` pauses while the `clickhouse` breaker is open |

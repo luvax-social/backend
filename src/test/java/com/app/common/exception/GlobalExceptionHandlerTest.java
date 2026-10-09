@@ -191,7 +191,9 @@ class GlobalExceptionHandlerTest {
     @CsvSource({
         "uq_user_verifications_active,VERIFICATION_ALREADY_VERIFIED",
         "uq_support_tickets_one_open_support_per_user,SUPPORT_TICKET_ALREADY_OPEN",
-        "uq_support_tickets_one_open_verification_per_user,SUPPORT_TICKET_ALREADY_OPEN"
+        "uq_support_tickets_one_open_verification_per_user,SUPPORT_TICKET_ALREADY_OPEN",
+        "hidden_words_normalized_phrase_key,HIDDEN_WORD_DUPLICATE",
+        "user_hidden_words_user_id_normalized_phrase_key,HIDDEN_WORD_DUPLICATE"
     })
     void handleDataIntegrityViolation_knownConstraint_answersItsDomainCode(
             String constraint, String expectedCode) {

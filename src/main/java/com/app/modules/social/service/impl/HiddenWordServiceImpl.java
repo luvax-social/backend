@@ -6,6 +6,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import jakarta.annotation.PostConstruct;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
@@ -14,7 +16,6 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
 import com.app.common.text.PhraseMatcher;
-import com.app.common.text.TextMatchNormalizer;
 import com.app.modules.social.dto.response.HiddenWordEntryResponse;
 import com.app.modules.social.dto.response.HiddenWordListResponse;
 import com.app.modules.social.entity.UserHiddenWord;
@@ -22,10 +23,13 @@ import com.app.modules.social.event.HiddenWordsChangedEvent;
 import com.app.modules.social.repository.HiddenWordRepository;
 import com.app.modules.social.repository.UserHiddenWordRepository;
 import com.app.modules.social.service.HiddenWordService;
+import com.app.modules.social.validation.HiddenWordPhrases;
 import com.app.modules.users.service.UserPrivacySettingsService;
 
 @Service
 public class HiddenWordServiceImpl implements HiddenWordService {
+
+    private static final Logger log = LoggerFactory.getLogger(HiddenWordServiceImpl.class);
 
     private final UserHiddenWordRepository userHiddenWordRepository;
     private final HiddenWordRepository hiddenWordRepository;
@@ -54,7 +58,7 @@ public class HiddenWordServiceImpl implements HiddenWordService {
     @Override
     @Transactional
     public HiddenWordEntryResponse addPersonal(UUID ownerId, String phrase) {
-        String normalized = normalizedOrReject(phrase);
+        String normalized = HiddenWordPhrases.normalizeOrReject(phrase);
 
         // Serialises the count, the duplicate check and the insert per account.
         userHiddenWordRepository.lockPersonalList(ownerId);
@@ -104,9 +108,20 @@ public class HiddenWordServiceImpl implements HiddenWordService {
         return includeSystemList ? personal.or(systemList.get()) : personal;
     }
 
+    // Synchronized so the read and the swap form one step. Two after-commit refreshes can run on
+    // different threads, and without it the slower reader of an older snapshot could store its
+    // result after the newer one and leave the list stale until the next change.
     @Override
-    public void refreshSystemList() {
-        systemList.set(PhraseMatcher.compile(hiddenWordRepository.findAllNormalizedPhrases()));
+    public synchronized void refreshSystemList() {
+        try {
+            systemList.set(PhraseMatcher.compile(hiddenWordRepository.findAllNormalizedPhrases()));
+        } catch (RuntimeException ex) {
+            log.error(
+                    "Reloading the platform-wide hidden word list failed; the previous copy stays"
+                            + " in use",
+                    ex);
+            throw ex;
+        }
     }
 
     /**
@@ -117,22 +132,15 @@ public class HiddenWordServiceImpl implements HiddenWordService {
      */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onHiddenWordsChanged(HiddenWordsChangedEvent event) {
-        refreshSystemList();
-    }
-
-    private static String normalizedOrReject(String phrase) {
-        if (phrase == null) {
-            throw new AppException(ApiErrorCode.HIDDEN_WORD_INVALID);
+        try {
+            refreshSystemList();
+        } catch (RuntimeException ex) {
+            // The change is already committed, so the request that made it must not fail over a
+            // cache reload. refreshSystemList logged the cause at error.
+            log.warn(
+                    "A hidden word change is saved but the in-memory list could not be reloaded;"
+                            + " it stays stale until the next change or a restart");
         }
-        int characters = phrase.codePointCount(0, phrase.length());
-        if (characters < 1 || characters > MAX_PHRASE_CHARACTERS) {
-            throw new AppException(ApiErrorCode.HIDDEN_WORD_INVALID);
-        }
-        List<String> tokens = TextMatchNormalizer.tokens(phrase);
-        if (tokens.isEmpty() || tokens.size() > MAX_PHRASE_TOKENS) {
-            throw new AppException(ApiErrorCode.HIDDEN_WORD_INVALID);
-        }
-        return String.join(" ", tokens);
     }
 
     private static HiddenWordEntryResponse toResponse(UserHiddenWord entry) {

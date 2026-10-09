@@ -11,7 +11,14 @@ import static org.mockito.Mockito.when;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +26,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
@@ -30,7 +38,14 @@ import com.app.modules.social.entity.UserHiddenWord;
 import com.app.modules.social.event.HiddenWordsChangedEvent;
 import com.app.modules.social.repository.HiddenWordRepository;
 import com.app.modules.social.repository.UserHiddenWordRepository;
+import com.app.modules.users.repository.UserSettingsRepository;
 import com.app.modules.users.service.UserPrivacySettingsService;
+import com.app.modules.users.service.impl.UserPrivacySettingsServiceImpl;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 
 @ExtendWith(MockitoExtension.class)
 class HiddenWordServiceImplTest {
@@ -38,6 +53,7 @@ class HiddenWordServiceImplTest {
     @Mock private UserHiddenWordRepository userHiddenWordRepository;
     @Mock private HiddenWordRepository hiddenWordRepository;
     @Mock private UserPrivacySettingsService privacySettings;
+    @Mock private UserSettingsRepository settingsRepository;
 
     private HiddenWordServiceImpl service;
     private final UUID owner = UUID.randomUUID();
@@ -236,6 +252,131 @@ class HiddenWordServiceImplTest {
         PhraseMatcher matcher = service.matcherFor(owner);
         assertThat(matcher.matches(List.of("scam"))).isTrue();
         assertThat(matcher.matches(List.of("ass"))).isFalse();
+    }
+
+    @Test
+    void addPersonal_controlCharacters_throwInvalidWithoutTouchingTheDatabase() {
+        for (String phrase :
+                new String[] {
+                    "bad\u0000word",
+                    "tab\tseparated",
+                    "line\nbreak",
+                    "del\u007fchar",
+                    "next\u0085line"
+                }) {
+            assertThatThrownBy(() -> service.addPersonal(owner, phrase))
+                    .as("phrase with control character at %s", phrase.length())
+                    .isInstanceOf(AppException.class)
+                    .extracting(ex -> ((AppException) ex).getErrorCode())
+                    .isEqualTo(ApiErrorCode.HIDDEN_WORD_INVALID);
+        }
+        verifyNoMoreInteractions(userHiddenWordRepository);
+    }
+
+    @Test
+    void addPersonal_surroundingWhitespaceIncludingNewlines_isStrippedNotRejected() {
+        when(userHiddenWordRepository.countByUserId(owner)).thenReturn(0L);
+        when(userHiddenWordRepository.saveAndFlush(any(UserHiddenWord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.addPersonal(owner, "\n pasted phrase \r\n");
+
+        ArgumentCaptor<UserHiddenWord> stored = ArgumentCaptor.forClass(UserHiddenWord.class);
+        verify(userHiddenWordRepository).saveAndFlush(stored.capture());
+        assertThat(stored.getValue().getPhrase()).isEqualTo("pasted phrase");
+    }
+
+    @Test
+    void matcherFor_accountWithoutSettingsRow_usesTheColumnDefaultsInsteadOfThrowing() {
+        UserPrivacySettingsServiceImpl realSettings =
+                new UserPrivacySettingsServiceImpl(settingsRepository);
+        HiddenWordServiceImpl withRealSettings =
+                new HiddenWordServiceImpl(
+                        userHiddenWordRepository, hiddenWordRepository, realSettings);
+        when(settingsRepository.findById(owner)).thenReturn(Optional.empty());
+        when(hiddenWordRepository.findAllNormalizedPhrases()).thenReturn(List.of("ass"));
+        withRealSettings.refreshSystemList();
+        when(userHiddenWordRepository.findNormalizedPhrasesByUserId(owner))
+                .thenReturn(List.of("do ngu"));
+
+        PhraseMatcher matcher = withRealSettings.matcherFor(owner);
+
+        // Defaults: the platform-wide list is on, so both lists apply.
+        assertThat(matcher.matches(TextMatchNormalizer.tokens("what an a$$"))).isTrue();
+        assertThat(matcher.matches(TextMatchNormalizer.tokens("đồ ngu"))).isTrue();
+    }
+
+    @Test
+    void refreshSystemList_concurrentRefreshes_leaveTheLaterSnapshotInPlace() throws Exception {
+        CountDownLatch firstIsReading = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondIsReading = new CountDownLatch(1);
+        AtomicInteger reads = new AtomicInteger();
+        when(hiddenWordRepository.findAllNormalizedPhrases())
+                .thenAnswer(
+                        invocation -> {
+                            if (reads.incrementAndGet() == 1) {
+                                firstIsReading.countDown();
+                                releaseFirst.await();
+                                return List.of("older");
+                            }
+                            secondIsReading.countDown();
+                            return List.of("newer");
+                        });
+        when(privacySettings.hiddenWordsSystemEnabled(owner)).thenReturn(true);
+        when(userHiddenWordRepository.findNormalizedPhrasesByUserId(owner)).thenReturn(List.of());
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> first = pool.submit(service::refreshSystemList);
+            assertThat(firstIsReading.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<?> second = pool.submit(service::refreshSystemList);
+            // An unsynchronised second refresh reads while the first is still parked; a
+            // synchronised one waits for the first to finish, so this wait times out by design.
+            secondIsReading.await(500, TimeUnit.MILLISECONDS);
+            releaseFirst.countDown();
+            first.get(5, TimeUnit.SECONDS);
+            second.get(5, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        PhraseMatcher matcher = service.matcherFor(owner);
+        assertThat(matcher.matches(List.of("newer"))).isTrue();
+        assertThat(matcher.matches(List.of("older"))).isFalse();
+    }
+
+    @Test
+    void refreshSystemList_readFails_logsAtErrorKeepsTheOldListAndRethrows() {
+        when(hiddenWordRepository.findAllNormalizedPhrases())
+                .thenReturn(List.of("ass"))
+                .thenThrow(new IllegalStateException("database down"));
+        when(privacySettings.hiddenWordsSystemEnabled(owner)).thenReturn(true);
+        when(userHiddenWordRepository.findNormalizedPhrasesByUserId(owner)).thenReturn(List.of());
+        service.refreshSystemList();
+
+        Logger logger = (Logger) LoggerFactory.getLogger(HiddenWordServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertThatThrownBy(service::refreshSystemList)
+                    .isInstanceOf(IllegalStateException.class);
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(appender.list).extracting(ILoggingEvent::getLevel).contains(Level.ERROR);
+        assertThat(service.matcherFor(owner).matches(List.of("ass"))).isTrue();
+    }
+
+    @Test
+    void onHiddenWordsChanged_refreshFails_doesNotFailTheCommittedRequest() {
+        when(hiddenWordRepository.findAllNormalizedPhrases())
+                .thenThrow(new IllegalStateException("database down"));
+
+        service.onHiddenWordsChanged(new HiddenWordsChangedEvent());
+
+        verify(hiddenWordRepository).findAllNormalizedPhrases();
     }
 
     private static UserHiddenWord entry(String phrase, OffsetDateTime createdAt) {

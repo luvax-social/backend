@@ -118,7 +118,7 @@ class CommentServiceImplTest {
                         accessPolicy,
                         mapper,
                         outboxService,
-                        new CommentProperties(0, 24, java.util.List.of()),
+                        new CommentProperties(0, 24),
                         redisTemplate,
                         objectMapper,
                         metrics,

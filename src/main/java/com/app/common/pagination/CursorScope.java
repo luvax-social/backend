@@ -32,6 +32,9 @@ public final class CursorScope {
     public static final String ADMIN_CONTENT_COMMENTS = "admcc";
     public static final String ADMIN_HASHTAGS = "admh";
     public static final String ADMIN_HASHTAG_SEARCH = "admhs";
+    // One tag for the listing and its optional search term: unlike the hashtag pair, both walk the
+    // same keyset ordering over the same table, so a position from one is valid in the other.
+    public static final String ADMIN_HIDDEN_WORDS = "admhw";
     public static final String COMMENTS_TOP_LEVEL = "cmt";
     public static final String COMMENTS_TOP_LEVEL_NEWEST = "cmtn";
     public static final String COMMENT_REPLIES = "rpl";

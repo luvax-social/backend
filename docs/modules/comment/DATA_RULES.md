@@ -67,7 +67,9 @@ This is a deliberate departure from the enum-as-constraint-layer rule in `GLOBAL
 | `updated_at` is not an edit signal and must never be compared against `created_at` to derive one | `trg_comments_updated_at` (V16) fires on any row change, including the counter updates `trg_comment_like_count` and `trg_comment_reply_count` issue |
 | Only the comment owner **or an admin** may soft-delete a comment | `CommentServiceImpl.delete` — owner check with an admin override |
 | Content is normalized before moderation and persistence | `CommentContentNormalizer` |
-| Content failing a blocked-word rule is rejected on create and on edit | `CommentModerationServiceImpl.check` — throws `COMMENT_MODERATION_REJECTED` (422) |
+| Content that is empty, longer than 2200 characters, an all-capitals message over 50 characters, or a repeat of one word more than three times is rejected on create and on edit | `CommentModerationServiceImpl.check` - throws `COMMENT_MODERATION_REJECTED` (422) |
+| A word list is not a moderation rule here: configured blocked words were retired, and the platform-wide Hidden Words registry hides a matching comment from the account it is aimed at instead of rejecting it from its author | `HiddenWordService` in the social module |
+| Startup fails while `app.comment.blocked-words` is still configured, with a message naming the administrator Hidden Words registry, so a retired list can never be dropped silently | `LegacyBlockedWordsGuard` |
 | A repeat create within the slow-mode window is rejected | `CommentServiceImpl` — throws `COMMENT_SLOW_MODE_ACTIVE` (429); disabled when `slowModeSeconds` is 0 |
 | An idempotency key reused with a different request payload is rejected | throws `COMMENT_IDEMPOTENCY_CONFLICT` (409) |
 | Flat reply lists filter by `root_id`; no `WITH RECURSIVE` CTE is used | `CommentRepository` |
@@ -119,8 +121,8 @@ The two sort modes therefore differ only in whether that block is computed, neve
 - No comment edit history is stored; only the current `content` and the `edited_at` timestamp of the most recent change are retained.
   This differs from the `post` module, which has a `post_edit_history` table (V22).
   A client can tell that a comment was edited and when, but not what it used to say.
-- Moderation is blocked-word matching only.
-  There is no classifier, no review queue, and no appeal path; `moderation_status` exists to support one later without a schema change.
+- Moderation is rule-based only: emptiness, length, all-capitals and repeated words.
+  Word lists live in the Hidden Words registry, not here, and there is no classifier, no review queue, and no appeal path; `moderation_status` exists to support one later without a schema change.
 - The Redis recent-comment cache is best-effort.
   A cache failure degrades to a database read; it never fails the request.
 - The pinned exclusion set is recomputed on every page rather than carried in the cursor.

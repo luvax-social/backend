@@ -258,7 +258,14 @@ public class GlobalExceptionHandler {
                     "uq_support_tickets_one_open_support_per_user",
                             ApiErrorCode.SUPPORT_TICKET_ALREADY_OPEN,
                     "uq_support_tickets_one_open_verification_per_user",
-                            ApiErrorCode.SUPPORT_TICKET_ALREADY_OPEN);
+                            ApiErrorCode.SUPPORT_TICKET_ALREADY_OPEN,
+                    // Two requests can both pass the duplicate check before either commits, and the
+                    // loser would otherwise see the generic conflict instead of the code the
+                    // check itself answers. These are the names PostgreSQL gives the inline UNIQUE
+                    // constraints in V140.
+                    "hidden_words_normalized_phrase_key", ApiErrorCode.HIDDEN_WORD_DUPLICATE,
+                    "user_hidden_words_user_id_normalized_phrase_key",
+                            ApiErrorCode.HIDDEN_WORD_DUPLICATE);
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<?>> handleDataIntegrityViolation(
