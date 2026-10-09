@@ -1,3 +1,6 @@
 /mvnw text eol=lf
 *.sh text eol=lf
 *.cmd text eol=crlf
+
+# Compared byte for byte with the frontend copy, which is stored with LF.
+src/test/resources/text-match/*.json text eol=lf

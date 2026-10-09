@@ -936,6 +936,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 
 ### Tests
 - Comment preview integration coverage now checks moderation visibility and blocks in both directions.
+- The backend and frontend copies of the text match vectors are compared byte for byte whenever both checkouts are present.
 - The broker send guard, comment STOMP send authorisation and outbox trace continuity integration tests wait on server-side signals instead of sleeping or polling.
 - The post like live delivery test waits for the post notification consumer to finish before cleaning up, so its cleanup no longer deadlocks with a notification write still in flight.
 - The daily platform statistics test anchors its window to midnight UTC, so it no longer fails when it runs after 19:00 UTC.
