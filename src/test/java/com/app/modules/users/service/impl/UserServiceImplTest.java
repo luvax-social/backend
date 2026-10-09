@@ -395,6 +395,7 @@ class UserServiceImplTest {
                         false,
                         false,
                         MessagePermission.NOBODY,
+                        false,
                         false));
 
         assertThat(settings.isNotifyLikes()).isFalse();
@@ -405,6 +406,7 @@ class UserServiceImplTest {
         assertThat(settings.isShowActivityStatus()).isFalse();
         assertThat(settings.isAllowStoryReplies()).isFalse();
         assertThat(settings.getMessagePermission()).isEqualTo(MessagePermission.NOBODY);
+        assertThat(settings.isHiddenWordsSystemEnabled()).isFalse();
         verify(settingsRepository).save(settings);
     }
 
@@ -417,11 +419,13 @@ class UserServiceImplTest {
 
         service.updateMySettings(
                 id,
-                new UpdateSettingsRequest(null, null, null, null, null, null, null, null, null));
+                new UpdateSettingsRequest(
+                        null, null, null, null, null, null, null, null, null, null));
 
         assertThat(settings.isNotifyLikes()).isTrue();
         assertThat(settings.isNotifyComments()).isTrue();
         assertThat(settings.getMessagePermission()).isEqualTo(MessagePermission.FOLLOWING);
+        assertThat(settings.isHiddenWordsSystemEnabled()).isTrue();
         verify(settingsRepository).save(settings);
     }
 
@@ -502,6 +506,16 @@ class UserServiceImplTest {
 
     private static UserSettingsResponse settingsResponse() {
         return new UserSettingsResponse(
-                true, true, true, true, true, true, true, MessagePermission.EVERYONE, true, null);
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                MessagePermission.EVERYONE,
+                true,
+                true,
+                null);
     }
 }

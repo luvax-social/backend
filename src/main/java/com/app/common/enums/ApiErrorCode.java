@@ -77,6 +77,9 @@ public enum ApiErrorCode {
     SOCIAL_REQUEST_NOT_FOUND("SOCIAL_REQUEST_NOT_FOUND", "Follow request not found", HttpStatus.NOT_FOUND),
     SOCIAL_SELF_BLOCK("SOCIAL_SELF_BLOCK", "You cannot block yourself", HttpStatus.BAD_REQUEST),
     SOCIAL_ALREADY_BLOCKED("SOCIAL_ALREADY_BLOCKED", "User already blocked", HttpStatus.CONFLICT),
+    HIDDEN_WORD_DUPLICATE("HIDDEN_WORD_DUPLICATE", "This word or phrase is already on the list", HttpStatus.CONFLICT),
+    HIDDEN_WORD_LIMIT_REACHED("HIDDEN_WORD_LIMIT_REACHED", "The hidden words list is full", HttpStatus.UNPROCESSABLE_ENTITY),
+    HIDDEN_WORD_INVALID("HIDDEN_WORD_INVALID", "A hidden word must be 1 to 64 characters and contain 1 to 6 words", HttpStatus.BAD_REQUEST),
 
     // Media
     MEDIA_INVALID_METADATA("MEDIA_INVALID_METADATA", "Media metadata is invalid", HttpStatus.BAD_REQUEST),

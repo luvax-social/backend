@@ -15,7 +15,7 @@ The only outstanding rule is transitioning pending follow requests to accepted w
 | `account_show_fewer` | `user_id`, `author_id`, `created_at` | A user asking to see less of one author in recommendations (V138). A self row is rejected. |
 | `interaction_limits` | `user_id` (PK/FK), `limit_non_followers`, `limit_recent_followers`, `expires_at`, `created_at`, `updated_at` | At most one temporary interaction limit per user (V138). At least one toggle is true. A row past `expires_at` is inactive but may remain until replaced or removed. `updated_at` is maintained by trigger `trg_interaction_limits_updated_at`. |
 | `hidden_words` | `id`, `phrase`, `normalized_phrase`, `created_by`, `created_at`, `updated_at` | The platform-wide hidden word list that administrators maintain (V140). `normalized_phrase` is unique. `created_by` is set to null when the creating account is deleted. `updated_at` is maintained by trigger `trg_hidden_words_updated_at`. |
-| `user_hidden_words` | `id`, `user_id`, `phrase`, `normalized_phrase`, `created_at` | A user's personal hidden word list (V140). `(user_id, normalized_phrase)` is unique. The per-user entry limit is enforced by the service. |
+| `user_hidden_words` | `id`, `user_id`, `phrase`, `normalized_phrase`, `created_at` | A user's personal hidden word list (V140). `(user_id, normalized_phrase)` is unique. `phrase` keeps the text as the user typed it and `normalized_phrase` is the output of `TextMatchNormalizer.normalizePhrase`, which is the only form ever compared. The per-user entry limit of 200 is enforced by the service. |
 
 These tables cannot be rebuilt from any other source if lost.
 
@@ -27,6 +27,7 @@ These tables cannot be rebuilt from any other source if lost.
 |------|----------|--------------|-----------------|
 | `users.follower_count` | `users` table | `COUNT(*)` from `follows` where `following_id = user.id` and `status = 'accepted'` | Trigger `trg_follow_counts` (V16) |
 | `users.following_count` | `users` table | `COUNT(*)` from `follows` where `follower_id = user.id` and `status = 'accepted'` | Trigger `trg_follow_counts` (V16) |
+| Platform-wide hidden word matcher | In memory in `HiddenWordServiceImpl` (`AtomicReference<PhraseMatcher>`) | `hidden_words.normalized_phrase`, every row | Loaded at application start, and reloaded by an `AFTER_COMMIT` listener on `HiddenWordsChangedEvent` or by `HiddenWordService.refreshSystemList()`; a single application instance is assumed, so a second instance would serve its own copy until restarted |
 | Pending follow requests view | `pending_follow_requests` (DB view, V17) | Built from `follows` where `status = 'pending'` | Query-time; not currently queried by application code — `SocialServiceImpl.getPendingFollowRequests` reads `follows` directly via keyset-paginated repository methods |
 
 ---
@@ -65,6 +66,11 @@ These tables cannot be rebuilt from any other source if lost.
 | The `user.followed.v1` / `user.follow-requested.v1` events are consumed to create notifications | `SocialNotificationConsumer` (`notification` module) |
 | Unfollow, approve, reject and block publish `user.unfollowed.v1`, `user.follow-request.approved.v1`, `user.follow-request.rejected.v1` and `user.blocked.v1` through the outbox, in the same transaction as the relationship write, so the feed retracts, converts or removes the affected rows | `SocialServiceImpl`, `SocialEventService` |
 | When a private account is made public, all `'pending'` follow rows for that account must be transitioned to `'accepted'` | `[NOT YET IMPLEMENTED]` — `UserServiceImpl.updateMyProfile` flips `is_private` only; no pending-follow transition runs |
+| A personal hidden word is validated before anything else: 1 to 64 raw characters counted by code point, and 1 to 6 tokens after normalisation; punctuation-only, blank and missing phrases fail with `HIDDEN_WORD_INVALID` | `HiddenWordServiceImpl.addPersonal` |
+| A personal entry is stored with the phrase as typed (stripped) and its normalised form; matching and the duplicate check use the normalised form only, so `Đồ Ngu` then `do ngu` is a duplicate (`HIDDEN_WORD_DUPLICATE`) | `HiddenWordServiceImpl.addPersonal` |
+| An account keeps at most 200 personal entries (`HIDDEN_WORD_LIMIT_REACHED`); the count, the duplicate check and the insert run under a transaction-scoped advisory lock per account, so concurrent adds at 199 entries admit exactly one | `HiddenWordServiceImpl.addPersonal`, `UserHiddenWordRepository.lockPersonalList` |
+| Removing an entry of another account, or an unknown entry, answers `NOT_FOUND` and changes nothing | `UserHiddenWordRepository.deleteByIdAndUserId` |
+| `matcherFor(ownerId)` combines the owner's personal entries with the cached platform-wide list when `hidden_words_system_enabled` is true, and with the personal entries alone when it is false; it costs one personal-list query and one settings lookup per call | `HiddenWordServiceImpl.matcherFor` |
 
 **Block directionality**:
 - The `blocks` table stores a single directional row: `(blocker_id, blocked_id)`.
@@ -107,4 +113,5 @@ See `docs/modules/users/DATA_RULES.md` Section 3D for the same entry from the pr
 | `notification` | outbound | Follow, request, unfollow, approve, reject and block events drive notification creation, retraction and in-place conversion |
 | `notification` | inbound | `SocialService` answers block checks, follow status, the relationship block of a feed row, and the pending-request summary of the pinned entry (`countPendingRequestsUpTo`, `summarizePendingFollowRequests`) |
 | `post` | inbound | Post visibility (private account) is gated by `follows.status = 'accepted'` |
+| `users` | outbound | `HiddenWordServiceImpl` reads `hidden_words_system_enabled` through `UserPrivacySettingsService`; the personal hidden words endpoints are served by the users module's `UserSafetyController` |
 | `message` | inbound | Messaging permissions depend on whether a block relationship exists |

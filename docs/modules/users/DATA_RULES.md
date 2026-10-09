@@ -1,7 +1,7 @@
 # Users Module — Data Rules
 
 **Implementation status**: Implemented for profile and settings.
-`UserController`, `UserServiceImpl`, `UserSummaryServiceImpl`, `UserRepository`, and `UserSettingsRepository` all exist.
+`UserController`, `UserSafetyController`, `UserServiceImpl`, `UserPrivacySettingsServiceImpl`, `UserSummaryServiceImpl`, `UserRepository`, and `UserSettingsRepository` all exist.
 The `push_tokens` table has no Java code at all — no entity, no repository, no service — and account soft delete and restore are likewise unimplemented.
 
 ---
@@ -78,6 +78,10 @@ Queries using them must filter soft-deleted rows themselves.
 | A soft-deleted or unknown user id resolves to a placeholder, not an error | `UserSummaryServiceImpl.loadSummaries` — `displayName` becomes `"Deleted user"`, `username` becomes `null` |
 | Batch user lookups are a single query regardless of id count | `UserRepository.findSummariesByIdIn` |
 | `user_settings` is created with defaults when a new user registers | `AuthServiceImpl.register` and `CustomOidcUserService` (OAuth path) |
+| `PATCH /users/me/settings` applies `hiddenWordsSystemEnabled` only when it is non-null; a missing value leaves the stored toggle unchanged, and the toggle never touches the personal hidden words list | `UserServiceImpl.updateMySettings` |
+| Other modules read `hidden_words_system_enabled` and `message_permission` through one read-only service; an account with no `user_settings` row is a broken invariant and answers `NOT_FOUND` instead of a guessed default | `UserPrivacySettingsServiceImpl` |
+| The personal hidden words list is managed only by its owner through `GET` and `POST /users/me/hidden-words` and `DELETE /users/me/hidden-words/{entryId}`; the controller resolves the account from the token and the list itself is owned by the `social` module (see its `DATA_RULES.md`, Section 3B) | `UserSafetyController` delegating to `HiddenWordService` |
+| A personal entry is 1 to 64 raw characters (counted by code point) that normalise to 1 to 6 words, an account keeps at most 200, and two entries with the same normalised form are rejected; the codes are `HIDDEN_WORD_INVALID` (400), `HIDDEN_WORD_LIMIT_REACHED` (422) and `HIDDEN_WORD_DUPLICATE` (409) | `HiddenWordServiceImpl.addPersonal` |
 | `status` transitions are admin-only and follow a fixed state machine | `AdminServiceImpl` — ban, unban, suspend, unsuspend; each writes an `admin_actions` audit row in the same transaction. A moderator cannot reach these at all, an actor cannot change its own status, and no actor can change an administrator's status. See `admin/DATA_RULES.md` |
 
 **Username and Email Retention on Soft Delete**:
@@ -138,6 +142,7 @@ A future reader must not re-derive the "counters are safe because they're viewer
 | `auth` | inbound | Auth module owns the `users` row lifecycle (creation, status validation); users module manages profile fields on the same row |
 | `media` | outbound | `avatar_url` and `banner_url` are CDN URLs sourced from `media_assets`; relationship is by convention, not FK |
 | `notification` | inbound | `UserNotificationPreferencesService` gives the notification module the `user_settings` toggles it checks before writing; `UserSummaryService` gives the actor summaries and the verified flag of a feed row |
-| `social` | outbound | `UserServiceImpl` calls `SocialService` for block gating, follow gating, and viewer relationship state |
+| `social` | outbound | `UserServiceImpl` calls `SocialService` for block gating, follow gating, and viewer relationship state; `UserSafetyController` calls `HiddenWordService` for the personal hidden words list |
+| `social` | inbound | `HiddenWordServiceImpl` calls `UserPrivacySettingsService` for `hidden_words_system_enabled`, and later interaction rules read `message_permission` the same way |
 | `admin` | inbound | Moderation actions mutate `users.status` and write an `admin_actions` audit row |
 | all modules | outbound | `UserSummaryService` is the shared batch resolver for embedding user identity in any response |

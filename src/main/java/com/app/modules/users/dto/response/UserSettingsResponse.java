@@ -32,4 +32,10 @@ public record UserSettingsResponse(
                                 "Whether this account may be offered in other people's suggestions",
                         example = "true")
                 boolean suggestible,
+        @Schema(
+                        description =
+                                "Whether the platform-wide hidden word list applies to this"
+                                        + " account",
+                        example = "true")
+                boolean hiddenWordsSystemEnabled,
         @Schema(description = "Last updated timestamp") OffsetDateTime updatedAt) {}

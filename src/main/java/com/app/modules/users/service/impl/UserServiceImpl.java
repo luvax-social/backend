@@ -235,6 +235,9 @@ public class UserServiceImpl implements UserService {
         if (request.messagePermission() != null) {
             settings.setMessagePermission(request.messagePermission());
         }
+        if (request.hiddenWordsSystemEnabled() != null) {
+            settings.setHiddenWordsSystemEnabled(request.hiddenWordsSystemEnabled());
+        }
 
         settingsRepository.save(settings);
         return userMapper.toSettingsResponse(settings);

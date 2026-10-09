@@ -33,4 +33,10 @@ public record UpdateSettingsRequest(
                                 "Set false to stop this account being offered in other people's"
                                         + " suggestions",
                         nullable = true)
-                Boolean suggestible) {}
+                Boolean suggestible,
+        @Schema(
+                        description =
+                                "Set false to stop the platform-wide hidden word list applying to"
+                                        + " this account; the personal list is unaffected",
+                        nullable = true)
+                Boolean hiddenWordsSystemEnabled) {}

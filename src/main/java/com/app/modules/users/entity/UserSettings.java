@@ -82,6 +82,11 @@ public class UserSettings {
     @Builder.Default
     private MessagePermission messagePermission = MessagePermission.EVERYONE;
 
+    /** True when the platform-wide hidden word list also applies to this account's content. */
+    @Column(name = "hidden_words_system_enabled", nullable = false)
+    @Builder.Default
+    private boolean hiddenWordsSystemEnabled = true;
+
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;

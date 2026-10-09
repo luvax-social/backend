@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- `GET` and `PATCH /users/me/settings` carry `hiddenWordsSystemEnabled`, the account choice to apply the platform-wide hidden word list alongside its personal one; it defaults to true and a request that omits it leaves it unchanged.
 - The `allowMessageRequests` setting is replaced by `messagePermission` (`everyone`, `following` or `nobody`) on `GET` and `PUT /users/me/settings`; existing accounts keep their behaviour (`true` becomes `everyone`, `false` becomes `following`), and a request that still sends `allowMessageRequests` is rejected.
 - Accepted follows now record when they became accepted, so approving an older request keeps its original creation time and records the approval time separately.
 - Retry backoff lookup widens the attempt number before subtracting, so an out-of-range attempt count clamps to the nearest backoff instead of wrapping around.
@@ -29,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
+- Each account can keep a personal Hidden Words list of up to 200 words or phrases through `GET` and `POST /users/me/hidden-words` and `DELETE /users/me/hidden-words/{entryId}`; entries are compared by their normalised form, and a duplicate, a full list or an unusable phrase answers `HIDDEN_WORD_DUPLICATE`, `HIDDEN_WORD_LIMIT_REACHED` or `HIDDEN_WORD_INVALID`.
 - Mutes, show fewer, interaction limits, not-interested and hidden word lists now have database tables, and user settings gain a system hidden words toggle.
 - Hidden Words now share a text match contract for whole-token and contiguous phrase matching across Vietnamese accents, mention markers, and leetspeak.
 - A rollback script, `scripts/rollback/phase2_postgres_rollback.sql`, restores the PostgreSQL schema from V133 to V126 and forgets V127 to V133, so the release that moved analytics to ClickHouse can be abandoned; a test proves the result matches a V126 database, that a second run changes nothing and that the migrations then apply again.
@@ -571,6 +573,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- A message permission is now stored and read with the root locale, so an account set to `following` no longer fails to load when the server runs under a Turkish default locale.
 - Notification previews now hide blocked or unapproved comment and parent text from viewers who cannot see it.
 - A sender can no longer message a peer who left a conversation and then blocked them, and that peer's membership stays inactive.
 - Reusing a message send key with a different reply target now returns a conflict instead of replaying the earlier message.
