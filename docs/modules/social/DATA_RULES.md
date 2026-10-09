@@ -9,7 +9,7 @@ The only outstanding rule is transitioning pending follow requests to accepted w
 
 | Table | Key Columns | Notes |
 |-------|-------------|-------|
-| `follows` | `follower_id`, `following_id`, `status`, `created_at` | Unidirectional follow relationships (Instagram-style). `status = 'pending'` when the target account is private and has not yet approved the request. |
+| `follows` | `follower_id`, `following_id`, `status`, `created_at`, `accepted_at` | Unidirectional follow relationships have pending status for unapproved private-account requests and record the acceptance time in `accepted_at`, which is null while pending. |
 | `blocks` | `blocker_id`, `blocked_id`, `created_at` | Block relationships. Bidirectional in effect: blocked user cannot follow, message, or see the blocker's content. |
 
 These tables cannot be rebuilt from any other source if lost.
@@ -40,6 +40,7 @@ These tables cannot be rebuilt from any other source if lost.
 | Deleting a user cascades to their follow and block rows | `ON DELETE CASCADE` on all FK references |
 | `follower_count` and `following_count` on `users` are updated atomically with follow state changes | Trigger `trg_follow_counts` fires on INSERT / UPDATE / DELETE of `follows` |
 | Counter increment happens only when `status = 'accepted'`; pending follows do not increment counters | Trigger `fn_follow_counts` logic |
+| `accepted_at` is set when a follow becomes accepted, stays unchanged on same-status updates, and is null while pending | Trigger `trg_follow_accepted_at` calls `fn_follow_accepted_at` |
 
 ### B. Rules Enforced by Application Code
 

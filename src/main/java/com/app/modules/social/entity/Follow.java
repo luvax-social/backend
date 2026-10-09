@@ -8,6 +8,9 @@ import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
+
 import com.app.modules.social.converter.FollowStatusConverter;
 import com.app.modules.social.enums.FollowStatus;
 
@@ -41,4 +44,9 @@ public class Follow {
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    /** Set by trg_follow_accepted_at on acceptance; null while pending. */
+    @Column(name = "accepted_at", insertable = false, updatable = false)
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    private OffsetDateTime acceptedAt;
 }
