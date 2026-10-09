@@ -316,10 +316,7 @@ public class MessageServiceImpl implements MessageService {
                 participantRepository
                         .findByIdConversationIdOrderByJoinedAtAsc(conversation.getId())
                         .stream()
-                        .filter(
-                                p ->
-                                        p.getLeftAt() == null
-                                                && !p.getId().getUserId().equals(actorId))
+                        .filter(p -> !p.getId().getUserId().equals(actorId))
                         .map(p -> p.getId().getUserId())
                         .findFirst()
                         .orElse(null);
