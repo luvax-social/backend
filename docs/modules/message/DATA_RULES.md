@@ -59,7 +59,7 @@ These tables cannot be rebuilt from any other source if lost.
 | `last_read_at` on `conversation_participants` is updated when the user reads the conversation | `MessageServiceImpl.markRead` |
 | A message of type `'post_share'` must have `shared_post_id` set; `'story_share'` must have `shared_story_id` set | `MessageServiceImpl.sendMessage` payload validation |
 | A message of type `'image'` or `'video'` must have `media_asset_id` set | `MessageServiceImpl.sendMessage` payload validation |
-| `user_settings.allow_message_requests` governs whether non-followers can initiate a conversation | `ConversationServiceImpl.assertMessageRequestAllowed`, called from `createDirectConversation` |
+| `user_settings.message_permission` governs who can initiate a conversation: `everyone` accepts anyone, while `following` and `nobody` accept only users the target already follows (`nobody` is not yet stricter than `following`) | `ConversationServiceImpl.assertMessageRequestAllowed`, called from `createDirectConversation` |
 | A live WebSocket SUBSCRIBE to a conversation's topic is rejected unless the subscriber is an active participant | `MessageWebSocketAuthInterceptor` |
 
 **`sender_id` cascade behavior** `[FIXED - V32]`:

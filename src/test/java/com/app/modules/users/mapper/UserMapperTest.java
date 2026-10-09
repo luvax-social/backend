@@ -13,6 +13,7 @@ import com.app.modules.users.dto.response.UserProfileResponse;
 import com.app.modules.users.dto.response.UserSettingsResponse;
 import com.app.modules.users.entity.User;
 import com.app.modules.users.entity.UserSettings;
+import com.app.modules.users.enums.MessagePermission;
 import com.app.modules.users.enums.UserRole;
 import com.app.modules.users.enums.UserStatus;
 
@@ -117,7 +118,7 @@ class UserMapperTest {
     }
 
     @Test
-    void toSettingsResponse_mapsAllBooleanFieldsAndUpdatedAt() {
+    void toSettingsResponse_mapsAllFieldsAndUpdatedAt() {
         UUID userId = UUID.randomUUID();
         OffsetDateTime now = OffsetDateTime.now();
         UserSettings settings =
@@ -130,7 +131,7 @@ class UserMapperTest {
                         .notifyMessages(false)
                         .showActivityStatus(true)
                         .allowStoryReplies(false)
-                        .allowMessageRequests(true)
+                        .messagePermission(MessagePermission.NOBODY)
                         .updatedAt(now)
                         .build();
 
@@ -143,7 +144,7 @@ class UserMapperTest {
         assertThat(response.notifyMessages()).isFalse();
         assertThat(response.showActivityStatus()).isTrue();
         assertThat(response.allowStoryReplies()).isFalse();
-        assertThat(response.allowMessageRequests()).isTrue();
+        assertThat(response.messagePermission()).isEqualTo(MessagePermission.NOBODY);
         assertThat(response.updatedAt()).isEqualTo(now);
     }
 }

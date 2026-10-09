@@ -50,6 +50,7 @@ import com.app.modules.message.repository.MessageUserSettingsRepository;
 import com.app.modules.social.service.SocialService;
 import com.app.modules.users.entity.User;
 import com.app.modules.users.entity.UserSettings;
+import com.app.modules.users.enums.MessagePermission;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceImplTest {
@@ -207,6 +208,28 @@ class ConversationServiceImplTest {
                 .thenReturn(Optional.of(user(targetId)));
         when(userSettingsRepository.findById(targetId))
                 .thenReturn(Optional.of(settingsWithRequestsDisabled(targetId)));
+        when(socialService.hasAcceptedFollow(targetId, actorId)).thenReturn(false);
+
+        assertThatThrownBy(
+                        () ->
+                                service.createDirectConversation(
+                                        actorId, new CreateDirectConversationRequest(targetId)))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.MESSAGE_REQUEST_NOT_ALLOWED);
+        verify(conversationRepository, never()).findDirectConversationBetween(any(), any());
+    }
+
+    @Test
+    void
+            createDirectConversation_permissionNobodyAndNotFollowedBack_throwsMessageRequestNotAllowed() {
+        UUID actorId = UUID.randomUUID();
+        UUID targetId = UUID.randomUUID();
+        when(userRepository.findByIdAndDeletedAtIsNull(targetId))
+                .thenReturn(Optional.of(user(targetId)));
+        when(userSettingsRepository.findById(targetId))
+                .thenReturn(
+                        Optional.of(settingsWithPermission(targetId, MessagePermission.NOBODY)));
         when(socialService.hasAcceptedFollow(targetId, actorId)).thenReturn(false);
 
         assertThatThrownBy(
@@ -673,7 +696,11 @@ class ConversationServiceImplTest {
     }
 
     private static UserSettings settingsWithRequestsDisabled(UUID userId) {
-        return UserSettings.builder().userId(userId).allowMessageRequests(false).build();
+        return settingsWithPermission(userId, MessagePermission.FOLLOWING);
+    }
+
+    private static UserSettings settingsWithPermission(UUID userId, MessagePermission permission) {
+        return UserSettings.builder().userId(userId).messagePermission(permission).build();
     }
 
     private static ConversationParticipant participant(

@@ -51,7 +51,7 @@ import com.app.modules.message.repository.MessageUserSettingsRepository;
 import com.app.modules.message.service.ConversationService;
 import com.app.modules.social.service.SocialService;
 import com.app.modules.users.entity.User;
-import com.app.modules.users.entity.UserSettings;
+import com.app.modules.users.enums.MessagePermission;
 
 @Service
 public class ConversationServiceImpl implements ConversationService {
@@ -341,14 +341,18 @@ public class ConversationServiceImpl implements ConversationService {
     }
 
     /**
-     * A target with {@code allowMessageRequests=false} only accepts new conversations from users
-     * they already follow back; this is the "non-follower" gate the setting is meant to enforce.
+     * A target that is not set to {@code EVERYONE} only accepts new conversations from users they
+     * already follow back; this is the "non-follower" gate the setting is meant to enforce.
      */
     private void assertMessageRequestAllowed(UUID actorId, UUID targetId) {
+        // NOBODY is treated like FOLLOWING until a dedicated message policy replaces this method.
         boolean allowRequests =
                 userSettingsRepository
                         .findById(targetId)
-                        .map(UserSettings::isAllowMessageRequests)
+                        .map(
+                                settings ->
+                                        settings.getMessagePermission()
+                                                == MessagePermission.EVERYONE)
                         .orElse(true);
         if (!allowRequests && !socialService.hasAcceptedFollow(targetId, actorId)) {
             throw new AppException(ApiErrorCode.MESSAGE_REQUEST_NOT_ALLOWED);

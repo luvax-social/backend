@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- The `allowMessageRequests` setting is replaced by `messagePermission` (`everyone`, `following` or `nobody`) on `GET` and `PUT /users/me/settings`; existing accounts keep their behaviour (`true` becomes `everyone`, `false` becomes `following`), and a request that still sends `allowMessageRequests` is rejected.
 - Accepted follows now record when they became accepted, so approving an older request keeps its original creation time and records the approval time separately.
 - Retry backoff lookup widens the attempt number before subtracting, so an out-of-range attempt count clamps to the nearest backoff instead of wrapping around.
 - The repository owner is now the only code owner, so opening a pull request no longer requests a review from anyone else, and the git workflow rules let the owner push directly to `main` without a pull request.

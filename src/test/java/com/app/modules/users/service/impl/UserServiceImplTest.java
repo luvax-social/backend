@@ -28,6 +28,7 @@ import com.app.modules.users.dto.response.UserProfileResponse;
 import com.app.modules.users.dto.response.UserSettingsResponse;
 import com.app.modules.users.entity.User;
 import com.app.modules.users.entity.UserSettings;
+import com.app.modules.users.enums.MessagePermission;
 import com.app.modules.users.mapper.UserMapper;
 import com.app.modules.users.repository.UserRepository;
 import com.app.modules.users.repository.UserSettingsRepository;
@@ -386,7 +387,15 @@ class UserServiceImplTest {
         service.updateMySettings(
                 id,
                 new UpdateSettingsRequest(
-                        false, false, false, false, false, false, false, false, false));
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        MessagePermission.NOBODY,
+                        false));
 
         assertThat(settings.isNotifyLikes()).isFalse();
         assertThat(settings.isNotifyComments()).isFalse();
@@ -395,7 +404,7 @@ class UserServiceImplTest {
         assertThat(settings.isNotifyMessages()).isFalse();
         assertThat(settings.isShowActivityStatus()).isFalse();
         assertThat(settings.isAllowStoryReplies()).isFalse();
-        assertThat(settings.isAllowMessageRequests()).isFalse();
+        assertThat(settings.getMessagePermission()).isEqualTo(MessagePermission.NOBODY);
         verify(settingsRepository).save(settings);
     }
 
@@ -412,6 +421,7 @@ class UserServiceImplTest {
 
         assertThat(settings.isNotifyLikes()).isTrue();
         assertThat(settings.isNotifyComments()).isTrue();
+        assertThat(settings.getMessagePermission()).isEqualTo(MessagePermission.FOLLOWING);
         verify(settingsRepository).save(settings);
     }
 
@@ -447,7 +457,7 @@ class UserServiceImplTest {
                 .notifyMessages(true)
                 .showActivityStatus(true)
                 .allowStoryReplies(true)
-                .allowMessageRequests(true)
+                .messagePermission(MessagePermission.FOLLOWING)
                 .build();
     }
 
@@ -491,6 +501,7 @@ class UserServiceImplTest {
     }
 
     private static UserSettingsResponse settingsResponse() {
-        return new UserSettingsResponse(true, true, true, true, true, true, true, true, true, null);
+        return new UserSettingsResponse(
+                true, true, true, true, true, true, true, MessagePermission.EVERYONE, true, null);
     }
 }

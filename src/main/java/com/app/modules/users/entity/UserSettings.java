@@ -4,11 +4,15 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import org.hibernate.annotations.UpdateTimestamp;
+
+import com.app.modules.users.converter.MessagePermissionConverter;
+import com.app.modules.users.enums.MessagePermission;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -68,9 +72,10 @@ public class UserSettings {
     @Builder.Default
     private boolean suggestible = true;
 
-    @Column(name = "allow_message_requests", nullable = false)
+    @Convert(converter = MessagePermissionConverter.class)
+    @Column(name = "message_permission", nullable = false, columnDefinition = "message_permission")
     @Builder.Default
-    private boolean allowMessageRequests = true;
+    private MessagePermission messagePermission = MessagePermission.EVERYONE;
 
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
