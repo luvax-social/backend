@@ -295,7 +295,13 @@ class CommentServiceImplTest {
     void createComment_depthExceeded_throwsDepthExceeded() {
         UUID parentId = UUID.randomUUID();
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
-        Comment parent = Comment.builder().id(parentId).postId(postId).depth((short) 10).build();
+        Comment parent =
+                Comment.builder()
+                        .id(parentId)
+                        .postId(postId)
+                        .depth((short) 10)
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(parentId))
                 .thenReturn(Optional.of(parent));
         assertThatThrownBy(() -> service.createComment(actorId, createRequest(parentId), null))
@@ -438,7 +444,12 @@ class CommentServiceImplTest {
     @Test
     void editComment_notOwner_throwsForbidden() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         assertThatThrownBy(
@@ -452,7 +463,13 @@ class CommentServiceImplTest {
 
     @Test
     void editComment_success_enqueuesEditedEvent() {
-        Comment comment = Comment.builder().id(commentId).postId(postId).userId(actorId).build();
+        Comment comment =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(actorId)
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -475,7 +492,13 @@ class CommentServiceImplTest {
 
     @Test
     void editComment_stampsEditedAtBeforeSaving() {
-        Comment comment = Comment.builder().id(commentId).postId(postId).userId(actorId).build();
+        Comment comment =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(actorId)
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -578,6 +601,7 @@ class CommentServiceImplTest {
                                         .postId(postId)
                                         .userId(parentAuthorId)
                                         .depth((short) 0)
+                                        .moderationStatus("approved")
                                         .build()));
         when(moderationService.check(any())).thenReturn(ModerationResult.approved());
         when(interactionPolicy.evaluate(
@@ -913,7 +937,12 @@ class CommentServiceImplTest {
     @Test
     void likeComment_doesNotStampEditedAt() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -928,7 +957,13 @@ class CommentServiceImplTest {
 
     @Test
     void deleteComment_doesNotStampEditedAt() {
-        Comment comment = Comment.builder().id(commentId).postId(postId).userId(actorId).build();
+        Comment comment =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(actorId)
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
 
@@ -940,7 +975,12 @@ class CommentServiceImplTest {
     @Test
     void deleteComment_notOwner_throwsForbidden() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         assertThatThrownBy(() -> service.deleteComment(actorId, commentId))
@@ -951,7 +991,13 @@ class CommentServiceImplTest {
 
     @Test
     void deleteComment_success_callsSoftDeleteSubtree() {
-        Comment comment = Comment.builder().id(commentId).postId(postId).userId(actorId).build();
+        Comment comment =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(actorId)
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
 
@@ -970,7 +1016,13 @@ class CommentServiceImplTest {
 
     @Test
     void deleteComment_success_returnsAndPublishesTheAffectedRowCount() {
-        Comment comment = Comment.builder().id(commentId).postId(postId).userId(actorId).build();
+        Comment comment =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(actorId)
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(commentRepository.softDeleteSubtree(eq(commentId), any())).thenReturn(11);
@@ -992,7 +1044,13 @@ class CommentServiceImplTest {
 
     @Test
     void getDeletionScope_owner_returnsTheSubtreeCount() {
-        Comment comment = Comment.builder().id(commentId).postId(postId).userId(actorId).build();
+        Comment comment =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(actorId)
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(commentRepository.countSubtree(commentId)).thenReturn(11);
@@ -1004,7 +1062,12 @@ class CommentServiceImplTest {
     @Test
     void getDeletionScope_notOwner_throwsNotFoundRatherThanForbidden() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
 
@@ -1024,7 +1087,12 @@ class CommentServiceImplTest {
                         new UsernamePasswordAuthenticationToken(
                                 admin, null, admin.getAuthorities()));
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(commentRepository.countSubtree(commentId)).thenReturn(4);
@@ -1051,7 +1119,12 @@ class CommentServiceImplTest {
                         new UsernamePasswordAuthenticationToken(
                                 admin, null, admin.getAuthorities()));
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
 
@@ -1062,7 +1135,13 @@ class CommentServiceImplTest {
 
     @Test
     void likeComment_ownComment_persistsAndEnqueues() {
-        Comment comment = Comment.builder().id(commentId).postId(postId).userId(actorId).build();
+        Comment comment =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(actorId)
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -1086,7 +1165,12 @@ class CommentServiceImplTest {
     @Test
     void likeComment_postNotVisible_throwsForbidden() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -1103,7 +1187,12 @@ class CommentServiceImplTest {
     @Test
     void likeComment_alreadyLiked_throwsConflict() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -1119,7 +1208,12 @@ class CommentServiceImplTest {
     @Test
     void likeComment_success_persistsAndEnqueues() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -1143,7 +1237,12 @@ class CommentServiceImplTest {
     @Test
     void likeComment_concurrentDuplicateInsert_throwsAlreadyLiked() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -1163,7 +1262,12 @@ class CommentServiceImplTest {
     @Test
     void unlikeComment_notLiked_throwsConflict() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -1178,7 +1282,12 @@ class CommentServiceImplTest {
     @Test
     void unlikeComment_postNotVisible_throwsForbidden() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
@@ -1195,7 +1304,12 @@ class CommentServiceImplTest {
     @Test
     void unlikeComment_success_enqueues() {
         Comment comment =
-                Comment.builder().id(commentId).postId(postId).userId(UUID.randomUUID()).build();
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("approved")
+                        .build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
         when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));

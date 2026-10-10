@@ -96,6 +96,13 @@ V143 refuses to run while any existing row is not `approved`, with a message nam
 | The post owner's own comments are always allowed, because the policy answers `SELF` for an actor acting on themselves | `InteractionPolicyServiceImpl` |
 | A Hidden Words entry or an interaction limit decides only comments written after it is in force; adding a word or turning on a limit leaves existing comments approved, and removing a word or turning a limit off leaves a hidden comment hidden | `HiddenWordsNotRetroactiveIT`, `LimitNotRetroactiveIT` |
 | The viewer's per-row like state is batch-resolved, never per row | `CommentViewerStateServiceImpl` |
+| A hidden comment is visible to its author only; every by-id path answers anyone else with `COMMENT_NOT_FOUND`, exactly as for a comment that does not exist: like, unlike, the replies list, the context chain, a reply naming it as `parentId`, an edit and a delete | `CommentServiceImpl.findVisibleToActor`, `isConcealedFrom` and `isListable` |
+| An admin may still delete a hidden comment, and the owner of a hidden comment may edit, delete and like it | `CommentServiceImpl.deleteComment` |
+| The author of a hidden comment may reply to it, and the reply goes through the interaction policy like any comment; the reply is saved hidden with the parent's `hidden_reason`, so a visible reply never carries a hidden parent's id into counters, lists or live frames | `CommentServiceImpl.doCreateComment` |
+| `comment.liked.v1` carries `visibility` like the created and edited events, so the live consumer can skip a hidden comment's likes | `CommentServiceImpl.likeComment`, `unlikeComment` |
+| The delete event carries both the full subtree count and `visibleDeletedCount`, the approved comments with neither tombstone that the delete removes, counted before the soft delete in the same transaction | `CommentServiceImpl.deleteComment`, `CommentRepository.countVisibleSubtree` |
+| The HTTP response to the deleter keeps the full count, because it is their own action | `CommentDeletionScopeResponse` through `CommentServiceImpl.deleteComment` |
+| The edited event carries `previousVisibility` and `rootId`, so a live removal frame can say whether viewers held the comment | `CommentServiceImpl.editComment` |
 
 Notifications are delivered asynchronously through the transactional outbox, not written inline.
 `CommentServiceImpl` enqueues a `DomainEventEnvelope` in the same transaction as the comment write; `CommentNotificationConsumer` creates the notification rows after the broker delivers the event.
@@ -108,6 +115,9 @@ The cursor is the opaque base64url encoding of that tuple and carries no other f
 
 | Rule | Enforced By |
 |------|-------------|
+| A reply or top-level list shows an approved comment to everyone and a hidden comment to its author only, by the predicate `moderation_status = 'approved' OR (moderation_status = 'hidden' AND user_id = :viewerId)`; a null viewer matches no author and sees approved comments only, and nothing marks the author's own hidden row | `CommentRepository.findFirstTopLevelExcluding`, `findTopLevelBefore`, `findFirstReplies`, `findRepliesBefore` |
+| The first-page top-level query still seeks `idx_comments_post_root_id` (V36) with the `OR` predicate, pinned by an `EXPLAIN` assertion | `CommentKeysetRowLossIT.firstTopLevelPage_withTheViewerOrPredicate_stillUsesTheKeysetIndex` |
+| A hidden comment is never pinned, not even for its author | `findTopLikedTopLevel` keeps `moderation_status = 'approved'` |
 | Replies are ordered newest-first by `(created_at, id)` on every page, with no pinned block | `CommentRepository.findFirstReplies`, `findRepliesBefore` |
 | Top-level comments are ordered newest-first by `(created_at, id)` on every page | `CommentRepository.findFirstTopLevelExcluding`, `findTopLevelBefore` |
 | The **first page only** of a post's top-level comments is preceded by up to three pinned comments, ordered by `(like_count, created_at, id)` descending, in the default `top` sort mode | `CommentRepository.findTopLikedTopLevel`, capped by `CommentServiceImpl.PINNED_COMMENT_COUNT` |
@@ -125,6 +135,22 @@ The cursor is the opaque base64url encoding of that tuple and carries no other f
 It is mutable, so a keyset over it would let rows cross a page boundary between requests and be lost or repeated.
 Pinning a fixed-size block to the first page is what keeps the ranking visible without putting a mutable column in the sort key of the paginated stream.
 The two sort modes therefore differ only in whether that block is computed, never in the ordering of the stream itself.
+
+### C2. Hidden Comments on Live, Notification and Report Paths
+
+A hidden comment is shown to its author only, and the author must not be able to tell it is hidden.
+Nobody else may learn that it exists, so every delivery path that carries a comment checks its visibility.
+
+| Rule | Enforced By |
+|------|-------------|
+| A hidden comment produces no `comment_post`, `reply_comment` or `mention_comment` notification, and no `like_comment` notification, for any recipient | `CommentNotificationConsumer.dispatch` returns early for `visibility = hidden` on the created and liked events |
+| A hidden comment produces no live frame: its created and liked events are skipped | `CommentLiveFanoutConsumer.frameFor` |
+| An edit that leaves a comment hidden is sent to viewers as a removal in the shape of a `comment.deleted.v1` frame for that one comment, never as the edit, and never with the text | `CommentLiveFanoutConsumer.frameFor` |
+| That removal carries `deletedCommentCount` 1 when the comment counted as visible before the edit and 0 when it was already hidden, read from `previousVisibility` | `CommentLiveFanoutConsumer.frameFor` |
+| The removal frame is not delivered to the author's own sessions, because the author's view of their comment must not change | The author is added to the dropped-viewer set that `CommentLiveBlockFilterInterceptor` already applies per session |
+| The live delete frame forwards `visibleDeletedCount` as its `deletedCommentCount` and carries no other count, so viewers cannot learn how many hidden comments a delete removed; an event without the field reports 0 | `CommentLiveFanoutConsumer.frameFor` |
+| The post owner may report a hidden comment, and the author's attempt is refused with `REPORT_SELF_NOT_ALLOWED` as for a visible comment; anyone else is answered `REPORT_TARGET_NOT_FOUND` | `ReportTargetRepositoryImpl.findOwnerId`, see the report module's data rules |
+| `posts.comment_count` and `reply_count` come from triggers that ignore hidden rows, so an author sees a count one lower than the comments they can read; this is accepted and is never patched on the client | Triggers `fn_post_comment_count` and `fn_comment_reply_count` (V143) |
 
 ### D. Scope Simplifications
 
@@ -153,6 +179,9 @@ The two sort modes therefore differ only in whether that block is computed, neve
 - Top comments are pinned to the first page only, rather than the whole list being ranked by like count.
   A full ranking would put a mutable column in the keyset sort key, which is the defect class the `(created_at, id)` cursor exists to prevent.
   The accepted degradation is that a highly-liked comment is not surfaced anywhere on page two onward.
+- A live frame that removes a hidden comment (a delete, or an edit that leaves it hidden) still names the comment id, with a count of zero when no viewer held it.
+  The topic is shared by every subscriber, so the frame cannot be limited to the author without a per-session audience filter.
+  The id is opaque and the frame carries no text, author or position, which is the disclosure accepted in exchange for the author's other sessions learning of the delete.
 
 ---
 
@@ -166,5 +195,5 @@ The two sort modes therefore differ only in whether that block is computed, neve
 | `social` | inbound | `CommentServiceImpl` asks `InteractionPolicyService` before it persists a comment, an edit or a mention, and stores the hidden state the answer calls for |
 | `notification` | outbound | `comment.created.v1`, `comment.liked.v1` and `comment.unliked.v1` drive `comment_post`, `reply_comment`, `mention_comment` and `like_comment` notifications; a mention of the person the comment already notifies is dropped, and an unlike retracts the liker from the group |
 | `notification` | inbound | `CommentPreviewService` gives the notification feed viewer-specific comment and parent snippets, withholding text for tombstones, blocks in either direction, and unapproved comments except to their authors; `GET /api/v1/comments/{commentId}/context` returns a comment with every ancestor so a notification can open a reply wherever it sits. |
-| `report` | inbound | Reports can target a comment via polymorphic `entity_id` |
+| `report` | inbound | Reports can target a comment via polymorphic `entity_id`; a hidden comment can be reported by the owner of its post only, and its author is refused as for a visible comment |
 | `admin` | inbound | Moderator remove and restore actions target comments and write an `admin_actions` audit row |

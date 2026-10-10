@@ -82,7 +82,6 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
 
     /**
      * Most-liked approved top-level comments for a post, for the pinned first-page block, excluding
-     * any commenter in a block relationship with the viewer.
      *
      * <p>Only comments with at least one like are eligible: a zero-like comment carries no
      * popularity signal, and without the threshold every post with no likes would pin its three
@@ -111,8 +110,13 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             @Param("postId") UUID postId, @Param("viewerId") UUID viewerId, Pageable pageable);
 
     /**
-     * First keyset page of approved top-level comments, excluding the already-pinned comments and
-     * any commenter in a block relationship with the viewer.
+     * First keyset page of top-level comments the viewer may see, excluding the already-pinned
+     * comments and any commenter in a block relationship with the viewer.
+     *
+     * <p>An approved comment is listed to everyone. A hidden comment is listed to its own author
+     * only, with nothing marking it, so the author cannot tell it is hidden; the viewer id decides
+     * this inside the statement so no caller can forget the filter. A null viewer matches no author
+     * and therefore sees approved comments only.
      *
      * <p>The pinned exclusion is applied in SQL rather than in the caller so that {@code LIMIT}
      * counts post-filter rows and the body still yields a full page. Excluding in Java would
@@ -123,12 +127,14 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
      * @param viewerId the requesting viewer; commenters in a block relationship with this user are
      *     excluded
      * @param pageable page size carrier
-     * @return top-level approved comments ordered by the {@code (created_at, id)} tuple descending
+     * @return top-level comments visible to the viewer ordered by the {@code (created_at, id)}
+     *     tuple descending
      */
     @Query(
             value =
                     "SELECT * FROM comments WHERE post_id = :postId AND parent_id IS NULL "
-                            + "AND moderation_status = 'approved' AND deleted_at IS NULL "
+                            + "AND (moderation_status = 'approved' OR (moderation_status = 'hidden'"
+                            + " AND user_id = :viewerId)) AND deleted_at IS NULL "
                             + "AND admin_removed_at IS NULL "
                             + "AND id <> ALL(CAST(:excludedIds AS uuid[])) "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
@@ -143,8 +149,9 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             Pageable pageable);
 
     /**
-     * Keyset page of approved top-level comments strictly after the cursor tuple, newest first,
-     * excluding the pinned comments and any commenter in a block relationship with the viewer.
+     * Keyset page of top-level comments the viewer may see, strictly after the cursor tuple, newest
+     * first, excluding the pinned comments and any commenter in a block relationship with the
+     * viewer.
      *
      * <p>The {@code (created_at, id)} row-value comparison seeks directly to the cursor position
      * and never drops comments sharing a boundary {@code created_at}. Served exactly by {@code
@@ -162,12 +169,14 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
      * @param cursorTime {@code created_at} of the cursor row; never null
      * @param cursorId id of the cursor row, breaking ties on equal {@code created_at}; never null
      * @param pageable page size carrier
-     * @return top-level approved comments ordered by the {@code (created_at, id)} tuple descending
+     * @return top-level comments visible to the viewer ordered by the {@code (created_at, id)}
+     *     tuple descending
      */
     @Query(
             value =
                     "SELECT * FROM comments WHERE post_id = :postId AND parent_id IS NULL "
-                            + "AND moderation_status = 'approved' AND deleted_at IS NULL "
+                            + "AND (moderation_status = 'approved' OR (moderation_status = 'hidden'"
+                            + " AND user_id = :viewerId)) AND deleted_at IS NULL "
                             + "AND admin_removed_at IS NULL "
                             + "AND id <> ALL(CAST(:excludedIds AS uuid[])) "
                             + "AND (created_at, id) < (:cursorTime, :cursorId) "
@@ -185,19 +194,24 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             Pageable pageable);
 
     /**
-     * First keyset page of approved direct replies to a parent comment, newest first, excluding any
-     * commenter in a block relationship with the viewer.
+     * First keyset page of direct replies the viewer may see, newest first, excluding any commenter
+     * in a block relationship with the viewer.
+     *
+     * <p>A hidden reply is listed to its own author only, by the same rule as {@link
+     * #findFirstTopLevelExcluding}.
      *
      * @param parentId parent comment whose direct replies are listed
      * @param viewerId the requesting viewer; commenters in a block relationship with this user are
      *     excluded
      * @param pageable page size carrier
-     * @return approved direct replies ordered by the {@code (created_at, id)} tuple descending
+     * @return direct replies visible to the viewer ordered by the {@code (created_at, id)} tuple
+     *     descending
      */
     @Query(
             value =
                     "SELECT * FROM comments WHERE parent_id = :parentId "
-                            + "AND moderation_status = 'approved' AND deleted_at IS NULL "
+                            + "AND (moderation_status = 'approved' OR (moderation_status = 'hidden'"
+                            + " AND user_id = :viewerId)) AND deleted_at IS NULL "
                             + "AND admin_removed_at IS NULL "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
                             + " WHERE (b.blocker_id = :viewerId AND b.blocked_id = comments.user_id)"
@@ -208,8 +222,8 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             @Param("parentId") UUID parentId, @Param("viewerId") UUID viewerId, Pageable pageable);
 
     /**
-     * Keyset page of approved direct replies strictly after the cursor tuple, newest first,
-     * excluding any commenter in a block relationship with the viewer.
+     * Keyset page of direct replies the viewer may see, strictly after the cursor tuple, newest
+     * first, excluding any commenter in a block relationship with the viewer.
      *
      * <p>The {@code (created_at, id)} row-value comparison seeks directly to the cursor position
      * and never drops replies sharing a boundary {@code created_at}. Served exactly by {@code
@@ -221,12 +235,14 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
      * @param cursorTime {@code created_at} of the cursor row; never null
      * @param cursorId id of the cursor row, breaking ties on equal {@code created_at}; never null
      * @param pageable page size carrier
-     * @return approved direct replies ordered by the {@code (created_at, id)} tuple descending
+     * @return direct replies visible to the viewer ordered by the {@code (created_at, id)} tuple
+     *     descending
      */
     @Query(
             value =
                     "SELECT * FROM comments WHERE parent_id = :parentId "
-                            + "AND moderation_status = 'approved' AND deleted_at IS NULL "
+                            + "AND (moderation_status = 'approved' OR (moderation_status = 'hidden'"
+                            + " AND user_id = :viewerId)) AND deleted_at IS NULL "
                             + "AND admin_removed_at IS NULL "
                             + "AND (created_at, id) < (:cursorTime, :cursorId) "
                             + "AND NOT EXISTS (SELECT 1 FROM blocks b"
@@ -336,4 +352,46 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
 					""",
             nativeQuery = true)
     int countSubtree(@Param("commentId") UUID commentId);
+
+    /**
+     * Counts the comments in the target's subtree that a live viewer can have on screen: approved,
+     * and carrying neither tombstone.
+     *
+     * <p>This is {@link #countSubtree} narrowed to the rows the counters and the lists show to
+     * everyone, so the live delete frame can tell viewers how many comments to drop without
+     * revealing how many hidden ones the delete also removed. It must run before {@link
+     * #softDeleteSubtree} in the same transaction, because the soft delete changes the rows it
+     * reads. The walk is bounded to the target's own thread exactly as {@link #countSubtree} is.
+     *
+     * @param commentId root of the subtree to measure
+     * @return number of approved, non-tombstoned comments in that subtree; zero when the comment
+     *     does not exist
+     */
+    @Query(
+            value =
+                    """
+					WITH RECURSIVE anchor AS (
+						SELECT id, coalesce(root_id, id) AS thread_id
+						FROM comments WHERE id = :commentId
+					),
+					thread AS (
+						SELECT c.id, c.parent_id, c.deleted_at, c.admin_removed_at, c.moderation_status
+						FROM comments c JOIN anchor a ON c.id = a.thread_id
+						UNION ALL
+						SELECT c.id, c.parent_id, c.deleted_at, c.admin_removed_at, c.moderation_status
+						FROM comments c JOIN anchor a ON c.root_id = a.thread_id
+					),
+					subtree AS (
+						SELECT t.id, t.deleted_at, t.admin_removed_at, t.moderation_status
+						FROM thread t JOIN anchor a ON t.id = a.id
+						UNION ALL
+						SELECT t.id, t.deleted_at, t.admin_removed_at, t.moderation_status
+						FROM thread t JOIN subtree s ON t.parent_id = s.id
+					)
+					SELECT count(*) FROM subtree
+					WHERE deleted_at IS NULL AND admin_removed_at IS NULL
+						AND moderation_status = 'approved'
+					""",
+            nativeQuery = true)
+    int countVisibleSubtree(@Param("commentId") UUID commentId);
 }

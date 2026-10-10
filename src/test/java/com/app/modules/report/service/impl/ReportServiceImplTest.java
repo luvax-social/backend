@@ -79,7 +79,7 @@ class ReportServiceImplTest {
                         "Repeated advertisements",
                         TURNSTILE_TOKEN);
         ReportResponse expected = response(ReportStatus.PENDING);
-        when(reportRepository.findOwnerId(ReportType.POST, entityId))
+        when(reportRepository.findOwnerId(ReportType.POST, entityId, reporterId))
                 .thenReturn(Optional.of(ownerId));
         when(reportRepository.saveAndFlush(any(Report.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -97,12 +97,14 @@ class ReportServiceImplTest {
     @Test
     void submitReport_missingTarget_throwsTargetNotFound() {
         UUID entityId = UUID.randomUUID();
-        when(reportRepository.findOwnerId(ReportType.USER, entityId)).thenReturn(Optional.empty());
+        UUID reporterId = UUID.randomUUID();
+        when(reportRepository.findOwnerId(ReportType.USER, entityId, reporterId))
+                .thenReturn(Optional.empty());
 
         assertThatThrownBy(
                         () ->
                                 service.submitReport(
-                                        UUID.randomUUID(),
+                                        reporterId,
                                         new CreateReportRequest(
                                                 ReportType.USER,
                                                 ReportReason.HARASSMENT,
@@ -120,7 +122,7 @@ class ReportServiceImplTest {
     void submitReport_selfOwnedTarget_throwsSelfNotAllowed() {
         UUID reporterId = UUID.randomUUID();
         UUID entityId = UUID.randomUUID();
-        when(reportRepository.findOwnerId(ReportType.POST, entityId))
+        when(reportRepository.findOwnerId(ReportType.POST, entityId, reporterId))
                 .thenReturn(Optional.of(reporterId));
 
         assertThatThrownBy(
@@ -143,7 +145,7 @@ class ReportServiceImplTest {
     void submitReport_duplicateTarget_throwsConflict() {
         UUID reporterId = UUID.randomUUID();
         UUID entityId = UUID.randomUUID();
-        when(reportRepository.findOwnerId(ReportType.COMMENT, entityId))
+        when(reportRepository.findOwnerId(ReportType.COMMENT, entityId, reporterId))
                 .thenReturn(Optional.of(UUID.randomUUID()));
         var activeStatuses =
                 List.of(ReportStatus.PENDING, ReportStatus.REVIEWING, ReportStatus.ESCALATED);

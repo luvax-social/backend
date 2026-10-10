@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 
 import com.app.common.messaging.DomainEventMessageParser;
 import com.app.common.outbox.model.DomainEventEnvelope;
+import com.app.modules.comment.messaging.CommentEventTypes;
 import com.app.modules.comment.observability.CommentMetrics;
 import com.app.modules.social.repository.BlockRepository;
 
@@ -42,6 +43,7 @@ import io.micrometer.core.instrument.Timer;
 public class CommentLiveFanoutConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(CommentLiveFanoutConsumer.class);
+    private static final String VISIBILITY_HIDDEN = "hidden";
 
     private final DomainEventMessageParser parser;
     private final SimpMessagingTemplate messagingTemplate;
@@ -74,9 +76,13 @@ public class CommentLiveFanoutConsumer {
                 return;
             }
             MDC.put("postId", postId.toString());
+            LiveFrame frame = frameFor(event);
+            if (frame == null) {
+                return;
+            }
             Map<String, Object> payload = new HashMap<>();
-            payload.put("eventType", event.eventType());
-            payload.put("data", event.data());
+            payload.put("eventType", frame.eventType());
+            payload.put("data", frame.data());
             // A plain Map passed as convertAndSend's headers argument is treated as intended for
             // the outgoing STOMP frame and stringified into nativeHeaders. Building the
             // MessageHeaders via SimpMessageHeaderAccessor.setHeader instead keeps the Set<UUID>
@@ -85,7 +91,7 @@ public class CommentLiveFanoutConsumer {
                     SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
             accessor.setHeader(
                     CommentLiveBlockFilterInterceptor.BLOCKED_COUNTERPARTIES_HEADER,
-                    resolveBlockedCounterparties(event));
+                    resolveDroppedViewers(event, frame));
             accessor.setLeaveMutable(true);
             messagingTemplate.convertAndSend(
                     "/topic/comments." + UUID.fromString(postId.toString()) + ".events",
@@ -102,12 +108,60 @@ public class CommentLiveFanoutConsumer {
         }
     }
 
-    private Set<UUID> resolveBlockedCounterparties(DomainEventEnvelope event) {
+    // A hidden comment belongs to its author alone, so this decides what viewers are told about it.
+    // Returns null when no frame may be sent at all.
+    private static LiveFrame frameFor(DomainEventEnvelope event) {
+        Map<String, Object> data = event.data();
+        boolean hidden = VISIBILITY_HIDDEN.equals(data.get("visibility"));
+        switch (event.eventType()) {
+            case CommentEventTypes.COMMENT_DELETED_V1 -> {
+                // The delete event carries the full subtree count for the deleter's own response.
+                // The frame carries the visible count only, so viewers cannot learn how many
+                // hidden comments were removed. An event without the field comes from before it
+                // existed; reporting zero is the choice that cannot leak a hidden count.
+                Map<String, Object> frameData = new HashMap<>(data);
+                Object visibleCount = frameData.remove("visibleDeletedCount");
+                frameData.put("deletedCommentCount", visibleCount == null ? 0 : visibleCount);
+                return new LiveFrame(event.eventType(), frameData, false);
+            }
+            case CommentEventTypes.COMMENT_EDITED_V1 -> {
+                if (!hidden) {
+                    return new LiveFrame(event.eventType(), data, false);
+                }
+                // An edit can newly hide a comment viewers already hold. They get a removal in the
+                // deleted frame's shape for that one comment and never the text; the author is
+                // excluded because their own view must not change. A comment hidden before the
+                // edit was never on a viewer's screen, so it removes nothing.
+                Map<String, Object> removal = new HashMap<>();
+                removal.put("postId", data.get("postId"));
+                removal.put("commentId", data.get("commentId"));
+                removal.put("commentOwnerId", data.get("commentOwnerId"));
+                if (data.get("rootId") != null) {
+                    removal.put("rootId", data.get("rootId"));
+                }
+                removal.put(
+                        "deletedCommentCount",
+                        VISIBILITY_HIDDEN.equals(data.get("previousVisibility")) ? 0 : 1);
+                return new LiveFrame(CommentEventTypes.COMMENT_DELETED_V1, removal, true);
+            }
+            default -> {
+                return hidden ? null : new LiveFrame(event.eventType(), data, false);
+            }
+        }
+    }
+
+    private Set<UUID> resolveDroppedViewers(DomainEventEnvelope event, LiveFrame frame) {
         Object ownerId = event.data().get("commentOwnerId");
         if (ownerId == null) {
             return Set.of();
         }
-        return new HashSet<>(
-                blockRepository.findBlockedCounterpartyIds(UUID.fromString(ownerId.toString())));
+        UUID owner = UUID.fromString(ownerId.toString());
+        Set<UUID> dropped = new HashSet<>(blockRepository.findBlockedCounterpartyIds(owner));
+        if (frame.excludesOwner()) {
+            dropped.add(owner);
+        }
+        return dropped;
     }
+
+    private record LiveFrame(String eventType, Map<String, Object> data, boolean excludesOwner) {}
 }

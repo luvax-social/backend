@@ -142,7 +142,9 @@ class CommentPreviewVisibilityIT {
         assertThat(hidden.parentSnippet()).isNull();
 
         jdbc.update(
-                "UPDATE comments SET moderation_status = 'approved' WHERE id = ?", hiddenParent);
+                "UPDATE comments SET moderation_status = 'approved', hidden_reason = NULL WHERE"
+                        + " id = ?",
+                hiddenParent);
         block(viewer, parentAuthor);
         CommentPreviewResponse blocked =
                 previewService
@@ -186,6 +188,9 @@ class CommentPreviewVisibilityIT {
     }
 
     private void hide(UUID comment) {
-        jdbc.update("UPDATE comments SET moderation_status = 'hidden' WHERE id = ?", comment);
+        jdbc.update(
+                "UPDATE comments SET moderation_status = 'hidden', hidden_reason = 'hidden_words'"
+                        + " WHERE id = ?",
+                comment);
     }
 }
