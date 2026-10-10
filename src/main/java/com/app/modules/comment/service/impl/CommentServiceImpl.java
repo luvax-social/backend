@@ -42,6 +42,7 @@ import com.app.modules.comment.entity.Comment;
 import com.app.modules.comment.entity.CommentLike;
 import com.app.modules.comment.entity.CommentLikeId;
 import com.app.modules.comment.entity.CommentWriteIdempotency;
+import com.app.modules.comment.enums.CommentHiddenReason;
 import com.app.modules.comment.enums.CommentSortOrder;
 import com.app.modules.comment.mapper.CommentMapper;
 import com.app.modules.comment.messaging.CommentEventTypes;
@@ -58,6 +59,11 @@ import com.app.modules.post.entity.Post;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.repository.PostRepository;
 import com.app.modules.post.service.PostVisibilityService;
+import com.app.modules.social.policy.InteractionDecision;
+import com.app.modules.social.policy.InteractionOutcome;
+import com.app.modules.social.policy.InteractionPolicyService;
+import com.app.modules.social.policy.InteractionRequest;
+import com.app.modules.social.policy.InteractionType;
 import com.app.modules.social.repository.BlockRepository;
 import com.app.modules.users.service.UserSummaryService;
 
@@ -74,6 +80,8 @@ public class CommentServiceImpl implements CommentService {
     private static final int MAX_PAGE_SIZE = 100;
     private static final int PINNED_COMMENT_COUNT = 3;
     private static final String AGGREGATE_TYPE = "comment";
+    private static final String STATUS_APPROVED = "approved";
+    private static final String STATUS_HIDDEN = "hidden";
 
     private final CommentRepository commentRepository;
     private final CommentLikeRepository commentLikeRepository;
@@ -92,6 +100,7 @@ public class CommentServiceImpl implements CommentService {
     private final UserSummaryService userSummaryService;
     private final CommentViewerStateService commentViewerStateService;
     private final BlockRepository blockRepository;
+    private final InteractionPolicyService interactionPolicy;
 
     public CommentServiceImpl(
             CommentRepository commentRepository,
@@ -110,7 +119,8 @@ public class CommentServiceImpl implements CommentService {
             PostVisibilityService postVisibilityService,
             UserSummaryService userSummaryService,
             CommentViewerStateService commentViewerStateService,
-            BlockRepository blockRepository) {
+            BlockRepository blockRepository,
+            InteractionPolicyService interactionPolicy) {
         this.commentRepository = commentRepository;
         this.commentLikeRepository = commentLikeRepository;
         this.idempotencyRepository = idempotencyRepository;
@@ -128,6 +138,7 @@ public class CommentServiceImpl implements CommentService {
         this.userSummaryService = userSummaryService;
         this.commentViewerStateService = commentViewerStateService;
         this.blockRepository = blockRepository;
+        this.interactionPolicy = interactionPolicy;
     }
 
     @Override
@@ -186,6 +197,23 @@ public class CommentServiceImpl implements CommentService {
             throw new AppException(ApiErrorCode.COMMENT_MODERATION_REJECTED);
         }
 
+        // After the spam rules so a rejected comment never costs a policy lookup, and before the
+        // idempotency reservation so a refused create leaves no key behind. A replay inside the
+        // key's lifetime returns the cached response whatever the lists have become since.
+        InteractionDecision decision =
+                interactionPolicy.evaluate(
+                        new InteractionRequest(
+                                actorId,
+                                post.getUserId(),
+                                InteractionType.COMMENT,
+                                content,
+                                parentOwnerId == null ? List.of() : List.of(parentOwnerId),
+                                null));
+        if (decision.denied()) {
+            throw refusalFor(actorId, post);
+        }
+        boolean hidden = decision.outcome() == InteractionOutcome.ALLOW_HIDDEN;
+
         // Reserve the idempotency key in the same transaction via ON CONFLICT DO NOTHING. A
         // duplicate key returns a clean replay/conflict instead of poisoning the transaction with a
         // constraint violation, and a rolled-back create frees the key.
@@ -210,10 +238,13 @@ public class CommentServiceImpl implements CommentService {
                                 .rootId(rootId)
                                 .depth(depth)
                                 .content(content)
-                                .moderationStatus("approved")
+                                .moderationStatus(hidden ? STATUS_HIDDEN : STATUS_APPROVED)
+                                .hiddenReason(hidden ? hiddenReasonOf(decision) : null)
                                 .build());
         MDC.put("commentId", saved.getId().toString());
 
+        // The response is built from the same fields whether the comment is hidden or not: its
+        // author is deliberately not told, so a hidden-words match or a limit stays invisible.
         // hasReported is false without a lookup: the actor is the author of the comment just
         // created, and self-reporting is rejected, so no report by them against it can exist.
         CommentResponse response =
@@ -229,7 +260,7 @@ public class CommentServiceImpl implements CommentService {
         }
 
         List<String> mentionedUserIds = resolveMentions(content, actorId);
-        enqueueCreated(post, saved, actorId, parentOwnerId, mentionedUserIds, response);
+        enqueueCreated(post, saved, actorId, parentOwnerId, mentionedUserIds, response, hidden);
         return response;
     }
 
@@ -254,6 +285,7 @@ public class CommentServiceImpl implements CommentService {
                 metrics.moderationRejected(moderation.reason());
                 throw new AppException(ApiErrorCode.COMMENT_MODERATION_REJECTED);
             }
+            applyInteractionPolicyToEdit(actorId, comment, content);
             comment.setContent(content);
             // The only place edited_at is written. Truncated to the microsecond resolution
             // TIMESTAMPTZ stores, so the value returned here is byte-identical to the one a
@@ -279,6 +311,7 @@ public class CommentServiceImpl implements CommentService {
             data.put("commentId", saved.getId().toString());
             data.put("commentOwnerId", saved.getUserId().toString());
             data.put("depth", (int) saved.getDepth());
+            data.put("visibility", visibilityOf(STATUS_HIDDEN.equals(saved.getModerationStatus())));
             // Broadcast projection: this payload is fanned out to every subscriber of the post's
             // live stream, so the editor's own isLiked state must not ride along as if it applied
             // to every viewer.
@@ -681,7 +714,8 @@ public class CommentServiceImpl implements CommentService {
             UUID actorId,
             UUID parentOwnerId,
             List<String> mentionedUserIds,
-            CommentResponse response) {
+            CommentResponse response,
+            boolean hidden) {
         // The outbox stores data via Map.copyOf, which rejects null values, so null-valued keys are
         // omitted rather than inserted.
         Map<String, Object> data = new HashMap<>();
@@ -692,6 +726,7 @@ public class CommentServiceImpl implements CommentService {
         data.put("commentOwnerId", actorId.toString());
         data.put("depth", (int) saved.getDepth());
         data.put("mentionedUserIds", mentionedUserIds);
+        data.put("visibility", visibilityOf(hidden));
         // Broadcast projection: this payload is fanned out to every subscriber of the post's live
         // stream, so the creating actor's own isLiked state must not ride along as if it applied to
         // every viewer.
@@ -714,29 +749,95 @@ public class CommentServiceImpl implements CommentService {
                 data);
     }
 
-    // A mention across a block relationship, in either direction, resolves to nothing: the
+    // A mention the interaction policy does not allow resolves to nothing, whether it is denied by
+    // a block in either direction or hidden by the mentioned account's interaction limit: the
     // mentioned user must not receive a notification (the harassment channel the stealth block
     // model exists to close), and the mentioner must not be able to tell resolution was
     // suppressed rather than the username simply not existing, since that distinction is itself a
     // disclosure. The filter applies here, at the single source every downstream consumer of
     // mentionedUserIds reads from - the comment-notification consumer and the live WS fan-out both
-    // inherit it for free rather than needing their own copy of this check.
+    // inherit it for free rather than needing their own copy of this check. Accounts are
+    // de-duplicated first so one account costs one policy call however its name is spelled.
     private List<String> resolveMentions(String content, UUID actorId) {
         Set<String> usernames = new LinkedHashSet<>();
         Matcher matcher = MENTION.matcher(content);
         while (matcher.find() && usernames.size() < MAX_MENTIONS) {
             usernames.add(matcher.group(1));
         }
-        List<String> ids = new java.util.ArrayList<>();
+        Set<UUID> mentioned = new LinkedHashSet<>();
         for (String username : usernames) {
             commentUserRepository
                     .findByUsernameAndDeletedAtIsNull(username)
                     .map(u -> u.getId())
                     .filter(id -> !id.equals(actorId))
                     .filter(id -> !blockRepository.existsBetween(actorId, id))
-                    .ifPresent(id -> ids.add(id.toString()));
+                    .ifPresent(mentioned::add);
+        }
+        List<String> ids = new java.util.ArrayList<>();
+        for (UUID id : mentioned) {
+            InteractionDecision decision =
+                    interactionPolicy.evaluate(
+                            new InteractionRequest(
+                                    actorId, id, InteractionType.MENTION, null, null, null));
+            if (decision.outcome() == InteractionOutcome.ALLOW) {
+                ids.add(id.toString());
+            }
         }
         return ids;
+    }
+
+    // A block with the post owner is already visible to the actor through the post itself, so it
+    // keeps the existing restricted answer. Any other denial comes from the parent comment's
+    // author, and answering it as not-found keeps the replier from learning that author blocked
+    // them.
+    private AppException refusalFor(UUID actorId, Post post) {
+        return blockRepository.existsBetween(actorId, post.getUserId())
+                ? new AppException(ApiErrorCode.POST_COMMENTING_RESTRICTED)
+                : new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
+    }
+
+    // A hidden comment stays hidden through an edit and an approved one can only become hidden, so
+    // the post owner's unhide is the single way back to approved. The policy is not consulted for
+    // a hidden comment because no answer it could give changes that comment's state.
+    private void applyInteractionPolicyToEdit(UUID actorId, Comment comment, String content) {
+        if (!STATUS_APPROVED.equals(comment.getModerationStatus())) {
+            return;
+        }
+        Post post =
+                postRepository
+                        .findById(comment.getPostId())
+                        .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
+        UUID parentOwnerId =
+                comment.getParentId() == null
+                        ? null
+                        : commentRepository
+                                .findByIdAndDeletedAtIsNull(comment.getParentId())
+                                .map(Comment::getUserId)
+                                .orElse(null);
+        InteractionDecision decision =
+                interactionPolicy.evaluate(
+                        new InteractionRequest(
+                                actorId,
+                                post.getUserId(),
+                                InteractionType.COMMENT,
+                                content,
+                                parentOwnerId == null ? List.of() : List.of(parentOwnerId),
+                                null));
+        if (decision.denied()) {
+            throw refusalFor(actorId, post);
+        }
+        if (decision.outcome() == InteractionOutcome.ALLOW_HIDDEN) {
+            comment.setModerationStatus(STATUS_HIDDEN);
+            comment.setHiddenReason(hiddenReasonOf(decision));
+        }
+    }
+
+    private static String visibilityOf(boolean hidden) {
+        return hidden ? "hidden" : "visible";
+    }
+
+    private static String hiddenReasonOf(InteractionDecision decision) {
+        return CommentHiddenReason.from(decision.reason()).value();
     }
 
     // MDC keys are not in the current logback console pattern; they exist for correlation in log

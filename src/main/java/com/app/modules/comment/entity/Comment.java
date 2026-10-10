@@ -25,9 +25,9 @@ import lombok.Setter;
  *
  * <p>Maps to the {@code comments} table. The denormalized counters ({@code like_count}, {@code
  * reply_count}) are maintained by Postgres triggers (V16) and are never written from application
- * code. {@code content} is the only mutable column, and changing it also stamps {@code edited_at}.
- * Soft delete sets {@code deleted_at} — never hard-delete; {@code @SQLRestriction} excludes deleted
- * rows from every query.
+ * code. {@code content} changes only through an edit, which also stamps {@code edited_at} and can
+ * hide an approved comment but never approves a hidden one. Soft delete sets {@code deleted_at},
+ * never hard-delete; {@code @SQLRestriction} excludes deleted rows from every query.
  */
 @Entity
 @Table(name = "comments")
@@ -67,6 +67,15 @@ public class Comment {
 
     @Column(name = "moderation_status", nullable = false)
     private String moderationStatus;
+
+    /**
+     * Why the comment is {@code hidden}: {@code hidden_words} or {@code limited_interaction}.
+     *
+     * <p>Set exactly when {@code moderation_status} is {@code hidden}, which a database CHECK
+     * enforces (V143). A hidden comment is persisted but counted by neither comment counter.
+     */
+    @Column(name = "hidden_reason")
+    private String hiddenReason;
 
     /** Maintained exclusively by Postgres trigger {@code trg_comment_like_count} (V16). */
     @Column(name = "like_count", insertable = false, updatable = false)

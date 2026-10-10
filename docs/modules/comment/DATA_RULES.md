@@ -9,7 +9,7 @@ Threaded comment CRUD (create with HTTP idempotency, edit, soft-delete subtree),
 
 | Table | Key Columns | Notes |
 |-------|-------------|-------|
-| `comments` | `id`, `post_id`, `user_id`, `parent_id`, `root_id`, `depth`, `content`, `moderation_status`, `edited_at`, `deleted_at` | Core comment entity. Adjacency list with `root_id` and `depth` for efficient subtree queries. Soft-deleted via `deleted_at`. `edited_at` records when the content was last changed (V45). |
+| `comments` | `id`, `post_id`, `user_id`, `parent_id`, `root_id`, `depth`, `content`, `moderation_status`, `hidden_reason`, `edited_at`, `deleted_at` | Core comment entity. Adjacency list with `root_id` and `depth` for efficient subtree queries. Soft-deleted via `deleted_at`. `edited_at` records when the content was last changed (V45). `moderation_status` is `approved` or `hidden`, and `hidden_reason` (`hidden_words` or `limited_interaction`) is set exactly when it is `hidden` (V143). |
 | `comment_likes` | `user_id`, `comment_id`, `created_at` | One row per (user, comment) pair; compound PK prevents duplicate likes. Canonical like signal for comments. |
 | `comment_write_idempotency` | `id`, `user_id`, `idempotency_key`, `request_hash`, `response_body`, `created_at` | Caches the first response for a `(user_id, idempotency_key)` pair so a retried create returns the original result instead of a duplicate comment (V27). |
 
@@ -23,9 +23,9 @@ Threaded comment CRUD (create with HTTP idempotency, edit, soft-delete subtree),
 | Data | Location | Rebuilt From | Rebuild Trigger |
 |------|----------|--------------|-----------------|
 | `comments.like_count` | `comments` table | `COUNT(*)` from `comment_likes` where `comment_id = comment.id` | Trigger `trg_comment_like_count` (V16) |
-| `comments.reply_count` | `comments` table | `COUNT(*)` from `comments` where `parent_id = comment.id` and `deleted_at IS NULL` | Trigger `trg_comment_reply_count` (V16) |
+| `comments.reply_count` | `comments` table | `COUNT(*)` from `comments` where `parent_id = comment.id`, `deleted_at IS NULL`, `admin_removed_at IS NULL` and `moderation_status = 'approved'` | Trigger `trg_comment_reply_count` (V16, redefined by V95 and V143) |
 | `comments.updated_at` | `comments` table | Auto-maintained | Trigger `trg_comments_updated_at` (V16) |
-| `posts.comment_count` | `posts` table | `COUNT(*)` from `comments` where `post_id = post.id` and `deleted_at IS NULL` | Trigger `trg_post_comment_count` (V16) |
+| `posts.comment_count` | `posts` table | `COUNT(*)` from `comments` where `post_id = post.id`, `deleted_at IS NULL`, `admin_removed_at IS NULL` and `moderation_status = 'approved'` | Trigger `trg_post_comment_count` (V16, redefined by V95 and V143) |
 | Recent-comment page cache | Redis, key prefix `comment:recent:v3:` | Re-read from `comments` | Cache miss or 300-second TTL expiry |
 
 ---
@@ -41,12 +41,16 @@ Threaded comment CRUD (create with HTTP idempotency, edit, soft-delete subtree),
 | `comment_likes` allows at most one like per (user, comment) pair | Compound `PRIMARY KEY (user_id, comment_id)` (V07) |
 | At most one cached response per user and idempotency key | `UNIQUE (user_id, idempotency_key)` (V27) |
 | `moderation_status` defaults to `approved` | `VARCHAR(20) NOT NULL DEFAULT 'approved'` (V26) |
+| `hidden_reason` is present exactly when `moderation_status` is `hidden` | `CHECK ((moderation_status = 'hidden') = (hidden_reason IS NOT NULL))`, constraint `chk_comments_hidden_reason` (V143) |
+| A hidden comment is counted by neither `posts.comment_count` nor its parent's `reply_count`, and unhiding it counts it | Triggers `fn_post_comment_count` and `fn_comment_reply_count` as V143 redefined them, which count a row only while it is approved and carries neither tombstone |
 | Deleting a post cascades to all its comments | `ON DELETE CASCADE` on `comments.post_id` |
 | Deleting a parent comment cascades to all its child replies | `ON DELETE CASCADE` on `comments.parent_id` and `comments.root_id` |
 | Deleting a user cascades to their comments | `ON DELETE CASCADE` on `comments.user_id` |
 
 `moderation_status` is a `VARCHAR`, not a PostgreSQL enum, so adding a state needs no enum migration.
 This is a deliberate departure from the enum-as-constraint-layer rule in `GLOBAL_RULES.md`; the tradeoff is that invalid states are not rejected by the database.
+The one constraint on it is the pairing with `hidden_reason`, so a status other than `approved` or `hidden` is still accepted by the database.
+V143 refuses to run while any existing row is not `approved`, with a message naming the count, before it adds that constraint.
 
 ### B. Rules Enforced by Application Code
 
@@ -80,7 +84,17 @@ This is a deliberate departure from the enum-as-constraint-layer rule in `GLOBAL
 | User mentions in comment `content` generate `mention_comment` notifications | `CommentNotificationConsumer`, from the `mentionedUserIds` event field |
 | Liking a comment generates a `like_comment` notification | `CommentNotificationConsumer`, from `comment.liked.v1` |
 | No notification is created when the actor is also the recipient | `NotificationServiceImpl.create` — a single general guard covering every notification type, so a self-like or a self-reply produces no row |
-| A user may only comment on a post that is visible to them | `CommentAccessPolicyServiceImpl.assertCanComment` — delegates to `PostVisibilityService.isVisibleTo`, throws `POST_COMMENTING_RESTRICTED` |
+| A user may only comment on a post that is visible to them; this is a read-visibility gate and carries no interaction rule | `CommentAccessPolicyServiceImpl.assertCanComment`, which delegates to `PostVisibilityService.isVisibleTo` and throws `POST_COMMENTING_RESTRICTED` |
+| Every create asks the interaction policy with `COMMENT`, the post owner as target and the parent comment's author as secondary target, after the spam rules and before the idempotency key is reserved | `CommentServiceImpl.doCreateComment`, `InteractionPolicyService.evaluate` |
+| A denied create answers `POST_COMMENTING_RESTRICTED` (403) when the actor and the post owner are blocked, and `COMMENT_NOT_FOUND` (404) for any other denial, which is a block with the parent comment's author: the replier must not learn that author blocked them | `CommentServiceImpl.refusalFor` |
+| A comment the post owner's Hidden Words or interaction limit filters is persisted with `moderation_status = 'hidden'` and `hidden_reason` `hidden_words` or `limited_interaction`; the policy's `HIDDEN_WORD` maps to the first, `LIMITED_NON_FOLLOWER` and `LIMITED_RECENT_FOLLOWER` to the second | `CommentHiddenReason.from` |
+| The create response to the author is built the same way whether the comment is hidden or not and carries no hidden marker, because the author is not told | `CommentServiceImpl.doCreateComment`; `CommentResponse` has no status component |
+| `comment.created.v1` carries `visibility` (`visible` or `hidden`); `comment.edited.v1` carries it too, for the same reason | `CommentServiceImpl.enqueueCreated`, `CommentServiceImpl.editComment` |
+| Each distinct mentioned account is evaluated once with `MENTION` after the block filter; `DENY` and `ALLOW_HIDDEN` both drop it from `mentionedUserIds` so it is never notified, and only `ALLOW` keeps it | `CommentServiceImpl.resolveMentions` |
+| An edit of an approved comment runs the `COMMENT` policy with the new content; `ALLOW_HIDDEN` switches the comment to hidden with the reason, and a denial refuses the edit with the same mapping as a create | `CommentServiceImpl.applyInteractionPolicyToEdit` |
+| An edit never makes a hidden comment approved and does not consult the policy for one; only the post owner unhides | `CommentServiceImpl.applyInteractionPolicyToEdit` |
+| The post owner's own comments are always allowed, because the policy answers `SELF` for an actor acting on themselves | `InteractionPolicyServiceImpl` |
+| A Hidden Words entry or an interaction limit decides only comments written after it is in force; adding a word or turning on a limit leaves existing comments approved, and removing a word or turning a limit off leaves a hidden comment hidden | `HiddenWordsNotRetroactiveIT`, `LimitNotRetroactiveIT` |
 | The viewer's per-row like state is batch-resolved, never per row | `CommentViewerStateServiceImpl` |
 
 Notifications are delivered asynchronously through the transactional outbox, not written inline.
@@ -122,7 +136,8 @@ The two sort modes therefore differ only in whether that block is computed, neve
   This differs from the `post` module, which has a `post_edit_history` table (V22).
   A client can tell that a comment was edited and when, but not what it used to say.
 - Moderation is rule-based only: emptiness, length, all-capitals and repeated words.
-  Word lists live in the Hidden Words registry, not here, and there is no classifier, no review queue, and no appeal path; `moderation_status` exists to support one later without a schema change.
+  Word lists live in the Hidden Words registry, not here, and there is no classifier, no review queue, and no appeal path.
+  `moderation_status` carries the hidden state the post owner's controls produce, and nothing else writes it.
 - The Redis recent-comment cache is best-effort.
   A cache failure degrades to a database read; it never fails the request.
 - The pinned exclusion set is recomputed on every page rather than carried in the cursor.
@@ -148,6 +163,7 @@ The two sort modes therefore differ only in whether that block is computed, neve
 | `post` | inbound | Every comment belongs to a `post_id`; the `comment_count` trigger updates `posts`; the comment-create gate delegates to `PostVisibilityService` |
 | `users` | inbound | Every comment belongs to a `user_id`; `@mention` usernames resolve against `users` |
 | `social` | inbound | Block and follow state reach comments through the post visibility policy |
+| `social` | inbound | `CommentServiceImpl` asks `InteractionPolicyService` before it persists a comment, an edit or a mention, and stores the hidden state the answer calls for |
 | `notification` | outbound | `comment.created.v1`, `comment.liked.v1` and `comment.unliked.v1` drive `comment_post`, `reply_comment`, `mention_comment` and `like_comment` notifications; a mention of the person the comment already notifies is dropped, and an unlike retracts the liker from the group |
 | `notification` | inbound | `CommentPreviewService` gives the notification feed viewer-specific comment and parent snippets, withholding text for tombstones, blocks in either direction, and unapproved comments except to their authors; `GET /api/v1/comments/{commentId}/context` returns a comment with every ancestor so a notification can open a reply wherever it sits. |
 | `report` | inbound | Reports can target a comment via polymorphic `entity_id` |

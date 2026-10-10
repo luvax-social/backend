@@ -10,6 +10,11 @@ import com.app.modules.comment.service.CommentAccessPolicyService;
 import com.app.modules.post.entity.Post;
 import com.app.modules.post.service.PostVisibilityService;
 
+/**
+ * Keeps only the post-visibility check for commenting, which is a read-visibility rule. The post
+ * owner's block, interaction limit and Hidden Words are interaction rules and are evaluated by the
+ * interaction policy in the comment write path.
+ */
 @Service
 public class CommentAccessPolicyServiceImpl implements CommentAccessPolicyService {
 

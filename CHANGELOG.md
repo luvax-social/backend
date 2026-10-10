@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- `posts.comment_count` and a comment's `reply_count` now count only approved comments, so a hidden comment is not counted until its post owner unhides it.
 - `GET` and `PATCH /users/me/settings` carry `hiddenWordsSystemEnabled`, the account choice to apply the platform-wide hidden word list alongside its personal one; it defaults to true and a request that omits it leaves it unchanged.
 - The `allowMessageRequests` setting is replaced by `messagePermission` (`everyone`, `following` or `nobody`) on `GET` and `PUT /users/me/settings`; existing accounts keep their behaviour (`true` becomes `everyone`, `false` becomes `following`), and a request that still sends `allowMessageRequests` is rejected.
 - Accepted follows now record when they became accepted, so approving an older request keeps its original creation time and records the approval time separately.
@@ -30,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 
 ### Added
+- A comment the post owner's Hidden Words or interaction limit filters is now saved hidden instead of shown, with its author told nothing and any account it mentions not notified; a reply to a comment whose author blocked the replier answers `COMMENT_NOT_FOUND`, and an edit can hide an approved comment but never approves a hidden one.
 - One interaction policy now decides, in a fixed order of block, interaction limit, message permission, pending request and Hidden Words, whether a comment, mention, new conversation or message is allowed, hidden, routed to message requests or refused.
 - Each account can keep a personal Hidden Words list of up to 200 words or phrases through `GET` and `POST /users/me/hidden-words` and `DELETE /users/me/hidden-words/{entryId}`; entries are compared by their normalised form, and a duplicate, a full list or an unusable phrase answers `HIDDEN_WORD_DUPLICATE`, `HIDDEN_WORD_LIMIT_REACHED` or `HIDDEN_WORD_INVALID`.
 - Mutes, show fewer, interaction limits, not-interested and hidden word lists now have database tables, and user settings gain a system hidden words toggle.
