@@ -87,10 +87,131 @@ class CommentHiddenCounterIT {
 
         setStatus(hiddenReply, "hidden", "limited_interaction");
         assertThat(replyCount(parent)).isEqualTo(1);
+        assertThat(commentCount(postId)).isEqualTo(2);
 
         softDelete(hiddenReply);
         assertThat(replyCount(parent)).isEqualTo(1);
         softDelete(visibleReply);
+        assertThat(replyCount(parent)).isZero();
+    }
+
+    @Test
+    void restoredApprovedComment_isCountedAgain_onBothCounters() {
+        UUID postId = seedPost();
+        UUID author = seedUser();
+        UUID parent = insertComment(postId, author, null, "approved", null);
+        UUID reply = insertComment(postId, author, parent, "approved", null);
+        softDelete(reply);
+        assertThat(commentCount(postId)).isEqualTo(1);
+        assertThat(replyCount(parent)).isZero();
+
+        restore(reply);
+
+        assertThat(commentCount(postId)).isEqualTo(2);
+        assertThat(replyCount(parent)).isEqualTo(1);
+    }
+
+    @Test
+    void restoredHiddenComment_isNotCounted_onEitherCounter() {
+        UUID postId = seedPost();
+        UUID author = seedUser();
+        UUID parent = insertComment(postId, author, null, "approved", null);
+        UUID reply = insertComment(postId, author, parent, "hidden", "hidden_words");
+        softDelete(reply);
+
+        restore(reply);
+
+        assertThat(commentCount(postId)).isEqualTo(1);
+        assertThat(replyCount(parent)).isZero();
+    }
+
+    @Test
+    void hardDeletedApprovedComment_isUncounted_onBothCounters() {
+        UUID postId = seedPost();
+        UUID author = seedUser();
+        UUID parent = insertComment(postId, author, null, "approved", null);
+        UUID reply = insertComment(postId, author, parent, "approved", null);
+        assertThat(commentCount(postId)).isEqualTo(2);
+
+        hardDelete(reply);
+
+        assertThat(commentCount(postId)).isEqualTo(1);
+        assertThat(replyCount(parent)).isZero();
+    }
+
+    @Test
+    void hardDeletedHiddenComment_leavesBothCountersUnchanged() {
+        UUID postId = seedPost();
+        UUID author = seedUser();
+        UUID parent = insertComment(postId, author, null, "approved", null);
+        insertComment(postId, author, parent, "approved", null);
+        UUID hiddenReply = insertComment(postId, author, parent, "hidden", "hidden_words");
+        assertThat(commentCount(postId)).isEqualTo(2);
+        assertThat(replyCount(parent)).isEqualTo(1);
+
+        hardDelete(hiddenReply);
+
+        assertThat(commentCount(postId)).isEqualTo(2);
+        assertThat(replyCount(parent)).isEqualTo(1);
+    }
+
+    @Test
+    void adminRemovedApprovedReply_isNotCountedOnItsParent_andRestoreCountsIt() {
+        UUID postId = seedPost();
+        UUID author = seedUser();
+        UUID parent = insertComment(postId, author, null, "approved", null);
+        UUID reply = insertComment(postId, author, parent, "approved", null);
+
+        adminRemove(reply);
+        assertThat(replyCount(parent)).isZero();
+        assertThat(commentCount(postId)).isEqualTo(1);
+
+        adminRestore(reply);
+        assertThat(replyCount(parent)).isEqualTo(1);
+        assertThat(commentCount(postId)).isEqualTo(2);
+    }
+
+    @Test
+    void adminRemoveAndRestoreOfAHiddenComment_neverCountsIt() {
+        UUID postId = seedPost();
+        UUID author = seedUser();
+        UUID parent = insertComment(postId, author, null, "approved", null);
+        UUID reply = insertComment(postId, author, parent, "hidden", "limited_interaction");
+
+        adminRemove(reply);
+        assertThat(replyCount(parent)).isZero();
+        assertThat(commentCount(postId)).isEqualTo(1);
+
+        adminRestore(reply);
+        assertThat(replyCount(parent)).isZero();
+        assertThat(commentCount(postId)).isEqualTo(1);
+    }
+
+    @Test
+    void unhidingASoftDeletedComment_doesNotChangeEitherCounter() {
+        UUID postId = seedPost();
+        UUID author = seedUser();
+        UUID parent = insertComment(postId, author, null, "approved", null);
+        UUID reply = insertComment(postId, author, parent, "hidden", "hidden_words");
+        softDelete(reply);
+
+        setStatus(reply, "approved", null);
+
+        assertThat(commentCount(postId)).isEqualTo(1);
+        assertThat(replyCount(parent)).isZero();
+    }
+
+    @Test
+    void unhidingAnAdminRemovedComment_doesNotChangeEitherCounter() {
+        UUID postId = seedPost();
+        UUID author = seedUser();
+        UUID parent = insertComment(postId, author, null, "approved", null);
+        UUID reply = insertComment(postId, author, parent, "hidden", "hidden_words");
+        adminRemove(reply);
+
+        setStatus(reply, "approved", null);
+
+        assertThat(commentCount(postId)).isEqualTo(1);
         assertThat(replyCount(parent)).isZero();
     }
 
@@ -189,6 +310,31 @@ class CommentHiddenCounterIT {
     private void softDelete(UUID commentId) {
         jdbcClient
                 .sql("UPDATE comments SET deleted_at = NOW() WHERE id = :id")
+                .param("id", commentId)
+                .update();
+    }
+
+    private void restore(UUID commentId) {
+        jdbcClient
+                .sql("UPDATE comments SET deleted_at = NULL WHERE id = :id")
+                .param("id", commentId)
+                .update();
+    }
+
+    private void hardDelete(UUID commentId) {
+        jdbcClient.sql("DELETE FROM comments WHERE id = :id").param("id", commentId).update();
+    }
+
+    private void adminRemove(UUID commentId) {
+        jdbcClient
+                .sql("UPDATE comments SET admin_removed_at = NOW() WHERE id = :id")
+                .param("id", commentId)
+                .update();
+    }
+
+    private void adminRestore(UUID commentId) {
+        jdbcClient
+                .sql("UPDATE comments SET admin_removed_at = NULL WHERE id = :id")
                 .param("id", commentId)
                 .update();
     }

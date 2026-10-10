@@ -175,7 +175,7 @@ class MentionSuppressionIT {
     }
 
     @Test
-    void mention_ownerOfTheLimitedPost_isStillMentionableWhenNotLimited() {
+    void mention_unlimitedAccount_isKept() {
         TestUser owner = registerUser("ms_plain_owner");
         TestUser actor = registerUser("ms_plain_actor");
         UUID postId = createImagePost(owner, "plain mention post");

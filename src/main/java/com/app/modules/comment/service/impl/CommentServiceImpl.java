@@ -198,8 +198,10 @@ public class CommentServiceImpl implements CommentService {
         }
 
         // After the spam rules so a rejected comment never costs a policy lookup, and before the
-        // idempotency reservation so a refused create leaves no key behind. A replay inside the
-        // key's lifetime returns the cached response whatever the lists have become since.
+        // idempotency reservation so a refused create leaves no key behind. The check also runs
+        // before the key is looked up, so a replay after a new block is refused rather than
+        // answered from the cache: a block wins over an idempotent replay. A list or limit change
+        // alone does not matter to a replay, which returns the cached response.
         InteractionDecision decision =
                 interactionPolicy.evaluate(
                         new InteractionRequest(
@@ -796,13 +798,11 @@ public class CommentServiceImpl implements CommentService {
                 : new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
     }
 
-    // A hidden comment stays hidden through an edit and an approved one can only become hidden, so
-    // the post owner's unhide is the single way back to approved. The policy is not consulted for
-    // a hidden comment because no answer it could give changes that comment's state.
+    // The policy runs for every edit, hidden comment or not, so an author the post owner blocked
+    // after the comment was hidden cannot push new text into the owner's hidden review list. Its
+    // answer can only move an approved comment to hidden: a hidden comment stays hidden through an
+    // edit, so the post owner's unhide is the single way back to approved.
     private void applyInteractionPolicyToEdit(UUID actorId, Comment comment, String content) {
-        if (!STATUS_APPROVED.equals(comment.getModerationStatus())) {
-            return;
-        }
         Post post =
                 postRepository
                         .findById(comment.getPostId())
@@ -826,7 +826,8 @@ public class CommentServiceImpl implements CommentService {
         if (decision.denied()) {
             throw refusalFor(actorId, post);
         }
-        if (decision.outcome() == InteractionOutcome.ALLOW_HIDDEN) {
+        if (decision.outcome() == InteractionOutcome.ALLOW_HIDDEN
+                && STATUS_APPROVED.equals(comment.getModerationStatus())) {
             comment.setModerationStatus(STATUS_HIDDEN);
             comment.setHiddenReason(hiddenReasonOf(decision));
         }

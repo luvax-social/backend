@@ -327,6 +327,70 @@ class CommentPolicyWriteIT {
         assertThat(contentOf(commentId)).isEqualTo("before the block");
     }
 
+    @Test
+    void edit_hiddenCommentByAuthorNowBlockedByPostOwner_isRestrictedAndContentUnchanged() {
+        TestUser owner = registerUser("pw_hblock_owner");
+        TestUser actor = registerUser("pw_hblock_actor");
+        UUID postId = createImagePost(owner, "hidden edit block post");
+        addHiddenWord(owner, "badword");
+        UUID commentId = idOf(postComment(actor, postId, null, "a badword here"));
+        assertThat(statusOf(commentId)).isEqualTo("hidden");
+        block(owner, actor);
+
+        ResponseEntity<Map> edited = editComment(actor, commentId, "text for the owner to read");
+
+        assertThat(edited.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(edited.getBody().get("code")).isEqualTo("POST_COMMENTING_RESTRICTED");
+        assertThat(contentOf(commentId)).isEqualTo("a badword here");
+        assertThat(statusOf(commentId)).isEqualTo("hidden");
+    }
+
+    @Test
+    void edit_newlyHidingEdit_enqueuesHiddenVisibility() {
+        TestUser owner = registerUser("pw_evis_owner");
+        TestUser actor = registerUser("pw_evis_actor");
+        UUID postId = createImagePost(owner, "edit visibility post");
+        addHiddenWord(owner, "badword");
+        UUID commentId = idOf(postComment(actor, postId, null, "perfectly fine"));
+
+        editComment(actor, commentId, "now a badword sneaks in");
+
+        assertThat(editedVisibility(commentId)).isEqualTo("hidden");
+    }
+
+    @Test
+    void edit_ofAnAlreadyHiddenComment_enqueuesHiddenVisibility() {
+        TestUser owner = registerUser("pw_evish_owner");
+        TestUser actor = registerUser("pw_evish_actor");
+        UUID postId = createImagePost(owner, "edit hidden visibility post");
+        addHiddenWord(owner, "badword");
+        UUID commentId = idOf(postComment(actor, postId, null, "a badword here"));
+
+        editComment(actor, commentId, "now entirely polite");
+
+        assertThat(editedVisibility(commentId)).isEqualTo("hidden");
+    }
+
+    @Test
+    void edit_ofAVisibleComment_enqueuesVisibleVisibility() {
+        TestUser owner = registerUser("pw_evisv_owner");
+        TestUser actor = registerUser("pw_evisv_actor");
+        UUID postId = createImagePost(owner, "edit visible visibility post");
+        UUID commentId = idOf(postComment(actor, postId, null, "perfectly fine"));
+
+        editComment(actor, commentId, "still perfectly fine");
+
+        assertThat(editedVisibility(commentId)).isEqualTo("visible");
+    }
+
+    private String editedVisibility(UUID commentId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT payload->'data'->>'visibility' FROM outbox_events WHERE aggregate_id = ?"
+                        + " AND event_type = 'comment.edited.v1'",
+                String.class,
+                commentId);
+    }
+
     private ResponseEntity<Map> postComment(
             TestUser user, UUID postId, UUID parentId, String content) {
         Map<String, Object> body = new HashMap<>();

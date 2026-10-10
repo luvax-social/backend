@@ -114,26 +114,7 @@ class CommentServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service =
-                new CommentServiceImpl(
-                        commentRepository,
-                        commentLikeRepository,
-                        idempotencyRepository,
-                        postRepository,
-                        commentUserRepository,
-                        moderationService,
-                        accessPolicy,
-                        mapper,
-                        outboxService,
-                        new CommentProperties(0, 24),
-                        redisTemplate,
-                        objectMapper,
-                        metrics,
-                        postVisibilityService,
-                        userSummaryService,
-                        commentViewerStateService,
-                        blockRepository,
-                        interactionPolicy);
+        service = newService(new CommentProperties(0, 24));
         lenient()
                 .when(metrics.createLatency())
                 .thenReturn(new SimpleMeterRegistry().timer("comment.create.latency"));
@@ -147,6 +128,28 @@ class CommentServiceImplTest {
                 .when(interactionPolicy.evaluate(any()))
                 .thenReturn(
                         new InteractionDecision(InteractionOutcome.ALLOW, InteractionReason.NONE));
+    }
+
+    private CommentServiceImpl newService(CommentProperties properties) {
+        return new CommentServiceImpl(
+                commentRepository,
+                commentLikeRepository,
+                idempotencyRepository,
+                postRepository,
+                commentUserRepository,
+                moderationService,
+                accessPolicy,
+                mapper,
+                outboxService,
+                properties,
+                redisTemplate,
+                objectMapper,
+                metrics,
+                postVisibilityService,
+                userSummaryService,
+                commentViewerStateService,
+                blockRepository,
+                interactionPolicy);
     }
 
     @AfterEach
@@ -214,6 +217,22 @@ class CommentServiceImplTest {
                 .enqueue(
                         eq(CommentEventTypes.COMMENT_CREATED_V1),
                         eq(CommentEventTypes.COMMENT_CREATED_V1),
+                        eq("comment"),
+                        eq(commentId),
+                        eq(actorId),
+                        data.capture());
+        return data.getValue();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> editedEventData() {
+        ArgumentCaptor<Map<String, Object>> data =
+                (ArgumentCaptor<Map<String, Object>>)
+                        (ArgumentCaptor<?>) ArgumentCaptor.forClass(Map.class);
+        verify(outboxService)
+                .enqueue(
+                        eq(CommentEventTypes.COMMENT_EDITED_V1),
+                        eq(CommentEventTypes.COMMENT_EDITED_V1),
                         eq("comment"),
                         eq(commentId),
                         eq(actorId),
@@ -436,6 +455,7 @@ class CommentServiceImplTest {
         Comment comment = Comment.builder().id(commentId).postId(postId).userId(actorId).build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
         when(moderationService.check(any())).thenReturn(ModerationResult.approved());
         when(commentRepository.saveAndFlush(any())).thenReturn(comment);
         when(mapper.toResponse(eq(comment), any(), anyBoolean(), anyBoolean()))
@@ -458,6 +478,7 @@ class CommentServiceImplTest {
         Comment comment = Comment.builder().id(commentId).postId(postId).userId(actorId).build();
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
         when(moderationService.check(any())).thenReturn(ModerationResult.approved());
         when(commentRepository.saveAndFlush(any())).thenReturn(comment);
         when(mapper.toResponse(eq(comment), any(), anyBoolean(), anyBoolean()))
@@ -715,6 +736,7 @@ class CommentServiceImplTest {
         comment.setHiddenReason("hidden_words");
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
         when(moderationService.check(any())).thenReturn(ModerationResult.approved());
         when(commentRepository.saveAndFlush(any())).thenReturn(comment);
         when(mapper.toResponse(eq(comment), any(), anyBoolean(), anyBoolean()))
@@ -724,7 +746,108 @@ class CommentServiceImplTest {
 
         assertThat(comment.getModerationStatus()).isEqualTo("hidden");
         assertThat(comment.getHiddenReason()).isEqualTo("hidden_words");
-        verify(interactionPolicy, never()).evaluate(any());
+        assertThat(editedEventData().get("visibility")).isEqualTo("hidden");
+    }
+
+    @Test
+    void edit_hiddenCommentGainingAnotherHiddenReason_keepsItsOriginalReason() {
+        Comment comment = approvedComment(actorId);
+        comment.setModerationStatus("hidden");
+        comment.setHiddenReason("limited_interaction");
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ALLOW_HIDDEN, InteractionReason.HIDDEN_WORD));
+        when(commentRepository.saveAndFlush(any())).thenReturn(comment);
+        when(mapper.toResponse(eq(comment), any(), anyBoolean(), anyBoolean()))
+                .thenReturn(sampleResponse());
+
+        service.editComment(actorId, commentId, new EditCommentRequest("a badword"));
+
+        assertThat(comment.getModerationStatus()).isEqualTo("hidden");
+        assertThat(comment.getHiddenReason()).isEqualTo("limited_interaction");
+    }
+
+    @Test
+    void edit_hiddenCommentByAnAuthorNowBlockedByThePostOwner_throwsPostCommentingRestricted() {
+        Post post = publishedPost();
+        Comment comment = approvedComment(actorId);
+        comment.setModerationStatus("hidden");
+        comment.setHiddenReason("hidden_words");
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.DENY, InteractionReason.BLOCKED));
+        when(blockRepository.existsBetween(actorId, post.getUserId())).thenReturn(true);
+
+        assertThatThrownBy(
+                        () ->
+                                service.editComment(
+                                        actorId, commentId, new EditCommentRequest("new text")))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.POST_COMMENTING_RESTRICTED);
+        assertThat(comment.getContent()).isNull();
+        verify(commentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void edit_hiddenCommentByAnAuthorBlockedByTheParentAuthor_throwsCommentNotFound() {
+        UUID parentId = UUID.randomUUID();
+        Comment comment = approvedComment(actorId);
+        comment.setParentId(parentId);
+        comment.setModerationStatus("hidden");
+        comment.setHiddenReason("hidden_words");
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(comment));
+        when(commentRepository.findByIdAndDeletedAtIsNull(parentId))
+                .thenReturn(
+                        Optional.of(
+                                Comment.builder()
+                                        .id(parentId)
+                                        .postId(postId)
+                                        .userId(UUID.randomUUID())
+                                        .build()));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.DENY, InteractionReason.BLOCKED));
+
+        assertThatThrownBy(
+                        () ->
+                                service.editComment(
+                                        actorId, commentId, new EditCommentRequest("new text")))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.COMMENT_NOT_FOUND);
+    }
+
+    @Test
+    void create_policyDeny_neverTouchesTheSlowModeKey() {
+        CommentServiceImpl slowService = newService(new CommentProperties(30, 24));
+        Post post = publishedPost();
+        when(postRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(interactionPolicy.evaluate(commentRequestTo(post.getUserId())))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.DENY, InteractionReason.BLOCKED));
+        when(blockRepository.existsBetween(actorId, post.getUserId())).thenReturn(true);
+
+        assertThatThrownBy(() -> slowService.createComment(actorId, createRequest(null), null))
+                .isInstanceOf(AppException.class);
+
+        verify(redisTemplate, never()).opsForValue();
     }
 
     @Test
