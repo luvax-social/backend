@@ -29,7 +29,11 @@ public record InteractionRequest(
         Objects.requireNonNull(actorId, "actorId");
         Objects.requireNonNull(targetUserId, "targetUserId");
         Objects.requireNonNull(type, "type");
+        // A missing secondary account, such as a deleted parent comment author, has nothing to
+        // block
         secondaryTargetIds =
-                secondaryTargetIds == null ? List.of() : List.copyOf(secondaryTargetIds);
+                secondaryTargetIds == null
+                        ? List.of()
+                        : secondaryTargetIds.stream().filter(Objects::nonNull).toList();
     }
 }

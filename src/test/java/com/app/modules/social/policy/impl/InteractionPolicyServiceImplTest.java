@@ -3,6 +3,9 @@ package com.app.modules.social.policy.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -12,6 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -125,6 +129,46 @@ class InteractionPolicyServiceImplTest {
     }
 
     @Test
+    void comment_ownerLimitsRecentFollowersAndFollowAcceptedExactlySevenDaysAgo_allow() {
+        limit(false, true);
+        actorFollowsTargetSince(NOW_UTC.minusDays(7));
+        noPersonalMatch();
+
+        assertThat(service.evaluate(comment("hello")))
+                .isEqualTo(decision(InteractionOutcome.ALLOW, InteractionReason.NONE));
+    }
+
+    @Test
+    void comment_parentAuthorLimitedButPostOwnerNot_allowBecauseOnlyTargetLimitApplies() {
+        when(limitRepository.findActive(target, NOW_UTC)).thenReturn(Optional.empty());
+        noPersonalMatch();
+        InteractionRequest reply =
+                new InteractionRequest(
+                        actor, target, InteractionType.COMMENT, "hi", List.of(parentAuthor), null);
+
+        assertThat(service.evaluate(reply))
+                .isEqualTo(decision(InteractionOutcome.ALLOW, InteractionReason.NONE));
+        verify(limitRepository, never()).findActive(eq(parentAuthor), any());
+    }
+
+    @Test
+    void comment_nullSecondaryTarget_isIgnored() {
+        noPersonalMatch();
+        InteractionRequest reply =
+                new InteractionRequest(
+                        actor,
+                        target,
+                        InteractionType.COMMENT,
+                        "hi",
+                        Arrays.asList(null, parentAuthor),
+                        null);
+
+        assertThat(reply.secondaryTargetIds()).containsExactly(parentAuthor);
+        assertThat(service.evaluate(reply))
+                .isEqualTo(decision(InteractionOutcome.ALLOW, InteractionReason.NONE));
+    }
+
+    @Test
     void comment_limitExpired_allow() {
         // findActive filters on expires_at > now, so an expired row reads as absent
         when(limitRepository.findActive(target, NOW_UTC)).thenReturn(Optional.empty());
@@ -146,8 +190,7 @@ class InteractionPolicyServiceImplTest {
     }
 
     @Test
-    void comment_contentMatchesSystemListButOwnerDisabledIt_allow() {
-        // matcherFor leaves the platform-wide list out when the owner turned it off
+    void comment_contentMatchingNoListOfTheOwner_allow() {
         noPersonalMatch();
 
         assertThat(service.evaluate(comment("a word only the system list holds")))
@@ -203,6 +246,17 @@ class InteractionPolicyServiceImplTest {
     @Test
     void initiate_permissionNobody_denies() {
         when(privacySettings.messagePermissionOf(target)).thenReturn(MessagePermission.NOBODY);
+
+        assertThat(service.evaluate(request(InteractionType.MESSAGE_INITIATE)))
+                .isEqualTo(denied(InteractionReason.PERMISSION_NOBODY));
+    }
+
+    @Test
+    void initiate_permissionNobodyAndRecipientFollowsActor_denies() {
+        when(privacySettings.messagePermissionOf(target)).thenReturn(MessagePermission.NOBODY);
+        lenient()
+                .when(followRepository.findAcceptedAt(target, actor))
+                .thenReturn(Optional.of(NOW_UTC.minusDays(100)));
 
         assertThat(service.evaluate(request(InteractionType.MESSAGE_INITIATE)))
                 .isEqualTo(denied(InteractionReason.PERMISSION_NOBODY));
@@ -310,6 +364,33 @@ class InteractionPolicyServiceImplTest {
                         decision(
                                 InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS,
                                 InteractionReason.HIDDEN_WORD));
+    }
+
+    @Test
+    void send_pendingFirstTextFromLimitedRequester_routeToHiddenRequests() {
+        limit(true, false);
+        noPersonalMatch();
+
+        assertThat(service.evaluate(send(ConversationRequestState.PENDING, true, 0, "text", "hi")))
+                .isEqualTo(
+                        decision(
+                                InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS,
+                                InteractionReason.LIMITED_NON_FOLLOWER));
+    }
+
+    @Test
+    void send_pendingFirstTextLimitedAndMatchingList_reportsLimitReason() {
+        limit(true, false);
+        when(hiddenWordService.matcherFor(target))
+                .thenReturn(PhraseMatcher.compile(List.of("spam")));
+
+        assertThat(
+                        service.evaluate(
+                                send(ConversationRequestState.PENDING, true, 0, "text", "spam")))
+                .isEqualTo(
+                        decision(
+                                InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS,
+                                InteractionReason.LIMITED_NON_FOLLOWER));
     }
 
     @Test
