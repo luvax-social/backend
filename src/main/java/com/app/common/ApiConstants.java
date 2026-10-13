@@ -61,6 +61,7 @@ public final class ApiConstants {
         public static final String LIKES = "/{postId}/likes";
         public static final String SAVE = "/{postId}/save";
         public static final String SAVED = "/saved";
+        public static final String NOT_INTERESTED = "/{postId}/not-interested";
         public static final String VIEW = "/{postId}/view";
         public static final String LIKED = "/liked";
         public static final String SEARCH = "/search";

@@ -23,6 +23,17 @@ public final class PostEventTypes {
     public static final String POST_SAVED_V1 = "post.saved.v1";
     public static final String POST_VIEWED_V1 = "post.viewed.v1";
 
+    /**
+     * A viewer declared a post not interesting.
+     *
+     * <p>Carries the post and its author. Outside {@code post.index.*} and {@code post.live.*}, and
+     * never bound to a notification queue: the author is not told.
+     */
+    public static final String POST_NOT_INTERESTED_V1 = "post.not-interested.v1";
+
+    /** A viewer took back a not-interested mark; carries the post only. */
+    public static final String POST_NOT_INTERESTED_UNDONE_V1 = "post.not-interested-undone.v1";
+
     public static final String POST_LIVE_LIKED_V1 = "post.live.liked.v1";
     public static final String POST_LIVE_UNLIKED_V1 = "post.live.unliked.v1";
 

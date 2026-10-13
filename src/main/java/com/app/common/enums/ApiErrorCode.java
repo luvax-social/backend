@@ -108,6 +108,7 @@ public enum ApiErrorCode {
     POST_FORBIDDEN("POST_FORBIDDEN", "You do not have access to this post", HttpStatus.FORBIDDEN),
     POST_ALREADY_LIKED("POST_ALREADY_LIKED", "Post already liked", HttpStatus.CONFLICT),
     POST_ALREADY_SAVED("POST_ALREADY_SAVED", "Post already saved", HttpStatus.CONFLICT),
+    POST_FEEDBACK_SELF("POST_FEEDBACK_SELF", "You cannot mark your own post as not interested", HttpStatus.BAD_REQUEST),
     // 422 rather than 400: the caption is syntactically fine and the request is well formed, but a
     // tag it names is one an administrator has taken out of circulation. The response body carries
     // the offending names under data.bannedTags, in normalized form, so a client can highlight them

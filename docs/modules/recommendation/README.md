@@ -286,7 +286,8 @@ These are accepted trade-offs, not defects.
 - **Deduplication is per-request only.** Items already shown on an earlier page can reappear later.
 - **A mid-pagination fallback reuses the offset.** If Gorse fails while the reader is deep in the list, the same numeric offset is applied to the popularity list, skipping its head. Only reachable when the recommender fails mid-scroll.
 - **Recommendations can lag behind an out-of-band data reset.** Gorse's item, user and feedback store is derived state kept in sync by `PostIndexSyncConsumer` (`post.index.upsert.v1` / `post.index.delete.v1`, the same events that drive the Elasticsearch sync) as posts are created, updated, hidden on removal and restored. That consumer relies on the outbox, so it only sees writes that go through the application. If PostgreSQL's `posts` table is reset by a path that does not replay through the outbox, Gorse keeps whatever items it already had, which can drift entirely out of overlap with the current `posts` table without any error, because every Gorse call still succeeds and the candidates just fail to resolve to a live post. The Gorse rebuild tool (section 7) is the repair, and it verifies the catalogue against PostgreSQL in both directions before it reports `DONE`.
-- **No negative feedback.** There is no "not interested" signal, and unlike/unsave do not retract prior positive feedback.
+- **Negative feedback is stored but not yet sent.** A "not interested" mark is stored in PostgreSQL and announced by an event, and a later change sends it to Gorse as negative feedback.
+- **Unlike and unsave do not retract prior positive feedback.**
 
 ---
 

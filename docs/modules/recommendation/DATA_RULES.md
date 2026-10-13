@@ -190,7 +190,9 @@ Batch reads that need more rows than the reader profile allows set `max_result_r
 - Analytics reads lag writes by seconds: an event is visible after the outbox publishes it and the consumer writes it (the recorder's rows after the async flush).
 - ClickHouse partitions `user_events` monthly by itself; there is no partition maintenance job.
 - No A/B testing infrastructure for recommendation algorithms.
-- No explicit user "not interested" signal. Negative training examples are inferred rather than declared: a `read` with no accompanying positive feedback is what the factorization machine ranker trains against. A seeded database with no read signal therefore teaches the ranker nothing, which is why `SeedOutboxEmitter` emits `post.viewed.v1` and `AnalyticsSeedWriter` no longer writes `post_view` rows of its own.
+- A user's "not interested" mark on a post is stored in PostgreSQL (`post_not_interested`) and announced by `post.not-interested.v1` and `post.not-interested-undone.v1`.
+- A later change sends that mark to Gorse as negative feedback, so until then it does not alter any ranking.
+- Other negative training examples are inferred rather than declared: a `read` with no accompanying positive feedback is what the factorization machine ranker trains against. A seeded database with no read signal therefore teaches the ranker nothing, which is why `SeedOutboxEmitter` emits `post.viewed.v1` and `AnalyticsSeedWriter` no longer writes `post_view` rows of its own.
 
 ---
 
