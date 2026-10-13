@@ -44,6 +44,10 @@ If a counter appears stale, the correct action is to recalculate from the source
 
 All counter columns have `CHECK (column >= 0)` enforced at the database level. Triggers use `GREATEST(counter - 1, 0)` to prevent underflow on decrement.
 
+`posts.comment_count` and `comments.reply_count` count only approved, non-tombstoned comments.
+A comment counts while `moderation_status = 'approved'`, `deleted_at IS NULL` and `admin_removed_at IS NULL` (V95, V143).
+A comment hidden by its post owner's Hidden Words or interaction limit is therefore not counted, and unhiding it counts it.
+
 **Exception — `posts.view_count`**: This counter is NOT maintained by a PostgreSQL trigger. It is updated by a background job due to high-volume write concerns. As a result, `view_count` may lag behind real-time activity. This is a deliberate tradeoff. Application code must not attempt to increment `view_count` directly from a request path.
 
 ---
@@ -120,7 +124,7 @@ The enforcement they call for is already in place, so adding that flow will not 
 | `updated_at` | Trigger `fn_update_updated_at` | Do not set in application code for tables that have this trigger |
 | `deleted_at` | Application code | Set to `NOW()` on soft delete; `NULL` to restore |
 
-Tables with `updated_at` triggers: `users` (`trg_users_updated_at`), `posts` (`trg_posts_updated_at`), `comments` (`trg_comments_updated_at`), `conversations` (`trg_conversations_updated_at`).
+Tables with `updated_at` triggers: `users` (`trg_users_updated_at`), `posts` (`trg_posts_updated_at`), `comments` (`trg_comments_updated_at`), `conversations` (`trg_conversations_updated_at`), `user_mutes` (`trg_user_mutes_updated_at`), `interaction_limits` (`trg_interaction_limits_updated_at`), `hidden_words` (`trg_hidden_words_updated_at`).
 
 All timestamps use `TIMESTAMPTZ` (timezone-aware). Store and compare in UTC.
 
@@ -176,6 +180,23 @@ The field appears on every cursor-paginated response because the envelope is sha
 Hashtag search does **not** set it.
 Its fallback answers from PostgreSQL, which is the source of truth, so the results are real and complete for the query and only the ranking differs from Elasticsearch relevance.
 Post search sets it because it returns nothing at all.
+
+---
+
+## Text match normalisation
+
+1. Normalise text to Unicode NFD, then remove every code point in `\p{M}`.
+2. Map `đ` and `Đ` to `d`.
+3. Lowercase with the root locale.
+4. Tokenise on maximal runs of `[\p{L}\p{N}@$!]`, treating everything else as a separator.
+5. Remove every leading `@` and trailing `!` from each token.
+6. If a token contains at least one letter, map `0→o 1→i 3→e 4→a 5→s 7→t @→a $→s !→i`; keep a token of only digits unchanged.
+7. Drop tokens that are empty after marker removal.
+8. Normalise a word or phrase entry into tokens the same way, and match it only when its tokens appear as a contiguous subsequence of the content tokens.
+
+An entry must contain 1 to 64 raw characters and 1 to 6 tokens after normalisation.
+Each user may have at most 200 personal entries.
+Reject entries with the same normalised form using `HIDDEN_WORD_DUPLICATE`.
 
 ---
 

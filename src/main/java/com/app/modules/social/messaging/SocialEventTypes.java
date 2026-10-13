@@ -13,5 +13,14 @@ public final class SocialEventTypes {
     public static final String USER_FOLLOW_REQUEST_REJECTED_V1 = "user.follow-request.rejected.v1";
     public static final String USER_BLOCKED_V1 = "user.blocked.v1";
 
+    /**
+     * An account turned its interaction limit on, replaced it, or turned it off.
+     *
+     * <p>The payload carries both toggles and, while a limit is in force, its end time; the end
+     * time is absent once the limit is off.
+     */
+    public static final String USER_INTERACTION_LIMIT_CHANGED_V1 =
+            "user.interaction-limit.changed.v1";
+
     private SocialEventTypes() {}
 }

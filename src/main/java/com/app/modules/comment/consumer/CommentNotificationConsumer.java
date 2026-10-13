@@ -55,6 +55,7 @@ public class CommentNotificationConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(CommentNotificationConsumer.class);
     private static final String ENTITY_TYPE = "comment";
+    private static final String VISIBILITY_HIDDEN = "hidden";
 
     private final DomainEventMessageParser parser;
     private final ProcessedMessageService processedMessageService;
@@ -123,6 +124,13 @@ public class CommentNotificationConsumer {
         UUID actor = event.actorId();
         UUID commentId = uuid(data.get("commentId"));
         UUID postId = uuid(data.get("postId"));
+        // A hidden comment notifies nobody, and neither do its mentions: the post owner reviews
+        // hidden comments in their own list, and a notification would announce what the owner's
+        // Hidden Words or limit exists to keep out of sight. Withdrawing a like stays allowed.
+        if (!CommentEventTypes.COMMENT_UNLIKED_V1.equals(event.eventType())
+                && VISIBILITY_HIDDEN.equals(data.get("visibility"))) {
+            return;
+        }
         switch (event.eventType()) {
             case CommentEventTypes.COMMENT_CREATED_V1 -> {
                 int depth = ((Number) data.get("depth")).intValue();

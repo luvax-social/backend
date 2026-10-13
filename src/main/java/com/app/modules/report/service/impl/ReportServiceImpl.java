@@ -76,7 +76,7 @@ public class ReportServiceImpl implements ReportService {
     }
 
     private ReportResponse persistReport(UUID reporterId, CreateReportRequest request) {
-        UUID ownerId = validateEntityExists(request.reportType(), request.entityId());
+        UUID ownerId = validateEntityExists(reporterId, request.reportType(), request.entityId());
         if (reporterId.equals(ownerId)) {
             throw new AppException(ApiErrorCode.REPORT_SELF_NOT_ALLOWED);
         }
@@ -173,9 +173,9 @@ public class ReportServiceImpl implements ReportService {
         return reportMapper.toResponse(reportRepository.save(report));
     }
 
-    private UUID validateEntityExists(ReportType reportType, UUID entityId) {
+    private UUID validateEntityExists(UUID reporterId, ReportType reportType, UUID entityId) {
         return reportRepository
-                .findOwnerId(reportType, entityId)
+                .findOwnerId(reportType, entityId, reporterId)
                 .orElseThrow(() -> new AppException(ApiErrorCode.REPORT_TARGET_NOT_FOUND));
     }
 

@@ -251,7 +251,6 @@ app:
   comment:
     slow-mode-seconds: ${COMMENT_SLOW_MODE_SECONDS:0}
     idempotency-ttl-hours: ${COMMENT_IDEMPOTENCY_TTL_HOURS:24}
-    blocked-words: []
     consumer:
       enabled: ${COMMENT_CONSUMER_ENABLED:false}
     live:

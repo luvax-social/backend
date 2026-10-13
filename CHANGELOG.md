@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- `posts.comment_count` and a comment's `reply_count` now count only approved comments, so a hidden comment is not counted until its post owner unhides it.
+- `GET` and `PATCH /users/me/settings` carry `hiddenWordsSystemEnabled`, the account choice to apply the platform-wide hidden word list alongside its personal one; it defaults to true and a request that omits it leaves it unchanged.
+- The `allowMessageRequests` setting is replaced by `messagePermission` (`everyone`, `following` or `nobody`) on `GET` and `PUT /users/me/settings`; existing accounts keep their behaviour (`true` becomes `everyone`, `false` becomes `following`), and a request that still sends `allowMessageRequests` is rejected.
+- Accepted follows now record when they became accepted, so approving an older request keeps its original creation time and records the approval time separately.
 - Retry backoff lookup widens the attempt number before subtracting, so an out-of-range attempt count clamps to the nearest backoff instead of wrapping around.
 - The repository owner is now the only code owner, so opening a pull request no longer requests a review from anyone else, and the git workflow rules let the owner push directly to `main` without a pull request.
 - Security configuration receives its JSON mapper through the constructor.
@@ -25,8 +29,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration tests now run against PostgreSQL 18, the production major, through one shared image constant instead of PostgreSQL 16 named in each test class.
 - Allowed WebSocket origins for direct messages are now split without a backtracking-prone pattern, and empty entries in the list are ignored.
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
+- A comment saved hidden is now visible to its author only on every path: comment and reply lists, the context chain, like and unlike, replies to it, edits, deletes, reports, notifications and live updates answer a non-author as if it did not exist, and the live delete update carries only the number of comments viewers could see.
 
 ### Added
+- A comment the post owner's Hidden Words or interaction limit filters is now saved hidden instead of shown, with its author told nothing and any account it mentions not notified; a reply to a comment whose author blocked the replier answers `COMMENT_NOT_FOUND`, and an edit can hide an approved comment but never approves a hidden one.
+- One interaction policy now decides, in a fixed order of block, interaction limit, message permission, pending request and Hidden Words, whether a comment, mention, new conversation or message is allowed, hidden, routed to message requests or refused.
+- Each account can keep a personal Hidden Words list of up to 200 words or phrases through `GET` and `POST /users/me/hidden-words` and `DELETE /users/me/hidden-words/{entryId}`; entries are compared by their normalised form, and a duplicate, a full list or an unusable phrase answers `HIDDEN_WORD_DUPLICATE`, `HIDDEN_WORD_LIMIT_REACHED` or `HIDDEN_WORD_INVALID`.
+- Mutes, show fewer, interaction limits, not-interested and hidden word lists now have database tables, and user settings gain a system hidden words toggle.
+- Hidden Words now share a text match contract for whole-token and contiguous phrase matching across Vietnamese accents, mention markers, and leetspeak.
 - A rollback script, `scripts/rollback/phase2_postgres_rollback.sql`, restores the PostgreSQL schema from V133 to V126 and forgets V127 to V133, so the release that moved analytics to ClickHouse can be abandoned; a test proves the result matches a V126 database, that a second run changes nothing and that the migrations then apply again.
 - `GORSE_REBUILD_REQUESTS_PER_SECOND`, `GORSE_REBUILD_USER_BATCH_SIZE`, `GORSE_REBUILD_ITEM_BATCH_SIZE` and `GORSE_REBUILD_FEEDBACK_BATCH_SIZE` configuration properties.
 - An operator-triggered Gorse rebuild (`GORSE_REBUILD`, `GORSE_REBUILD_TOKEN`) purges Gorse's store, pushes every account and every post as an item (hidden when unpublished or deleted), replays the feedback the live pipeline accumulated from ClickHouse, and fails loudly if the catalogue then differs from PostgreSQL; a run is checkpointed in `gorse_rebuild_runs`, resumes after a crash with the same token, never repeats once finished, and pauses the feedback consumer while it runs.
@@ -567,6 +577,10 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- A message permission is now stored and read with the root locale, so an account set to `following` no longer fails to load when the server runs under a Turkish default locale.
+- Notification previews now hide blocked or unapproved comment and parent text from viewers who cannot see it.
+- A sender can no longer message a peer who left a conversation and then blocked them, and that peer's membership stays inactive.
+- Reusing a message send key with a different reply target now returns a conflict instead of replaying the earlier message.
 - The public support-category check now reads inside a read-only transaction like the list it filters.
 - A WebSocket subscription or send with no authenticated principal is now rejected with the same not-permitted error as any other denial.
 - The Gorse store purge now connects with the credentials of the application's live database connection, so the application context starts where `POSTGRES_USER` and `POSTGRES_PASSWORD` are unset and integration tests no longer reach Gorse with a developer's local credentials.
@@ -928,6 +942,8 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- Comment preview integration coverage now checks moderation visibility and blocks in both directions.
+- The backend and frontend copies of the text match vectors are compared byte for byte whenever both checkouts are present.
 - The broker send guard, comment STOMP send authorisation and outbox trace continuity integration tests wait on server-side signals instead of sleeping or polling.
 - The post like live delivery test waits for the post notification consumer to finish before cleaning up, so its cleanup no longer deadlocks with a notification write still in flight.
 - The daily platform statistics test anchors its window to midnight UTC, so it no longer fails when it runs after 19:00 UTC.

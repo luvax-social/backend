@@ -7,7 +7,6 @@ import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
-import com.app.modules.comment.config.CommentProperties;
 import com.app.modules.comment.service.CommentModerationService;
 
 @Service
@@ -17,12 +16,6 @@ public class CommentModerationServiceImpl implements CommentModerationService {
     private static final int MAX_TOKEN_REPEAT = 3;
     private static final int CAPS_SPAM_LENGTH = 50;
 
-    private final CommentProperties properties;
-
-    public CommentModerationServiceImpl(CommentProperties properties) {
-        this.properties = properties;
-    }
-
     @Override
     public ModerationResult check(String normalizedContent) {
         if (normalizedContent == null || normalizedContent.isBlank()) {
@@ -30,12 +23,6 @@ public class CommentModerationServiceImpl implements CommentModerationService {
         }
         if (normalizedContent.length() > MAX_LENGTH) {
             return ModerationResult.rejected("too_long");
-        }
-        String lower = normalizedContent.toLowerCase(Locale.ROOT);
-        for (String word : properties.blockedWords()) {
-            if (!word.isBlank() && lower.contains(word.toLowerCase(Locale.ROOT))) {
-                return ModerationResult.rejected("blocked_word");
-            }
         }
         if (isSpam(normalizedContent)) {
             return ModerationResult.rejected("spam");

@@ -128,7 +128,7 @@ public class NotificationItemAssembler {
                                 : postPreviewService.loadPreviews(viewerId, postIds),
                         commentIds.isEmpty()
                                 ? Map.of()
-                                : commentPreviewService.loadPreviews(commentIds),
+                                : commentPreviewService.loadPreviews(viewerId, commentIds),
                         storyIds.isEmpty()
                                 ? Map.of()
                                 : storyPreviewService.loadPreviews(viewerId, storyIds),

@@ -208,7 +208,7 @@ class MessageControllerIT {
         TestUser alice = registerUser("req_alice");
         TestUser bob = registerUser("req_bob");
         jdbcTemplate.update(
-                "UPDATE user_settings SET allow_message_requests = FALSE WHERE user_id = ?",
+                "UPDATE user_settings SET message_permission = 'following' WHERE user_id = ?",
                 bob.id());
 
         ResponseEntity<Map> response = createDirect(alice, bob.id());

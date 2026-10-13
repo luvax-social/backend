@@ -114,7 +114,9 @@ public class MessageServiceImpl implements MessageService {
                                 + "|"
                                 + request.sharedStoryId()
                                 + "|"
-                                + request.mediaAssetId());
+                                + request.mediaAssetId()
+                                + "|"
+                                + request.replyToId());
         if (idempotencyKey != null
                 && idempotencyRepository.insertIfAbsent(actorId, idempotencyKey, requestHash)
                         == 0) {
@@ -314,10 +316,7 @@ public class MessageServiceImpl implements MessageService {
                 participantRepository
                         .findByIdConversationIdOrderByJoinedAtAsc(conversation.getId())
                         .stream()
-                        .filter(
-                                p ->
-                                        p.getLeftAt() == null
-                                                && !p.getId().getUserId().equals(actorId))
+                        .filter(p -> !p.getId().getUserId().equals(actorId))
                         .map(p -> p.getId().getUserId())
                         .findFirst()
                         .orElse(null);

@@ -15,6 +15,7 @@ Two rules remain outstanding: a background job to update `posts.view_count`, and
 | `post_likes` | `user_id`, `post_id`, `created_at` | One row per (user, post) pair; compound PK prevents duplicate likes. Canonical like signal. |
 | `post_saves` | `user_id`, `post_id`, `created_at` | One row per (user, post) pair; compound PK prevents duplicate saves. Canonical bookmark signal. |
 | `post_edit_history` | `id`, `post_id`, `editor_id`, `previous_caption`, `edited_at` | Append-only caption edit audit (V22). Rows are never updated or soft-deleted; retention is permanent until post hard-delete (FK cascade). |
+| `post_not_interested` | `user_id`, `post_id`, `created_at` | One row per (user, post) pair (V139); compound PK prevents duplicates. Rows are deleted with either the user or the post (FK cascade). |
 
 These tables cannot be rebuilt from any other source if lost.
 

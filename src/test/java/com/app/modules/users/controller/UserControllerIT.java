@@ -349,6 +349,69 @@ class UserControllerIT {
     }
 
     @Test
+    void updateMySettings_messagePermission_isStoredAndReturnedLowercase() {
+        String access =
+                registerVerifyAndLogin("user_sett_perm", uniqueEmail("sett_perm"), TEST_PASSWORD)
+                        .get("accessToken");
+
+        ResponseEntity<Map> updated =
+                patchWithAuth(
+                        "/api/v1/users/me/settings", Map.of("messagePermission", "nobody"), access);
+        ResponseEntity<Map> reread = getWithAuth("/api/v1/users/me/settings", access);
+
+        assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(((Map<?, ?>) updated.getBody().get("data")).get("messagePermission"))
+                .isEqualTo("nobody");
+        assertThat(((Map<?, ?>) reread.getBody().get("data")).get("messagePermission"))
+                .isEqualTo("nobody");
+    }
+
+    @Test
+    void getMySettings_newAccount_messagePermissionDefaultsToEveryone() {
+        String access =
+                registerVerifyAndLogin("user_sett_dflt", uniqueEmail("sett_dflt"), TEST_PASSWORD)
+                        .get("accessToken");
+
+        ResponseEntity<Map> response = getWithAuth("/api/v1/users/me/settings", access);
+
+        Map<?, ?> data = (Map<?, ?>) response.getBody().get("data");
+        assertThat(data.get("messagePermission")).isEqualTo("everyone");
+        assertThat(data.containsKey("allowMessageRequests")).isFalse();
+    }
+
+    @Test
+    void updateMySettings_unknownMessagePermission_isRejectedAndNothingChanges() {
+        String access =
+                registerVerifyAndLogin("user_sett_bad", uniqueEmail("sett_bad"), TEST_PASSWORD)
+                        .get("accessToken");
+
+        ResponseEntity<Map> response =
+                patchWithAuth(
+                        "/api/v1/users/me/settings",
+                        Map.of("messagePermission", "friends"),
+                        access);
+        ResponseEntity<Map> reread = getWithAuth("/api/v1/users/me/settings", access);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody().get("code")).isEqualTo("MALFORMED_REQUEST_BODY");
+        assertThat(((Map<?, ?>) reread.getBody().get("data")).get("messagePermission"))
+                .isEqualTo("everyone");
+    }
+
+    @Test
+    void updateMySettings_removedAllowMessageRequestsField_isRejected() {
+        String access =
+                registerVerifyAndLogin("user_sett_old", uniqueEmail("sett_old"), TEST_PASSWORD)
+                        .get("accessToken");
+
+        ResponseEntity<Map> response =
+                patchWithAuth(
+                        "/api/v1/users/me/settings", Map.of("allowMessageRequests", false), access);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void updateMySettings_withoutToken_returns401() {
         ResponseEntity<Map> response =
                 patchNoAuth("/api/v1/users/me/settings", Map.of("notifyLikes", false));

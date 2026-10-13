@@ -202,7 +202,79 @@ class VocabularyControllerIT {
         assertThat(reason.get("isEnabled")).isEqualTo(true);
         assertThat(reason.get("sortOrder")).isEqualTo(4);
         assertThat(reason.get("appliesTo"))
-                .isEqualTo(List.of("post", "comment", "story", "message"));
+                .isEqualTo(List.of("post", "comment", "story", "message", "message_reaction"));
+    }
+
+    @Test
+    void getVocabularies_contentReasonsAppliedToMessagesAlsoApplyToMessageReactions() {
+        TestUser ordinary = createUser("vocab_reaction_reasons_user", "user");
+        List<Map<String, Object>> reasons = listOf(dataOf(getWithAuth(ordinary)), "reportReasons");
+
+        for (String key : List.of("nudity", "violence", "hate_speech")) {
+            Map<String, Object> reason =
+                    reasons.stream()
+                            .filter(row -> key.equals(row.get("key")))
+                            .findFirst()
+                            .orElseThrow();
+            assertThat(((List<?>) reason.get("appliesTo")).contains("message_reaction"))
+                    .as(key)
+                    .isTrue();
+        }
+        // The empty list already means every report type, so those reasons stay unrestricted.
+        Map<String, Object> spam =
+                reasons.stream()
+                        .filter(row -> "spam".equals(row.get("key")))
+                        .findFirst()
+                        .orElseThrow();
+        assertThat((List<?>) spam.get("appliesTo")).isEmpty();
+    }
+
+    @Test
+    void getVocabularies_hiddenWordAndReactionModerationActionsAreRegistered() {
+        TestUser ordinary = createUser("vocab_hidden_word_action_user", "user");
+        List<Map<String, Object>> actions =
+                listOf(dataOf(getWithAuth(ordinary)), "moderationActions");
+
+        for (String key :
+                List.of(
+                        "create_hidden_word",
+                        "edit_hidden_word",
+                        "delete_hidden_word",
+                        "remove_message_reaction",
+                        "restore_message_reaction")) {
+            Map<String, Object> action =
+                    actions.stream()
+                            .filter(row -> key.equals(row.get("key")))
+                            .findFirst()
+                            .orElseThrow(() -> new AssertionError("missing action " + key));
+            assertThat(action.get("isEnabled")).as(key).isEqualTo(true);
+        }
+        Map<String, Object> remove =
+                actions.stream()
+                        .filter(row -> "remove_message_reaction".equals(row.get("key")))
+                        .findFirst()
+                        .orElseThrow();
+        Map<String, Object> restore =
+                actions.stream()
+                        .filter(row -> "restore_message_reaction".equals(row.get("key")))
+                        .findFirst()
+                        .orElseThrow();
+        assertThat(remove.get("requiresReason")).isEqualTo(true);
+        assertThat(restore.get("requiresReason")).isEqualTo(false);
+    }
+
+    @Test
+    void getVocabularies_reactionRemovedNotificationIsNotUserToggleable() {
+        TestUser ordinary = createUser("vocab_reaction_removed_user", "user");
+
+        Map<String, Object> type =
+                listOf(dataOf(getWithAuth(ordinary)), "notificationTypes").stream()
+                        .filter(row -> "reaction_removed".equals(row.get("key")))
+                        .findFirst()
+                        .orElseThrow();
+
+        assertThat(type.get("isUserToggleable")).isEqualTo(false);
+        assertThat(type.get("isEnabled")).isEqualTo(true);
     }
 
     @Test

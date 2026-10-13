@@ -95,7 +95,8 @@ class AnalyticsRollbackScriptIT {
                 UUID.randomUUID(),
                 user,
                 UUID.randomUUID());
-        flyway("latest").migrate();
+        // The rollback script covers V127 to V133 only, so later migrations are outside its scope.
+        flyway("133").migrate();
 
         assertThat(exists("gorse_rebuild_runs")).isTrue();
         assertThat(exists("user_events")).isFalse();
@@ -130,7 +131,7 @@ class AnalyticsRollbackScriptIT {
     @Test
     @Order(5)
     void migrate_afterRollback_appliesTheReleasedMigrationsAgain() {
-        flyway("latest").migrate();
+        flyway("133").migrate();
 
         assertThat(count("SELECT max(version::int) FROM flyway_schema_history")).isEqualTo(133);
         assertThat(exists("gorse_rebuild_runs")).isTrue();

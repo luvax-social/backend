@@ -31,6 +31,23 @@ public interface FollowRepository extends JpaRepository<Follow, FollowId>, Follo
     List<Follow> findByIdFollowerIdAndStatus(UUID followerId, FollowStatus status);
 
     /**
+     * Returns when the follow from {@code followerId} to {@code followingId} was accepted.
+     *
+     * <p>A pending request reads as no follow at all, which is what the interaction rules need: an
+     * account still waiting for approval is not a follower. A primary key lookup.
+     *
+     * @param followerId the follower
+     * @param followingId the account followed
+     * @return the acceptance time of an accepted follow, otherwise empty
+     */
+    @Query(
+            "SELECT f.acceptedAt FROM Follow f WHERE f.id.followerId = :followerId"
+                    + " AND f.id.followingId = :followingId"
+                    + " AND f.status = com.app.modules.social.enums.FollowStatus.ACCEPTED")
+    Optional<OffsetDateTime> findAcceptedAt(
+            @Param("followerId") UUID followerId, @Param("followingId") UUID followingId);
+
+    /**
      * Deletes a follow edge regardless of status, returning the affected-row count so the caller
      * can distinguish an actual unfollow from a no-op instead of loading the row first and calling
      * {@code delete(entity)}, which raises {@link

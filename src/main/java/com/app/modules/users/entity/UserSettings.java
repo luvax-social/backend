@@ -4,11 +4,15 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import org.hibernate.annotations.UpdateTimestamp;
+
+import com.app.modules.users.converter.MessagePermissionConverter;
+import com.app.modules.users.enums.MessagePermission;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -16,7 +20,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** Per-user notification and privacy preferences. Defaults match the V03 schema. */
+/**
+ * Per-user notification and privacy preferences.
+ *
+ * <p>The field defaults apply when a row is built in code; the column defaults in the database
+ * (V03, V136, V137) apply to rows inserted by SQL, and the two are kept equal.
+ */
 @Entity
 @Table(name = "user_settings")
 @Getter
@@ -68,9 +77,15 @@ public class UserSettings {
     @Builder.Default
     private boolean suggestible = true;
 
-    @Column(name = "allow_message_requests", nullable = false)
+    @Convert(converter = MessagePermissionConverter.class)
+    @Column(name = "message_permission", nullable = false, columnDefinition = "message_permission")
     @Builder.Default
-    private boolean allowMessageRequests = true;
+    private MessagePermission messagePermission = MessagePermission.EVERYONE;
+
+    /** True when the platform-wide hidden word list also applies to this account's content. */
+    @Column(name = "hidden_words_system_enabled", nullable = false)
+    @Builder.Default
+    private boolean hiddenWordsSystemEnabled = true;
 
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)

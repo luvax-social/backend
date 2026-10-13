@@ -430,12 +430,13 @@ class OpenApiContractIT {
     @Test
     void only422IsDocumentedForAKnownUnprocessableOutcome() {
         JsonNode doc = document();
-        // 422 is reserved for a well-formed request whose content cannot be satisfied. Four
+        // 422 is reserved for a well-formed request whose content cannot be satisfied. Five
         // outcomes qualify: COMMENT_MODERATION_REJECTED, the media upload confirmation rejecting a
         // storage key with no matching stored object, a warning citing a reason key whose
-        // report_reason_configs row is disabled or absent, and POST_BANNED_HASHTAG on the three
-        // post write paths that publish a caption. All four are requests the server understood and
-        // refused on their content. A 422 documented for anything else (e.g. generic
+        // report_reason_configs row is disabled or absent, POST_BANNED_HASHTAG on the three
+        // post write paths that publish a caption, and HIDDEN_WORD_LIMIT_REACHED when a personal
+        // hidden words list is full. All five are requests the server understood and refused on
+        // their content. A 422 documented for anything else (e.g. generic
         // bean-validation failure, which the server answers with 400) is a contract defect, not a
         // valid outcome.
         Set<String> allowed422 =
@@ -446,7 +447,8 @@ class OpenApiContractIT {
                         "POST /api/v1/admin/warnings/for-user/{userId}",
                         "POST /api/v1/posts",
                         "PATCH /api/v1/posts/{postId}",
-                        "PATCH /api/v1/posts/{postId}/status");
+                        "PATCH /api/v1/posts/{postId}/status",
+                        "POST /api/v1/users/me/hidden-words");
 
         List<String> offenders = new ArrayList<>();
         forEachOperation(

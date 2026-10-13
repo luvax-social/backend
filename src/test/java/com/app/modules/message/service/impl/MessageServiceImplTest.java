@@ -312,7 +312,7 @@ class MessageServiceImplTest {
         UUID actorId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
         stubActiveGroupParticipant(conversationId, actorId);
-        String hash = sha256(conversationId + "|TEXT|hello|null|null|null");
+        String hash = sha256(conversationId + "|TEXT|hello|null|null|null|null");
         when(idempotencyRepository.insertIfAbsent(eq(actorId), eq("key-1"), eq(hash)))
                 .thenReturn(0);
         MessageWriteIdempotency row =

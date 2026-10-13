@@ -41,6 +41,8 @@ This table cannot be rebuilt from any other source if lost.
 
 | Rule | Service / Component |
 |------|---------------------|
+| A hidden comment can be reported by the owner of the post it sits on, who reviews hidden comments, and by nobody else; every other reporter is answered `REPORT_TARGET_NOT_FOUND`, exactly as for a comment that does not exist | `ReportTargetRepositoryImpl.findOwnerId`, which takes the reporter id and lets a hidden comment through only for the post owner |
+| The author of a hidden comment is let through that lookup so the self-report refusal answers `REPORT_SELF_NOT_ALLOWED` exactly as it does for a visible comment, because the author must not be able to tell the comment is hidden | `ReportTargetRepositoryImpl.findOwnerId`, then `ReportServiceImpl.persistReport` |
 | A user may not report the same entity more than once | `ReportServiceImpl.validateDuplicateReport` — enforced via `ReportRepository.existsByReporterIdAndReportTypeAndEntityId`, with the unique index `uq_reports_reporter_type_entity` (V30) as the authoritative guard against a concurrent double-submit |
 
 > **Why V89's index swap runs in a transaction.**

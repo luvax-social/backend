@@ -10,7 +10,7 @@ import com.app.modules.users.entity.UserSettings;
 /**
  * Module-local read-only repository over the users module's {@link UserSettings} entity.
  *
- * <p>Used to read {@code allow_message_requests} when gating a new direct conversation from a
+ * <p>Used to read {@code message_permission} when gating a new direct conversation from a
  * non-follower.
  */
 @Repository

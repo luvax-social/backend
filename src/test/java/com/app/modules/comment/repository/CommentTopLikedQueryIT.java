@@ -165,6 +165,48 @@ class CommentTopLikedQueryIT {
         assertThat(body).extracting(Comment::getId).containsExactly(second, third);
     }
 
+    @Test
+    void findTopLikedTopLevel_hiddenComment_isNeverPinnedNotEvenForItsAuthor() {
+        UUID owner = insertUser("pin_owner");
+        UUID author = insertUser("pin_author");
+        UUID postId = insertPost(owner);
+        UUID approved = insertTopLevelComment(postId, author, BASE, 1);
+        insertComment(postId, author, null, BASE.minusMinutes(1), 400, "hidden", null);
+
+        List<Comment> pinnedForAuthor =
+                commentRepository.findTopLikedTopLevel(postId, author, pinnedPage());
+        List<Comment> pinnedForOwner =
+                commentRepository.findTopLikedTopLevel(postId, owner, pinnedPage());
+
+        assertThat(pinnedForAuthor).extracting(Comment::getId).containsExactly(approved);
+        assertThat(pinnedForOwner).extracting(Comment::getId).containsExactly(approved);
+    }
+
+    @Test
+    void findFirstTopLevelExcluding_hiddenComment_isListedToItsAuthorOnly() {
+        UUID owner = insertUser("list_owner");
+        UUID author = insertUser("list_author");
+        UUID other = insertUser("list_other");
+        UUID postId = insertPost(owner);
+        UUID approved = insertTopLevelComment(postId, other, BASE, 0);
+        UUID hidden = insertComment(postId, author, null, BASE.minusMinutes(1), 0, "hidden", null);
+        PageRequest page = PageRequest.of(0, 10);
+        UUID[] none = new UUID[0];
+
+        assertThat(commentRepository.findFirstTopLevelExcluding(postId, none, author, page))
+                .extracting(Comment::getId)
+                .containsExactly(approved, hidden);
+        assertThat(commentRepository.findFirstTopLevelExcluding(postId, none, other, page))
+                .extracting(Comment::getId)
+                .containsExactly(approved);
+        assertThat(commentRepository.findFirstTopLevelExcluding(postId, none, owner, page))
+                .extracting(Comment::getId)
+                .containsExactly(approved);
+        assertThat(commentRepository.findFirstTopLevelExcluding(postId, none, null, page))
+                .extracting(Comment::getId)
+                .containsExactly(approved);
+    }
+
     private static PageRequest pinnedPage() {
         return PageRequest.of(0, PINNED);
     }
@@ -228,10 +270,12 @@ class CommentTopLikedQueryIT {
                 .sql(
                         """
 						INSERT INTO comments(post_id, user_id, parent_id, root_id, depth, content,
-											like_count, moderation_status, created_at, deleted_at)
+											like_count, moderation_status, hidden_reason, created_at, deleted_at)
 						VALUES (:postId, :userId, :parentId, :parentId,
 								CASE WHEN CAST(:parentId AS uuid) IS NULL THEN 0 ELSE 1 END,
-								'text', :likeCount, :moderationStatus, :createdAt, :deletedAt)
+								'text', :likeCount, :moderationStatus,
+								CASE WHEN :moderationStatus = 'hidden' THEN 'hidden_words' END,
+								:createdAt, :deletedAt)
 						RETURNING id
 						""")
                 .param("postId", postId)

@@ -1,7 +1,7 @@
 # Users Module — Data Rules
 
 **Implementation status**: Implemented for profile and settings.
-`UserController`, `UserServiceImpl`, `UserSummaryServiceImpl`, `UserRepository`, and `UserSettingsRepository` all exist.
+`UserController`, `UserSafetyController`, `UserServiceImpl`, `UserPrivacySettingsServiceImpl`, `UserSummaryServiceImpl`, `UserRepository`, and `UserSettingsRepository` all exist.
 The `push_tokens` table has no Java code at all — no entity, no repository, no service — and account soft delete and restore are likewise unimplemented.
 
 ---
@@ -11,7 +11,7 @@ The `push_tokens` table has no Java code at all — no entity, no repository, no
 | Table | Key Columns | Notes |
 |-------|-------------|-------|
 | `users` | `id`, `username`, `email`, `display_name`, `bio`, `avatar_url`, `banner_url`, `website_url`, `is_private`, `is_verified`, `status`, `role`, `deleted_at`, `registration_ip`, `last_login_ip`, `last_login_at`, `suspended_until` | Profile fields. Shared with auth module (auth owns the row lifecycle; users module manages profile fields). The four columns added in V56 are written by the auth and admin modules only and are never exposed on a public profile shape; see `auth/DATA_RULES.md` and `admin/DATA_RULES.md`. |
-| `user_settings` | `user_id` (PK/FK), `notify_*`, `show_activity_status`, `allow_story_replies`, `allow_message_requests` | Per-user notification and privacy preferences. Created alongside the user account. |
+| `user_settings` | `user_id` (PK/FK), `notify_*`, `show_activity_status`, `allow_story_replies`, `message_permission`, `hidden_words_system_enabled` | Per-user notification and privacy preferences. `message_permission` is the `message_permission` enum (`everyone`, `following`, `nobody`, default `everyone`) and replaced the `allow_message_requests` boolean in V136, which archived the old values in `archived_user_settings_allow_message_requests`. Created alongside the user account. `hidden_words_system_enabled` (V137, default true) controls whether the platform-wide hidden word list applies to the account. |
 | `push_tokens` | `id`, `user_id`, `token`, `platform`, `last_used_at` | Device push notification tokens. Multiple tokens per user (one per device). **Schema only — no application code reads or writes this table.** |
 
 These tables cannot be rebuilt from any other source if lost.
@@ -78,6 +78,11 @@ Queries using them must filter soft-deleted rows themselves.
 | A soft-deleted or unknown user id resolves to a placeholder, not an error | `UserSummaryServiceImpl.loadSummaries` — `displayName` becomes `"Deleted user"`, `username` becomes `null` |
 | Batch user lookups are a single query regardless of id count | `UserRepository.findSummariesByIdIn` |
 | `user_settings` is created with defaults when a new user registers | `AuthServiceImpl.register` and `CustomOidcUserService` (OAuth path) |
+| `PATCH /users/me/settings` applies `hiddenWordsSystemEnabled` only when it is non-null; a missing value leaves the stored toggle unchanged, and the toggle never touches the personal hidden words list | `UserServiceImpl.updateMySettings` |
+| Other modules read `hidden_words_system_enabled` and `message_permission` through one read-only service; an account with no `user_settings` row logs an error and answers the column defaults (platform-wide list on, permission `everyone`) instead of failing the actor on whose behalf the read is made, while the owner's own `GET /users/me/settings` stays strict and answers `NOT_FOUND` | `UserPrivacySettingsServiceImpl` |
+| The personal hidden words list is managed only by its owner through `GET` and `POST /users/me/hidden-words` and `DELETE /users/me/hidden-words/{entryId}`; the controller resolves the account from the token and the list itself is owned by the `social` module (see its `DATA_RULES.md`, Section 3B) | `UserSafetyController` delegating to `HiddenWordService` |
+| A personal entry is 1 to 64 raw characters (counted by code point) that normalise to 1 to 6 words with no control characters, an account keeps at most 200, and two entries with the same normalised form are rejected; the codes are `HIDDEN_WORD_INVALID` (400), `HIDDEN_WORD_LIMIT_REACHED` (422) and `HIDDEN_WORD_DUPLICATE` (409) | `HiddenWordServiceImpl.addPersonal` |
+| The interaction limit is managed only by its owner through `GET`, `PUT` and `DELETE /users/me/interaction-limits`; the controller resolves the account from the token and the limit itself is owned by the `social` module (see its `DATA_RULES.md`, Section 3B) | `UserSafetyController` delegating to `InteractionLimitService` |
 | `status` transitions are admin-only and follow a fixed state machine | `AdminServiceImpl` — ban, unban, suspend, unsuspend; each writes an `admin_actions` audit row in the same transaction. A moderator cannot reach these at all, an actor cannot change its own status, and no actor can change an administrator's status. See `admin/DATA_RULES.md` |
 
 **Username and Email Retention on Soft Delete**:
@@ -138,6 +143,7 @@ A future reader must not re-derive the "counters are safe because they're viewer
 | `auth` | inbound | Auth module owns the `users` row lifecycle (creation, status validation); users module manages profile fields on the same row |
 | `media` | outbound | `avatar_url` and `banner_url` are CDN URLs sourced from `media_assets`; relationship is by convention, not FK |
 | `notification` | inbound | `UserNotificationPreferencesService` gives the notification module the `user_settings` toggles it checks before writing; `UserSummaryService` gives the actor summaries and the verified flag of a feed row |
-| `social` | outbound | `UserServiceImpl` calls `SocialService` for block gating, follow gating, and viewer relationship state |
+| `social` | outbound | `UserServiceImpl` calls `SocialService` for block gating, follow gating, and viewer relationship state; `UserSafetyController` calls `HiddenWordService` for the personal hidden words list and `InteractionLimitService` for the interaction limit |
+| `social` | inbound | `HiddenWordServiceImpl` calls `UserPrivacySettingsService` for `hidden_words_system_enabled`, and later interaction rules read `message_permission` the same way |
 | `admin` | inbound | Moderation actions mutate `users.status` and write an `admin_actions` audit row |
 | all modules | outbound | `UserSummaryService` is the shared batch resolver for embedding user identity in any response |

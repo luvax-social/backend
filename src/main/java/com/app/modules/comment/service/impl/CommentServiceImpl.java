@@ -42,6 +42,7 @@ import com.app.modules.comment.entity.Comment;
 import com.app.modules.comment.entity.CommentLike;
 import com.app.modules.comment.entity.CommentLikeId;
 import com.app.modules.comment.entity.CommentWriteIdempotency;
+import com.app.modules.comment.enums.CommentHiddenReason;
 import com.app.modules.comment.enums.CommentSortOrder;
 import com.app.modules.comment.mapper.CommentMapper;
 import com.app.modules.comment.messaging.CommentEventTypes;
@@ -58,6 +59,11 @@ import com.app.modules.post.entity.Post;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.repository.PostRepository;
 import com.app.modules.post.service.PostVisibilityService;
+import com.app.modules.social.policy.InteractionDecision;
+import com.app.modules.social.policy.InteractionOutcome;
+import com.app.modules.social.policy.InteractionPolicyService;
+import com.app.modules.social.policy.InteractionRequest;
+import com.app.modules.social.policy.InteractionType;
 import com.app.modules.social.repository.BlockRepository;
 import com.app.modules.users.service.UserSummaryService;
 
@@ -74,6 +80,8 @@ public class CommentServiceImpl implements CommentService {
     private static final int MAX_PAGE_SIZE = 100;
     private static final int PINNED_COMMENT_COUNT = 3;
     private static final String AGGREGATE_TYPE = "comment";
+    private static final String STATUS_APPROVED = "approved";
+    private static final String STATUS_HIDDEN = "hidden";
 
     private final CommentRepository commentRepository;
     private final CommentLikeRepository commentLikeRepository;
@@ -92,6 +100,7 @@ public class CommentServiceImpl implements CommentService {
     private final UserSummaryService userSummaryService;
     private final CommentViewerStateService commentViewerStateService;
     private final BlockRepository blockRepository;
+    private final InteractionPolicyService interactionPolicy;
 
     public CommentServiceImpl(
             CommentRepository commentRepository,
@@ -110,7 +119,8 @@ public class CommentServiceImpl implements CommentService {
             PostVisibilityService postVisibilityService,
             UserSummaryService userSummaryService,
             CommentViewerStateService commentViewerStateService,
-            BlockRepository blockRepository) {
+            BlockRepository blockRepository,
+            InteractionPolicyService interactionPolicy) {
         this.commentRepository = commentRepository;
         this.commentLikeRepository = commentLikeRepository;
         this.idempotencyRepository = idempotencyRepository;
@@ -128,6 +138,7 @@ public class CommentServiceImpl implements CommentService {
         this.userSummaryService = userSummaryService;
         this.commentViewerStateService = commentViewerStateService;
         this.blockRepository = blockRepository;
+        this.interactionPolicy = interactionPolicy;
     }
 
     @Override
@@ -159,11 +170,11 @@ public class CommentServiceImpl implements CommentService {
         short depth = 0;
         UUID rootId = null;
         UUID parentOwnerId = null;
+        Comment parent = null;
         if (request.parentId() != null) {
-            Comment parent =
-                    commentRepository
-                            .findByIdAndDeletedAtIsNull(request.parentId())
-                            .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
+            // A hidden parent answers exactly as a missing one to everyone but its author, so a
+            // reply attempt cannot be used to probe for hidden comments.
+            parent = findVisibleToActor(actorId, request.parentId());
             // The parent must belong to the same post the reply targets. Otherwise a reply could
             // attach to a comment on a different post - including one the caller cannot access -
             // bypassing the post-level permission gate and corrupting reply/comment counters.
@@ -185,6 +196,30 @@ public class CommentServiceImpl implements CommentService {
             metrics.moderationRejected(moderation.reason());
             throw new AppException(ApiErrorCode.COMMENT_MODERATION_REJECTED);
         }
+
+        // After the spam rules so a rejected comment never costs a policy lookup, and before the
+        // idempotency reservation so a refused create leaves no key behind. The check also runs
+        // before the key is looked up, so a replay after a new block is refused rather than
+        // answered from the cache: a block wins over an idempotent replay. A list or limit change
+        // alone does not matter to a replay, which returns the cached response.
+        InteractionDecision decision =
+                interactionPolicy.evaluate(
+                        new InteractionRequest(
+                                actorId,
+                                post.getUserId(),
+                                InteractionType.COMMENT,
+                                content,
+                                parentOwnerId == null ? List.of() : List.of(parentOwnerId),
+                                null));
+        if (decision.denied()) {
+            throw refusalFor(actorId, post);
+        }
+        // A reply under a hidden parent is hidden with it. Only the parent's author can write one,
+        // and a visible reply would otherwise be counted and broadcast with the hidden parent's id
+        // as its parentId, which tells every viewer that parent exists.
+        boolean policyHidden = decision.outcome() == InteractionOutcome.ALLOW_HIDDEN;
+        boolean parentHidden = parent != null && STATUS_HIDDEN.equals(parent.getModerationStatus());
+        boolean hidden = policyHidden || parentHidden;
 
         // Reserve the idempotency key in the same transaction via ON CONFLICT DO NOTHING. A
         // duplicate key returns a clean replay/conflict instead of poisoning the transaction with a
@@ -210,10 +245,16 @@ public class CommentServiceImpl implements CommentService {
                                 .rootId(rootId)
                                 .depth(depth)
                                 .content(content)
-                                .moderationStatus("approved")
+                                .moderationStatus(hidden ? STATUS_HIDDEN : STATUS_APPROVED)
+                                .hiddenReason(
+                                        policyHidden
+                                                ? hiddenReasonOf(decision)
+                                                : (parentHidden ? parent.getHiddenReason() : null))
                                 .build());
         MDC.put("commentId", saved.getId().toString());
 
+        // The response is built from the same fields whether the comment is hidden or not: its
+        // author is deliberately not told, so a hidden-words match or a limit stays invisible.
         // hasReported is false without a lookup: the actor is the author of the comment just
         // created, and self-reporting is rejected, so no report by them against it can exist.
         CommentResponse response =
@@ -229,7 +270,7 @@ public class CommentServiceImpl implements CommentService {
         }
 
         List<String> mentionedUserIds = resolveMentions(content, actorId);
-        enqueueCreated(post, saved, actorId, parentOwnerId, mentionedUserIds, response);
+        enqueueCreated(post, saved, actorId, parentOwnerId, mentionedUserIds, response, hidden);
         return response;
     }
 
@@ -238,14 +279,14 @@ public class CommentServiceImpl implements CommentService {
     public CommentResponse editComment(UUID actorId, UUID commentId, EditCommentRequest request) {
         putWriteMdc(commentId, actorId);
         try {
-            Comment comment =
-                    commentRepository
-                            .findByIdAndDeletedAtIsNull(commentId)
-                            .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
+            // Not-found rather than forbidden for a hidden comment, which would confirm to a
+            // non-author that the comment exists.
+            Comment comment = findVisibleToActor(actorId, commentId);
             if (!comment.getUserId().equals(actorId)) {
                 throw new AppException(ApiErrorCode.COMMENT_FORBIDDEN);
             }
             MDC.put("postId", comment.getPostId().toString());
+            boolean hiddenBeforeEdit = STATUS_HIDDEN.equals(comment.getModerationStatus());
             String content =
                     com.app.modules.comment.util.CommentContentNormalizer.normalize(
                             request.content());
@@ -254,6 +295,7 @@ public class CommentServiceImpl implements CommentService {
                 metrics.moderationRejected(moderation.reason());
                 throw new AppException(ApiErrorCode.COMMENT_MODERATION_REJECTED);
             }
+            applyInteractionPolicyToEdit(actorId, comment, content);
             comment.setContent(content);
             // The only place edited_at is written. Truncated to the microsecond resolution
             // TIMESTAMPTZ stores, so the value returned here is byte-identical to the one a
@@ -279,6 +321,14 @@ public class CommentServiceImpl implements CommentService {
             data.put("commentId", saved.getId().toString());
             data.put("commentOwnerId", saved.getUserId().toString());
             data.put("depth", (int) saved.getDepth());
+            data.put("visibility", visibilityOf(STATUS_HIDDEN.equals(saved.getModerationStatus())));
+            // An edit can newly hide a comment viewers already hold. The live consumer turns that
+            // case into a removal frame and needs to know whether the comment counted as visible
+            // before the edit, to tell viewers how many comments to drop.
+            data.put("previousVisibility", visibilityOf(hiddenBeforeEdit));
+            if (saved.getRootId() != null) {
+                data.put("rootId", saved.getRootId().toString());
+            }
             // Broadcast projection: this payload is fanned out to every subscriber of the post's
             // live stream, so the editor's own isLiked state must not ride along as if it applied
             // to every viewer.
@@ -306,9 +356,16 @@ public class CommentServiceImpl implements CommentService {
                             .findByIdAndDeletedAtIsNull(commentId)
                             .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
             if (!comment.getUserId().equals(actorId) && !isCurrentUserAdmin()) {
-                throw new AppException(ApiErrorCode.COMMENT_FORBIDDEN);
+                throw new AppException(
+                        isConcealedFrom(actorId, comment)
+                                ? ApiErrorCode.COMMENT_NOT_FOUND
+                                : ApiErrorCode.COMMENT_FORBIDDEN);
             }
             MDC.put("postId", comment.getPostId().toString());
+            // Counted before the soft delete, which changes the rows this reads. The live frame
+            // carries only this number: the full count below would tell every viewer how many
+            // hidden comments the subtree held.
+            int visibleDeletedCount = commentRepository.countVisibleSubtree(commentId);
             // The statement's own affected-row count is the authoritative figure for how many
             // comments this delete removed; no second query can match it without a race.
             int deletedCommentCount =
@@ -324,6 +381,7 @@ public class CommentServiceImpl implements CommentService {
             // A single delete event stands for a whole subtree, so a live subscriber that removed
             // only the named comment would leave its descendants rendered as orphans.
             data.put("deletedCommentCount", deletedCommentCount);
+            data.put("visibleDeletedCount", visibleDeletedCount);
             if (comment.getRootId() != null) {
                 data.put("rootId", comment.getRootId().toString());
             }
@@ -365,10 +423,7 @@ public class CommentServiceImpl implements CommentService {
     public void likeComment(UUID actorId, UUID commentId) {
         putWriteMdc(commentId, actorId);
         try {
-            Comment comment =
-                    commentRepository
-                            .findByIdAndDeletedAtIsNull(commentId)
-                            .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
+            Comment comment = findVisibleToActor(actorId, commentId);
             MDC.put("postId", comment.getPostId().toString());
             Post post =
                     postRepository
@@ -392,6 +447,9 @@ public class CommentServiceImpl implements CommentService {
             data.put("postId", comment.getPostId().toString());
             data.put("commentId", comment.getId().toString());
             data.put("commentOwnerId", comment.getUserId().toString());
+            data.put(
+                    "visibility",
+                    visibilityOf(STATUS_HIDDEN.equals(comment.getModerationStatus())));
             outboxService.enqueue(
                     CommentEventTypes.COMMENT_LIKED_V1,
                     CommentEventTypes.COMMENT_LIKED_V1,
@@ -409,10 +467,7 @@ public class CommentServiceImpl implements CommentService {
     public void unlikeComment(UUID actorId, UUID commentId) {
         putWriteMdc(commentId, actorId);
         try {
-            Comment comment =
-                    commentRepository
-                            .findByIdAndDeletedAtIsNull(commentId)
-                            .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
+            Comment comment = findVisibleToActor(actorId, commentId);
             MDC.put("postId", comment.getPostId().toString());
             Post post =
                     postRepository
@@ -427,6 +482,9 @@ public class CommentServiceImpl implements CommentService {
             data.put("postId", comment.getPostId().toString());
             data.put("commentId", comment.getId().toString());
             data.put("commentOwnerId", comment.getUserId().toString());
+            data.put(
+                    "visibility",
+                    visibilityOf(STATUS_HIDDEN.equals(comment.getModerationStatus())));
             outboxService.enqueue(
                     CommentEventTypes.COMMENT_UNLIKED_V1,
                     CommentEventTypes.COMMENT_UNLIKED_V1,
@@ -486,10 +544,7 @@ public class CommentServiceImpl implements CommentService {
     @Transactional(readOnly = true)
     public CursorPageResponse<CommentResponse> listReplies(
             UUID viewerId, UUID commentId, String cursor, int limit) {
-        Comment parent =
-                commentRepository
-                        .findByIdAndDeletedAtIsNull(commentId)
-                        .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
+        Comment parent = findVisibleToActor(viewerId, commentId);
         Post post =
                 postRepository
                         .findById(parent.getPostId())
@@ -540,13 +595,32 @@ public class CommentServiceImpl implements CommentService {
     }
 
     // The same predicate the reply and top-level list queries apply, so the context endpoint shows
-    // exactly what paging through the lists would have shown.
+    // exactly what paging through the lists would have shown: approved for everyone, hidden for
+    // its own author only.
     private boolean isListable(UUID viewerId, Comment comment) {
         return comment.getDeletedAt() == null
                 && comment.getAdminRemovedAt() == null
-                && "approved".equals(comment.getModerationStatus())
+                && !isConcealedFrom(viewerId, comment)
                 && (viewerId == null
                         || !blockRepository.existsBetween(viewerId, comment.getUserId()));
+    }
+
+    // A comment that is not approved belongs to its author alone. Every by-id path asks this
+    // before answering, so a hidden comment is indistinguishable from one that does not exist.
+    private static boolean isConcealedFrom(UUID viewerId, Comment comment) {
+        return !STATUS_APPROVED.equals(comment.getModerationStatus())
+                && !comment.getUserId().equals(viewerId);
+    }
+
+    private Comment findVisibleToActor(UUID viewerId, UUID commentId) {
+        Comment comment =
+                commentRepository
+                        .findByIdAndDeletedAtIsNull(commentId)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
+        if (isConcealedFrom(viewerId, comment)) {
+            throw new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
+        }
+        return comment;
     }
 
     // Visibility gate shared by the read, like, and unlike paths, consistent with the create path
@@ -681,7 +755,8 @@ public class CommentServiceImpl implements CommentService {
             UUID actorId,
             UUID parentOwnerId,
             List<String> mentionedUserIds,
-            CommentResponse response) {
+            CommentResponse response,
+            boolean hidden) {
         // The outbox stores data via Map.copyOf, which rejects null values, so null-valued keys are
         // omitted rather than inserted.
         Map<String, Object> data = new HashMap<>();
@@ -692,6 +767,7 @@ public class CommentServiceImpl implements CommentService {
         data.put("commentOwnerId", actorId.toString());
         data.put("depth", (int) saved.getDepth());
         data.put("mentionedUserIds", mentionedUserIds);
+        data.put("visibility", visibilityOf(hidden));
         // Broadcast projection: this payload is fanned out to every subscriber of the post's live
         // stream, so the creating actor's own isLiked state must not ride along as if it applied to
         // every viewer.
@@ -714,29 +790,94 @@ public class CommentServiceImpl implements CommentService {
                 data);
     }
 
-    // A mention across a block relationship, in either direction, resolves to nothing: the
+    // A mention the interaction policy does not allow resolves to nothing, whether it is denied by
+    // a block in either direction or hidden by the mentioned account's interaction limit: the
     // mentioned user must not receive a notification (the harassment channel the stealth block
     // model exists to close), and the mentioner must not be able to tell resolution was
     // suppressed rather than the username simply not existing, since that distinction is itself a
     // disclosure. The filter applies here, at the single source every downstream consumer of
     // mentionedUserIds reads from - the comment-notification consumer and the live WS fan-out both
-    // inherit it for free rather than needing their own copy of this check.
+    // inherit it for free rather than needing their own copy of this check. Accounts are
+    // de-duplicated first so one account costs one policy call however its name is spelled.
     private List<String> resolveMentions(String content, UUID actorId) {
         Set<String> usernames = new LinkedHashSet<>();
         Matcher matcher = MENTION.matcher(content);
         while (matcher.find() && usernames.size() < MAX_MENTIONS) {
             usernames.add(matcher.group(1));
         }
-        List<String> ids = new java.util.ArrayList<>();
+        Set<UUID> mentioned = new LinkedHashSet<>();
         for (String username : usernames) {
             commentUserRepository
                     .findByUsernameAndDeletedAtIsNull(username)
                     .map(u -> u.getId())
                     .filter(id -> !id.equals(actorId))
                     .filter(id -> !blockRepository.existsBetween(actorId, id))
-                    .ifPresent(id -> ids.add(id.toString()));
+                    .ifPresent(mentioned::add);
+        }
+        List<String> ids = new java.util.ArrayList<>();
+        for (UUID id : mentioned) {
+            InteractionDecision decision =
+                    interactionPolicy.evaluate(
+                            new InteractionRequest(
+                                    actorId, id, InteractionType.MENTION, null, null, null));
+            if (decision.outcome() == InteractionOutcome.ALLOW) {
+                ids.add(id.toString());
+            }
         }
         return ids;
+    }
+
+    // A block with the post owner is already visible to the actor through the post itself, so it
+    // keeps the existing restricted answer. Any other denial comes from the parent comment's
+    // author, and answering it as not-found keeps the replier from learning that author blocked
+    // them.
+    private AppException refusalFor(UUID actorId, Post post) {
+        return blockRepository.existsBetween(actorId, post.getUserId())
+                ? new AppException(ApiErrorCode.POST_COMMENTING_RESTRICTED)
+                : new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
+    }
+
+    // The policy runs for every edit, hidden comment or not, so an author the post owner blocked
+    // after the comment was hidden cannot push new text into the owner's hidden review list. Its
+    // answer can only move an approved comment to hidden: a hidden comment stays hidden through an
+    // edit, so the post owner's unhide is the single way back to approved.
+    private void applyInteractionPolicyToEdit(UUID actorId, Comment comment, String content) {
+        Post post =
+                postRepository
+                        .findById(comment.getPostId())
+                        .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
+        UUID parentOwnerId =
+                comment.getParentId() == null
+                        ? null
+                        : commentRepository
+                                .findByIdAndDeletedAtIsNull(comment.getParentId())
+                                .map(Comment::getUserId)
+                                .orElse(null);
+        InteractionDecision decision =
+                interactionPolicy.evaluate(
+                        new InteractionRequest(
+                                actorId,
+                                post.getUserId(),
+                                InteractionType.COMMENT,
+                                content,
+                                parentOwnerId == null ? List.of() : List.of(parentOwnerId),
+                                null));
+        if (decision.denied()) {
+            throw refusalFor(actorId, post);
+        }
+        if (decision.outcome() == InteractionOutcome.ALLOW_HIDDEN
+                && STATUS_APPROVED.equals(comment.getModerationStatus())) {
+            comment.setModerationStatus(STATUS_HIDDEN);
+            comment.setHiddenReason(hiddenReasonOf(decision));
+        }
+    }
+
+    private static String visibilityOf(boolean hidden) {
+        return hidden ? "hidden" : "visible";
+    }
+
+    private static String hiddenReasonOf(InteractionDecision decision) {
+        return CommentHiddenReason.from(decision.reason()).value();
     }
 
     // MDC keys are not in the current logback console pattern; they exist for correlation in log

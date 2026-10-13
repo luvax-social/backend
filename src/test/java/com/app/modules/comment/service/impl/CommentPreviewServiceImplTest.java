@@ -1,6 +1,7 @@
 package com.app.modules.comment.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.when;
 
@@ -23,6 +24,7 @@ class CommentPreviewServiceImplTest {
     @Mock private CommentPreviewRepository commentPreviewRepository;
 
     private CommentPreviewServiceImpl service;
+    private final UUID viewer = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -38,11 +40,19 @@ class CommentPreviewServiceImplTest {
                         UUID.randomUUID(),
                         "agreed",
                         false,
+                        UUID.randomUUID(),
+                        "approved",
+                        false,
                         "the colours on this",
+                        false,
+                        UUID.randomUUID(),
+                        "approved",
                         false);
-        when(commentPreviewRepository.findPreviewRows(anyCollection())).thenReturn(List.of(row));
+        when(commentPreviewRepository.findPreviewRows(any(), anyCollection()))
+                .thenReturn(List.of(row));
 
-        CommentPreviewResponse preview = service.loadPreviews(List.of(row.id())).get(row.id());
+        CommentPreviewResponse preview =
+                service.loadPreviews(viewer, List.of(row.id())).get(row.id());
 
         assertThat(preview.available()).isTrue();
         assertThat(preview.snippet()).isEqualTo("agreed");
@@ -58,11 +68,19 @@ class CommentPreviewServiceImplTest {
                         UUID.randomUUID(),
                         "agreed",
                         false,
+                        UUID.randomUUID(),
+                        "approved",
+                        false,
                         "removed words",
-                        true);
-        when(commentPreviewRepository.findPreviewRows(anyCollection())).thenReturn(List.of(row));
+                        true,
+                        UUID.randomUUID(),
+                        "approved",
+                        false);
+        when(commentPreviewRepository.findPreviewRows(any(), anyCollection()))
+                .thenReturn(List.of(row));
 
-        CommentPreviewResponse preview = service.loadPreviews(List.of(row.id())).get(row.id());
+        CommentPreviewResponse preview =
+                service.loadPreviews(viewer, List.of(row.id())).get(row.id());
 
         assertThat(preview.snippet()).isEqualTo("agreed");
         assertThat(preview.parentSnippet()).isNull();
@@ -72,11 +90,24 @@ class CommentPreviewServiceImplTest {
     void loadPreviews_deletedOrRemovedComment_isUnavailableWithoutText() {
         CommentPreviewRow row =
                 new CommentPreviewRow(
-                        UUID.randomUUID(), UUID.randomUUID(), null, "gone", true, null, true);
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        null,
+                        "gone",
+                        true,
+                        UUID.randomUUID(),
+                        "approved",
+                        false,
+                        null,
+                        true,
+                        null,
+                        null,
+                        false);
         UUID missing = UUID.randomUUID();
-        when(commentPreviewRepository.findPreviewRows(anyCollection())).thenReturn(List.of(row));
+        when(commentPreviewRepository.findPreviewRows(any(), anyCollection()))
+                .thenReturn(List.of(row));
 
-        var previews = service.loadPreviews(List.of(row.id(), missing));
+        var previews = service.loadPreviews(viewer, List.of(row.id(), missing));
 
         assertThat(previews.get(row.id()).available()).isFalse();
         assertThat(previews.get(row.id()).snippet()).isNull();

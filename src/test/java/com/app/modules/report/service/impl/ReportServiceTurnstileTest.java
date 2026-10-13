@@ -81,7 +81,7 @@ class ReportServiceTurnstileTest {
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.AUTH_CAPTCHA_FAILED);
 
-        verify(reportRepository, never()).findOwnerId(any(), any());
+        verify(reportRepository, never()).findOwnerId(any(), any(), any());
         verify(reportRepository, never()).saveAndFlush(any());
         verify(transactionTemplate, never()).execute(any());
     }
@@ -89,7 +89,7 @@ class ReportServiceTurnstileTest {
     @Test
     void submitReport_unavailable_proceedsToTheTargetChecks() {
         when(verifier.verify(any(), any(), any())).thenReturn(TurnstileOutcome.UNAVAILABLE);
-        when(reportRepository.findOwnerId(any(), any())).thenReturn(Optional.empty());
+        when(reportRepository.findOwnerId(any(), any(), any())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.submitReport(UUID.randomUUID(), request(TOKEN), CLIENT_IP))
                 .isInstanceOf(AppException.class)
@@ -100,7 +100,7 @@ class ReportServiceTurnstileTest {
     @Test
     void submitReport_killSwitchDisabled_acceptsABlankTokenWithoutVerifying() {
         turnstileProperties.getAuth().setEnabled(false);
-        when(reportRepository.findOwnerId(any(), any())).thenReturn(Optional.empty());
+        when(reportRepository.findOwnerId(any(), any(), any())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.submitReport(UUID.randomUUID(), request(null), CLIENT_IP))
                 .isInstanceOf(AppException.class);

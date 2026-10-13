@@ -1,5 +1,6 @@
 package com.app.modules.users.dto.request;
 
+import com.app.modules.users.enums.MessagePermission;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -23,11 +24,19 @@ public record UpdateSettingsRequest(
                 Boolean showActivityStatus,
         @Schema(description = "Allow replies to stories", example = "true")
                 Boolean allowStoryReplies,
-        @Schema(description = "Allow message requests from non-followers", example = "true")
-                Boolean allowMessageRequests,
+        @Schema(
+                        description = "Who may start a direct conversation with this account",
+                        example = "everyone")
+                MessagePermission messagePermission,
         @Schema(
                         description =
                                 "Set false to stop this account being offered in other people's"
                                         + " suggestions",
                         nullable = true)
-                Boolean suggestible) {}
+                Boolean suggestible,
+        @Schema(
+                        description =
+                                "Set false to stop the platform-wide hidden word list applying to"
+                                        + " this account; the personal list is unaffected",
+                        nullable = true)
+                Boolean hiddenWordsSystemEnabled) {}

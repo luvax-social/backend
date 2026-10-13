@@ -139,6 +139,156 @@ class CommentKeysetRowLossIT {
         assertThat(seen).containsExactlyInAnyOrderElementsOf(expected);
     }
 
+    @Test
+    void topLevelComments_authorsHiddenRowsInTieGroup_arePagedExactlyOnceForTheAuthorOnly() {
+        UUID owner = insertUser("hidden_page_owner");
+        UUID author = insertUser("hidden_page_author");
+        UUID other = insertUser("hidden_page_other");
+        UUID postId = insertPost(owner);
+        List<UUID> authorSees = new ArrayList<>();
+        List<UUID> othersSee = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            UUID approved = insertTopLevelComment(postId, other, SHARED_INSTANT);
+            UUID hidden = insertHiddenTopLevelComment(postId, author, SHARED_INSTANT);
+            authorSees.add(approved);
+            authorSees.add(hidden);
+            othersSee.add(approved);
+        }
+
+        assertThat(pageTopLevel(postId, author, NOTHING_EXCLUDED))
+                .containsExactlyInAnyOrderElementsOf(authorSees);
+        assertThat(pageTopLevel(postId, other, NOTHING_EXCLUDED))
+                .containsExactlyInAnyOrderElementsOf(othersSee);
+        assertThat(pageTopLevel(postId, null, NOTHING_EXCLUDED))
+                .containsExactlyInAnyOrderElementsOf(othersSee);
+    }
+
+    @Test
+    void replies_authorsHiddenRowsInTieGroup_arePagedExactlyOnceForTheAuthorOnly() {
+        UUID owner = insertUser("hidden_reply_owner");
+        UUID author = insertUser("hidden_reply_author");
+        UUID other = insertUser("hidden_reply_other");
+        UUID postId = insertPost(owner);
+        UUID parentId = insertTopLevelComment(postId, owner, SHARED_INSTANT.minusHours(1));
+        List<UUID> authorSees = new ArrayList<>();
+        List<UUID> othersSee = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            UUID approved = insertReply(postId, other, parentId, SHARED_INSTANT);
+            UUID hidden = insertHiddenReply(postId, author, parentId, SHARED_INSTANT);
+            authorSees.add(approved);
+            authorSees.add(hidden);
+            othersSee.add(approved);
+        }
+
+        assertThat(pageReplies(parentId, author)).containsExactlyInAnyOrderElementsOf(authorSees);
+        assertThat(pageReplies(parentId, other)).containsExactlyInAnyOrderElementsOf(othersSee);
+        assertThat(pageReplies(parentId, null)).containsExactlyInAnyOrderElementsOf(othersSee);
+    }
+
+    @Test
+    void firstTopLevelPage_withTheViewerOrPredicate_stillUsesTheKeysetIndex() {
+        UUID owner = insertUser("explain_owner");
+        UUID author = insertUser("explain_author");
+        UUID target = insertPost(owner);
+        // Enough rows across enough posts that a sequential scan is not the cheapest plan, with a
+        // share of hidden rows so the OR branch has something to match.
+        jdbcClient
+                .sql(
+                        """
+						INSERT INTO posts(user_id, post_type, status)
+						SELECT :owner, 'image', 'published' FROM generate_series(1, 40)
+						""")
+                .param("owner", owner)
+                .update();
+        jdbcClient
+                .sql(
+                        """
+						INSERT INTO comments(post_id, user_id, depth, content, moderation_status,
+											hidden_reason, created_at)
+						SELECT p.id, :author, 0, 'text',
+							CASE WHEN g % 5 = 0 THEN 'hidden' ELSE 'approved' END,
+							CASE WHEN g % 5 = 0 THEN 'hidden_words' END,
+							:base + (g || ' seconds')::interval
+						FROM (SELECT id FROM posts) p, generate_series(1, 120) g
+						""")
+                .param("author", author)
+                .param("base", SHARED_INSTANT)
+                .update();
+        jdbcClient.sql("ANALYZE comments").update();
+
+        // Mirrors the predicate and ordering of CommentRepository.findFirstTopLevelExcluding; the
+        // statement is restated because a repository query cannot be EXPLAINed through Spring Data.
+        String plan =
+                String.join(
+                        "\n",
+                        jdbcClient
+                                .sql(
+                                        """
+										EXPLAIN SELECT * FROM comments
+										WHERE post_id = :postId AND parent_id IS NULL
+										AND (moderation_status = 'approved'
+											OR (moderation_status = 'hidden' AND user_id = :viewerId))
+										AND deleted_at IS NULL AND admin_removed_at IS NULL
+										AND id <> ALL(CAST('{}' AS uuid[]))
+										AND NOT EXISTS (SELECT 1 FROM blocks b
+											WHERE (b.blocker_id = :viewerId
+												AND b.blocked_id = comments.user_id)
+											OR (b.blocker_id = comments.user_id
+												AND b.blocked_id = :viewerId))
+										ORDER BY created_at DESC, id DESC
+										LIMIT 21
+										""")
+                                .param("postId", target)
+                                .param("viewerId", author)
+                                .query(String.class)
+                                .list());
+
+        assertThat(plan).contains("idx_comments_post_root_id");
+    }
+
+    private List<UUID> pageReplies(UUID parentId, UUID viewerId) {
+        List<UUID> seen = new ArrayList<>();
+        List<Comment> page = commentRepository.findFirstReplies(parentId, viewerId, page());
+        int guard = 0;
+        while (!page.isEmpty() && guard++ < 100) {
+            page.forEach(c -> seen.add(c.getId()));
+            Comment last = page.get(page.size() - 1);
+            page =
+                    commentRepository.findRepliesBefore(
+                            parentId, viewerId, last.getCreatedAt(), last.getId(), page());
+        }
+        return seen;
+    }
+
+    private UUID insertHiddenTopLevelComment(UUID postId, UUID userId, OffsetDateTime createdAt) {
+        return jdbcClient
+                .sql(
+                        "INSERT INTO comments(post_id, user_id, depth, content, moderation_status,"
+                                + " hidden_reason, created_at) VALUES (:postId, :userId, 0, 'text',"
+                                + " 'hidden', 'hidden_words', :createdAt) RETURNING id")
+                .param("postId", postId)
+                .param("userId", userId)
+                .param("createdAt", createdAt)
+                .query(UUID.class)
+                .single();
+    }
+
+    private UUID insertHiddenReply(
+            UUID postId, UUID userId, UUID parentId, OffsetDateTime createdAt) {
+        return jdbcClient
+                .sql(
+                        "INSERT INTO comments(post_id, user_id, parent_id, root_id, depth, content,"
+                                + " moderation_status, hidden_reason, created_at) VALUES (:postId,"
+                                + " :userId, :parentId, :parentId, 1, 'text', 'hidden',"
+                                + " 'hidden_words', :createdAt) RETURNING id")
+                .param("postId", postId)
+                .param("userId", userId)
+                .param("parentId", parentId)
+                .param("createdAt", createdAt)
+                .query(UUID.class)
+                .single();
+    }
+
     private static PageRequest page() {
         return PageRequest.of(0, PAGE_SIZE);
     }

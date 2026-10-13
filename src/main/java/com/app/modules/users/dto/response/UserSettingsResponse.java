@@ -2,6 +2,8 @@ package com.app.modules.users.dto.response;
 
 import java.time.OffsetDateTime;
 
+import com.app.modules.users.enums.MessagePermission;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /** Notification and privacy settings for the authenticated user. */
@@ -21,11 +23,19 @@ public record UserSettingsResponse(
                 boolean showActivityStatus,
         @Schema(description = "Allow replies to stories", example = "true")
                 boolean allowStoryReplies,
-        @Schema(description = "Allow message requests from non-followers", example = "true")
-                boolean allowMessageRequests,
+        @Schema(
+                        description = "Who may start a direct conversation with this account",
+                        example = "everyone")
+                MessagePermission messagePermission,
         @Schema(
                         description =
                                 "Whether this account may be offered in other people's suggestions",
                         example = "true")
                 boolean suggestible,
+        @Schema(
+                        description =
+                                "Whether the platform-wide hidden word list applies to this"
+                                        + " account",
+                        example = "true")
+                boolean hiddenWordsSystemEnabled,
         @Schema(description = "Last updated timestamp") OffsetDateTime updatedAt) {}
