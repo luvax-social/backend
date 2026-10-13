@@ -155,6 +155,12 @@ public class CommentLiveFanoutConsumer {
                 removal.put("deletedCommentCount", 1);
                 return new LiveFrame(CommentEventTypes.COMMENT_DELETED_V1, removal, true);
             }
+            case CommentEventTypes.COMMENT_UNHIDDEN_V1 -> {
+                // A released comment is new to every viewer, so it goes out whole, exactly as a
+                // created comment does and under the same block filter on its author. Its payload
+                // carries no visibility marker: nothing releases a comment that is still hidden.
+                return new LiveFrame(event.eventType(), data, false);
+            }
             default -> {
                 return hidden ? null : new LiveFrame(event.eventType(), data, false);
             }

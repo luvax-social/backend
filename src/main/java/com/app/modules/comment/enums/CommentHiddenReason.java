@@ -7,10 +7,16 @@ import com.app.modules.social.policy.InteractionReason;
  *
  * <p>The lowercase {@link #value()} is what {@code comments.hidden_reason} stores, and the column
  * is set exactly when {@code moderation_status} is {@code hidden}.
+ *
+ * <p>{@link #HIDDEN_PARENT} is the one reason the interaction policy never produces: it marks a
+ * reply that is hidden only because the comment it answers is hidden, so unhiding that comment
+ * releases the reply with it. A reply that the policy hides for its own reason keeps that reason
+ * and stays hidden when the parent is released.
  */
 public enum CommentHiddenReason {
     HIDDEN_WORDS("hidden_words"),
-    LIMITED_INTERACTION("limited_interaction");
+    LIMITED_INTERACTION("limited_interaction"),
+    HIDDEN_PARENT("hidden_parent");
 
     private final String value;
 

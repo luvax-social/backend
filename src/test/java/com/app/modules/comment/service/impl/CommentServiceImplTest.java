@@ -188,6 +188,28 @@ class CommentServiceImplTest {
                 .build();
     }
 
+    private Comment hiddenComment(UUID id, UUID authorId, String reason) {
+        return Comment.builder()
+                .id(id)
+                .postId(postId)
+                .userId(authorId)
+                .moderationStatus("hidden")
+                .hiddenReason(reason)
+                .build();
+    }
+
+    private Comment approvedReply(UUID id, UUID authorId, UUID parentId, int depth) {
+        return Comment.builder()
+                .id(id)
+                .postId(postId)
+                .userId(authorId)
+                .parentId(parentId)
+                .depth((short) depth)
+                .createdAt(EPOCH.plusSeconds(depth))
+                .moderationStatus("approved")
+                .build();
+    }
+
     private CommentResponse stubSave() {
         Comment saved =
                 Comment.builder()
@@ -571,6 +593,174 @@ class CommentServiceImplTest {
         assertThat(persisted.getValue().getModerationStatus()).isEqualTo("approved");
         assertThat(persisted.getValue().getHiddenReason()).isNull();
         assertThat(createdEventData().get("visibility")).isEqualTo("visible");
+    }
+
+    @Test
+    void create_replyUnderAHiddenParentTheAuthorWrote_isHiddenWithTheHiddenParentReason() {
+        UUID parentId = UUID.randomUUID();
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(commentRepository.findByIdAndDeletedAtIsNull(parentId))
+                .thenReturn(Optional.of(hiddenComment(parentId, actorId, "limited_interaction")));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        stubSave();
+
+        service.createComment(actorId, createRequest(parentId), null);
+
+        ArgumentCaptor<Comment> persisted = ArgumentCaptor.forClass(Comment.class);
+        verify(commentRepository).saveAndFlush(persisted.capture());
+        assertThat(persisted.getValue().getModerationStatus()).isEqualTo("hidden");
+        assertThat(persisted.getValue().getHiddenReason()).isEqualTo("hidden_parent");
+        assertThat(createdEventData().get("visibility")).isEqualTo("hidden");
+    }
+
+    @Test
+    void create_replyUnderAHiddenParentThePolicyAlsoHides_keepsThePolicysOwnReason() {
+        UUID parentId = UUID.randomUUID();
+        Post post = publishedPost();
+        when(postRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(commentRepository.findByIdAndDeletedAtIsNull(parentId))
+                .thenReturn(Optional.of(hiddenComment(parentId, actorId, "limited_interaction")));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ALLOW_HIDDEN, InteractionReason.HIDDEN_WORD));
+        stubSave();
+
+        service.createComment(actorId, createRequest(parentId), null);
+
+        ArgumentCaptor<Comment> persisted = ArgumentCaptor.forClass(Comment.class);
+        verify(commentRepository).saveAndFlush(persisted.capture());
+        assertThat(persisted.getValue().getModerationStatus()).isEqualTo("hidden");
+        assertThat(persisted.getValue().getHiddenReason()).isEqualTo("hidden_words");
+    }
+
+    @Test
+    void unhide_byAnAccountThatDoesNotOwnThePost_throwsNotFoundAndChangesNothing() {
+        UUID commentAuthor = UUID.randomUUID();
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(hiddenComment(commentId, commentAuthor, "hidden_words")));
+        when(postRepository.findById(postId))
+                .thenReturn(Optional.of(postOwnedBy(UUID.randomUUID())));
+
+        assertThatThrownBy(() -> service.unhideComment(actorId, commentId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.COMMENT_NOT_FOUND);
+        verify(commentRepository, never()).approveHiddenForPostOwner(any(), any());
+        verify(outboxService, never()).enqueue(any(), any(), any(), any(), any(), anyMap());
+    }
+
+    @Test
+    void unhide_aCommentThatIsNotHidden_throwsNotFound() {
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(approvedComment(UUID.randomUUID())));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(postOwnedBy(actorId)));
+
+        assertThatThrownBy(() -> service.unhideComment(actorId, commentId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.COMMENT_NOT_FOUND);
+        verify(commentRepository, never()).approveHiddenForPostOwner(any(), any());
+    }
+
+    @Test
+    void unhide_aCommentByAnAccountBlockedWithTheOwner_throwsNotFound() {
+        UUID commentAuthor = UUID.randomUUID();
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(hiddenComment(commentId, commentAuthor, "hidden_words")));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(postOwnedBy(actorId)));
+        when(blockRepository.existsBetween(actorId, commentAuthor)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.unhideComment(actorId, commentId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.COMMENT_NOT_FOUND);
+        verify(commentRepository, never()).approveHiddenForPostOwner(any(), any());
+    }
+
+    @Test
+    void unhide_whileTheCommentItAnswersIsStillHidden_throwsParentStillHidden() {
+        UUID parentId = UUID.randomUUID();
+        Comment reply = hiddenComment(commentId, UUID.randomUUID(), "hidden_parent");
+        reply.setParentId(parentId);
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(reply));
+        when(commentRepository.findByIdAndDeletedAtIsNull(parentId))
+                .thenReturn(
+                        Optional.of(hiddenComment(parentId, UUID.randomUUID(), "hidden_words")));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(postOwnedBy(actorId)));
+
+        assertThatThrownBy(() -> service.unhideComment(actorId, commentId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.COMMENT_PARENT_STILL_HIDDEN);
+        verify(commentRepository, never()).approveHiddenForPostOwner(any(), any());
+        verify(outboxService, never()).enqueue(any(), any(), any(), any(), any(), anyMap());
+    }
+
+    @Test
+    void unhide_whenAConcurrentUnhideWonTheRace_throwsNotFoundWithoutReleasingReplies() {
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(
+                        Optional.of(hiddenComment(commentId, UUID.randomUUID(), "hidden_words")));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(postOwnedBy(actorId)));
+        when(commentRepository.approveHiddenForPostOwner(commentId, actorId)).thenReturn(0);
+
+        assertThatThrownBy(() -> service.unhideComment(actorId, commentId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.COMMENT_NOT_FOUND);
+        verify(commentRepository, never()).approveHiddenParentReplies(any());
+        verify(outboxService, never()).enqueue(any(), any(), any(), any(), any(), anyMap());
+    }
+
+    @Test
+    void unhide_releasingReplies_enqueuesOneUnhiddenEventEachWithTheTargetFirst() {
+        UUID commentAuthor = UUID.randomUUID();
+        UUID childId = UUID.randomUUID();
+        UUID grandchildId = UUID.randomUUID();
+        Comment target = hiddenComment(commentId, commentAuthor, "hidden_words");
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(target));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(postOwnedBy(actorId)));
+        when(commentRepository.approveHiddenForPostOwner(commentId, actorId)).thenReturn(1);
+        when(commentRepository.approveHiddenParentReplies(commentId))
+                .thenReturn(List.of(grandchildId, childId));
+        when(commentRepository.findAllById(anyCollection()))
+                .thenReturn(
+                        List.of(
+                                approvedReply(grandchildId, commentAuthor, childId, 2),
+                                approvedReply(childId, commentAuthor, commentId, 1),
+                                approvedReply(commentId, commentAuthor, null, 0)));
+        when(mapper.toResponse(any(), any(), anyBoolean(), anyBoolean()))
+                .thenReturn(sampleResponse());
+
+        CommentResponse response = service.unhideComment(actorId, commentId);
+
+        assertThat(response.id()).isEqualTo(commentId);
+        ArgumentCaptor<UUID> enqueued = ArgumentCaptor.forClass(UUID.class);
+        verify(outboxService, org.mockito.Mockito.times(3))
+                .enqueue(
+                        eq(CommentEventTypes.COMMENT_UNHIDDEN_V1),
+                        eq(CommentEventTypes.COMMENT_UNHIDDEN_V1),
+                        eq("comment"),
+                        enqueued.capture(),
+                        eq(actorId),
+                        anyMap());
+        assertThat(enqueued.getAllValues()).containsExactly(commentId, childId, grandchildId);
+    }
+
+    @Test
+    void listHiddenComments_forAnAccountThatDoesNotOwnThePost_throwsPostNotFound() {
+        when(postRepository.findById(postId))
+                .thenReturn(Optional.of(postOwnedBy(UUID.randomUUID())));
+
+        assertThatThrownBy(() -> service.listHiddenComments(actorId, postId, null, 20))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.POST_NOT_FOUND);
+        verify(commentRepository, never()).findFirstHiddenForPost(any(), any(), any());
     }
 
     @Test

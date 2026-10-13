@@ -46,7 +46,7 @@ All counter columns have `CHECK (column >= 0)` enforced at the database level. T
 
 `posts.comment_count` and `comments.reply_count` count only approved, non-tombstoned comments.
 A comment counts while `moderation_status = 'approved'`, `deleted_at IS NULL` and `admin_removed_at IS NULL` (V95, V143).
-A comment hidden by its post owner's Hidden Words or interaction limit is therefore not counted, and unhiding it counts it.
+A comment hidden by its post owner's Hidden Words or interaction limit, or hidden only because its parent is hidden, is therefore not counted, and the owner's unhide counts it together with the replies it releases.
 
 **Exception — `posts.view_count`**: This counter is NOT maintained by a PostgreSQL trigger. It is updated by a background job due to high-volume write concerns. As a result, `view_count` may lag behind real-time activity. This is a deliberate tradeoff. Application code must not attempt to increment `view_count` directly from a request path.
 

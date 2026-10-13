@@ -30,6 +30,7 @@ import com.app.modules.comment.dto.request.EditCommentRequest;
 import com.app.modules.comment.dto.response.CommentContextResponse;
 import com.app.modules.comment.dto.response.CommentDeletionScopeResponse;
 import com.app.modules.comment.dto.response.CommentResponse;
+import com.app.modules.comment.dto.response.HiddenCommentResponse;
 import com.app.modules.comment.service.CommentService;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
@@ -157,5 +158,31 @@ public class CommentController extends BaseController implements CommentApi {
             @PathVariable("commentId") UUID commentId) {
         commentService.unlikeComment(SecurityUtils.getCurrentUserId(), commentId);
         return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK));
+    }
+
+    /** Lists the hidden comments of a post, newest first; the post owner only. */
+    @Override
+    @GetMapping(ApiConstants.Posts.ROOT + ApiConstants.Posts.HIDDEN_COMMENTS)
+    @RateLimiter(name = "highTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<CursorPageResponse<HiddenCommentResponse>>>
+            listHiddenComments(
+                    @PathVariable("postId") UUID postId,
+                    @RequestParam(value = "cursor", required = false) String cursor,
+                    @RequestParam(value = "limit", defaultValue = "20") int limit) {
+        CursorPageResponse<HiddenCommentResponse> body =
+                commentService.listHiddenComments(
+                        SecurityUtils.getCurrentUserId(), postId, cursor, limit);
+        return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
+    }
+
+    /** Approves a hidden comment and the replies hidden because of it; the post owner only. */
+    @Override
+    @PostMapping(ApiConstants.Comments.ROOT + ApiConstants.Comments.UNHIDE)
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<CommentResponse>> unhideComment(
+            @PathVariable("commentId") UUID commentId) {
+        CommentResponse body =
+                commentService.unhideComment(SecurityUtils.getCurrentUserId(), commentId);
+        return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
     }
 }

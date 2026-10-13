@@ -65,6 +65,7 @@ public final class ApiConstants {
         public static final String LIKED = "/liked";
         public static final String SEARCH = "/search";
         public static final String COMMENTS = "/{postId}/comments";
+        public static final String HIDDEN_COMMENTS = "/{postId}/comments/hidden";
         public static final String FEED = "/feed";
         public static final String USER_POSTS = "/user/{userId}";
     }
@@ -78,6 +79,7 @@ public final class ApiConstants {
         public static final String REPLIES = "/{commentId}/replies";
         public static final String CONTEXT = "/{commentId}/context";
         public static final String DELETION_SCOPE = "/{commentId}/deletion-scope";
+        public static final String UNHIDE = "/{commentId}/unhide";
     }
 
     public static final class Stories {

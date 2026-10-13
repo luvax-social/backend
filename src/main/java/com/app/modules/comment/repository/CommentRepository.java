@@ -440,4 +440,123 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
 					""",
             nativeQuery = true)
     int countSubtreeVisibleTo(@Param("commentId") UUID commentId, @Param("viewerId") UUID viewerId);
+
+    /**
+     * First keyset page of a post's hidden comments for its owner, newest first.
+     *
+     * <p>Lists every hidden reason, and leaves out comments a moderator removed, soft-deleted ones,
+     * and comments by an account in a block with the owner, who never sees that account's content.
+     * The caller must already have established that {@code ownerId} owns the post; the statement
+     * does not check it.
+     *
+     * @param postId post whose hidden comments are listed
+     * @param ownerId the post owner reviewing them
+     * @param pageable page size carrier
+     * @return hidden comments ordered by the {@code (created_at, id)} tuple descending
+     */
+    @Query(
+            value =
+                    "SELECT * FROM comments WHERE post_id = :postId AND moderation_status ="
+                            + " 'hidden' AND deleted_at IS NULL AND admin_removed_at IS NULL "
+                            + "AND NOT EXISTS (SELECT 1 FROM blocks b"
+                            + " WHERE (b.blocker_id = :ownerId AND b.blocked_id = comments.user_id)"
+                            + " OR (b.blocker_id = comments.user_id AND b.blocked_id = :ownerId)) "
+                            + "ORDER BY created_at DESC, id DESC",
+            nativeQuery = true)
+    List<Comment> findFirstHiddenForPost(
+            @Param("postId") UUID postId, @Param("ownerId") UUID ownerId, Pageable pageable);
+
+    /**
+     * Keyset page of a post's hidden comments for its owner, strictly after the cursor tuple,
+     * newest first.
+     *
+     * <p>The same rows as {@link #findFirstHiddenForPost}, seeking with the {@code (created_at,
+     * id)} row-value comparison so comments sharing a boundary {@code created_at} are neither lost
+     * nor repeated.
+     *
+     * @param postId post whose hidden comments are listed
+     * @param ownerId the post owner reviewing them
+     * @param cursorTime {@code created_at} of the cursor row; never null
+     * @param cursorId id of the cursor row, breaking ties on equal {@code created_at}; never null
+     * @param pageable page size carrier
+     * @return hidden comments ordered by the {@code (created_at, id)} tuple descending
+     */
+    @Query(
+            value =
+                    "SELECT * FROM comments WHERE post_id = :postId AND moderation_status ="
+                            + " 'hidden' AND deleted_at IS NULL AND admin_removed_at IS NULL "
+                            + "AND (created_at, id) < (:cursorTime, :cursorId) "
+                            + "AND NOT EXISTS (SELECT 1 FROM blocks b"
+                            + " WHERE (b.blocker_id = :ownerId AND b.blocked_id = comments.user_id)"
+                            + " OR (b.blocker_id = comments.user_id AND b.blocked_id = :ownerId)) "
+                            + "ORDER BY created_at DESC, id DESC",
+            nativeQuery = true)
+    List<Comment> findHiddenForPostBefore(
+            @Param("postId") UUID postId,
+            @Param("ownerId") UUID ownerId,
+            @Param("cursorTime") OffsetDateTime cursorTime,
+            @Param("cursorId") UUID cursorId,
+            Pageable pageable);
+
+    /**
+     * Approves one hidden comment on a post the given account owns, clearing its hidden reason.
+     *
+     * <p>Every condition sits in the {@code WHERE} clause, so two concurrent unhides cannot both
+     * match: the loser updates no row and the caller answers it as not found. Only {@code
+     * moderation_status} and {@code hidden_reason} are written; the V143 triggers move {@code
+     * posts.comment_count} and the parent's {@code reply_count}. The persistence context is cleared
+     * afterwards because it still holds the row as hidden.
+     *
+     * @param commentId the hidden comment to approve
+     * @param ownerId the account that must own the comment's post
+     * @return 1 when the comment was approved, 0 when it was not hidden, was deleted or removed, or
+     *     its post belongs to someone else
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+            value =
+                    "UPDATE comments SET moderation_status = 'approved', hidden_reason = NULL"
+                            + " WHERE id = :commentId AND moderation_status = 'hidden'"
+                            + " AND deleted_at IS NULL AND admin_removed_at IS NULL"
+                            + " AND post_id IN (SELECT id FROM posts WHERE user_id = :ownerId)",
+            nativeQuery = true)
+    int approveHiddenForPostOwner(
+            @Param("commentId") UUID commentId, @Param("ownerId") UUID ownerId);
+
+    /**
+     * Approves every reply under a comment that is hidden only because of that comment, at any
+     * depth.
+     *
+     * <p>The walk follows rows whose {@code hidden_reason} is {@code hidden_parent} and nothing
+     * else. A reply hidden for a reason of its own (Hidden Words or an interaction limit) is not
+     * released, and neither is anything beneath it, because the walk cannot pass through it. The
+     * candidate rows are bounded to the target's own thread through {@code root_id} before the
+     * recursion starts, as {@link #countSubtree} is.
+     *
+     * @param commentId the comment that was just approved
+     * @return the ids of the replies approved, in no particular order
+     */
+    @Query(
+            value =
+                    """
+					WITH RECURSIVE anchor AS (
+						SELECT coalesce(root_id, id) AS thread_id FROM comments WHERE id = :commentId
+					),
+					candidates AS (
+						SELECT c.id, c.parent_id
+						FROM comments c JOIN anchor a ON c.root_id = a.thread_id
+						WHERE c.moderation_status = 'hidden' AND c.hidden_reason = 'hidden_parent'
+							AND c.deleted_at IS NULL AND c.admin_removed_at IS NULL
+					),
+					released AS (
+						SELECT id FROM candidates WHERE parent_id = :commentId
+						UNION ALL
+						SELECT c.id FROM candidates c JOIN released r ON c.parent_id = r.id
+					)
+					UPDATE comments SET moderation_status = 'approved', hidden_reason = NULL
+					WHERE id IN (SELECT id FROM released)
+					RETURNING id
+					""",
+            nativeQuery = true)
+    List<UUID> approveHiddenParentReplies(@Param("commentId") UUID commentId);
 }

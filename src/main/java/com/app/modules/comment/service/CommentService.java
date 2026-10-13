@@ -8,6 +8,7 @@ import com.app.modules.comment.dto.request.EditCommentRequest;
 import com.app.modules.comment.dto.response.CommentContextResponse;
 import com.app.modules.comment.dto.response.CommentDeletionScopeResponse;
 import com.app.modules.comment.dto.response.CommentResponse;
+import com.app.modules.comment.dto.response.HiddenCommentResponse;
 
 /** Comment creation, editing, soft deletion, likes, and threaded listing. */
 public interface CommentService {
@@ -141,4 +142,42 @@ public interface CommentService {
      * @return the post id and the thread
      */
     CommentContextResponse getContext(UUID viewerId, UUID commentId);
+
+    /**
+     * Lists the hidden comments of a post for its owner, newest first, using keyset pagination.
+     *
+     * <p>Every hidden reason is listed, each row carrying its {@code hiddenReason}. Anyone who does
+     * not own the post, whether they are the author of a hidden comment or a stranger, is answered
+     * {@code POST_NOT_FOUND} exactly as for a post that does not exist, so the endpoint cannot be
+     * used to learn whether a post has hidden comments.
+     *
+     * @param ownerId authenticated caller; must own the post
+     * @param postId post whose hidden comments are listed
+     * @param cursor opaque cursor from a previous page; null for the first page
+     * @param limit maximum number of comments to return
+     * @return a cursor page of hidden comments
+     */
+    CursorPageResponse<HiddenCommentResponse> listHiddenComments(
+            UUID ownerId, UUID postId, String cursor, int limit);
+
+    /**
+     * Approves a hidden comment on the caller's post and releases the replies hidden only because
+     * of it.
+     *
+     * <p>A reply hidden for its own reason (Hidden Words or an interaction limit), and everything
+     * beneath it, stays hidden. Enqueues one {@code comment.unhidden.v1} event for each comment
+     * released, the target first. No notification is created for any of them: the author was never
+     * told the comment was hidden and is not told it was released, and the people it mentions or
+     * answers were never told of it either.
+     *
+     * @param ownerId authenticated caller; must own the post the comment is on
+     * @param commentId the hidden comment to approve
+     * @return the approved comment
+     * @throws com.app.common.exception.AppException {@code COMMENT_NOT_FOUND} when the comment is
+     *     not hidden, is deleted or removed, belongs to a post the caller does not own, or was
+     *     written by an account the caller blocked or is blocked by, which includes the loser of
+     *     two concurrent unhides; {@code COMMENT_PARENT_STILL_HIDDEN} when the comment it answers
+     *     is hidden and must be released first
+     */
+    CommentResponse unhideComment(UUID ownerId, UUID commentId);
 }

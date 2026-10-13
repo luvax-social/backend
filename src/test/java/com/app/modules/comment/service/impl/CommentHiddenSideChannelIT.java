@@ -298,6 +298,12 @@ class CommentHiddenSideChannelIT {
         UUID replyId = idOf(postComment(f.author(), f.postId(), f.hidden(), "a polite follow-up"));
 
         assertThat(statusOf(replyId)).isEqualTo("hidden");
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "SELECT hidden_reason FROM comments WHERE id = ?",
+                                String.class,
+                                replyId))
+                .isEqualTo("hidden_parent");
         assertThat(eventVisibility(replyId, CommentEventTypes.COMMENT_CREATED_V1))
                 .isEqualTo("hidden");
         assertThat(get("/api/v1/comments/" + replyId + "/context", f.other()).getStatusCode())
