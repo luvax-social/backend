@@ -577,6 +577,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Schema snapshots preserve stored routine bodies and line endings, and the generated reference now reflects migrations through V144.
 - Refresh retry linkage builds its index concurrently so active sessions remain writable during deployment.
 - An interrupted refresh may recover the same active child token within sixty seconds using the exact request key, while unrelated replay still revokes sessions and account-state checks remain enforced.
 - Conversation summaries retain counterpart identity when that person hides the conversation, while each participants private nickname remains visible only to its owner.

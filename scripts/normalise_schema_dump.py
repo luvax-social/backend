@@ -31,8 +31,9 @@ from collections import OrderedDict
 MODULES: "OrderedDict[str, list[str]]" = OrderedDict(
     [
         ("AUTH", ["users", "user_credentials", "oauth_accounts", "refresh_tokens"]),
-        ("USER PROFILE & SETTINGS", ["user_settings", "push_tokens"]),
+        ("USER PROFILE & SETTINGS", ["user_settings", "archived_user_settings_allow_message_requests", "push_tokens"]),
         ("SOCIAL GRAPH (Follow / Block)", ["follows", "blocks"]),
+        ("INTERACTION PREFERENCES", ["user_mutes", "account_show_fewer", "interaction_limits", "hidden_words", "user_hidden_words"]),
         ("MEDIA ASSETS (Cloudflare R2)", ["media_assets"]),
         (
             "POST",
@@ -43,6 +44,7 @@ MODULES: "OrderedDict[str, list[str]]" = OrderedDict(
                 "post_saves",
                 "post_views",
                 "post_edit_history",
+                "post_not_interested",
             ],
         ),
         (
@@ -502,7 +504,8 @@ def main() -> int:
         return 2
 
     dump_path, previous_path, version = sys.argv[1], sys.argv[2], sys.argv[3]
-    dump = open(dump_path, encoding="utf-8").read()
+    dump = open(dump_path, encoding="utf-8", newline="").read()
+    sys.stdout.reconfigure(newline="")
     previous = open(previous_path, encoding="utf-8").read()
 
     prose = load_previous_comments(previous)
@@ -515,7 +518,16 @@ def main() -> int:
     triggers: "dict[str, list[str]]" = {}
 
     for block in blocks:
-        body = rewrite_defaults(rewrite_types(strip_schema(block.body))).strip()
+        # A dollar-quoted routine body is stored verbatim in PostgreSQL. Type
+        # and qualifier rewrites there alter its source rather than its DDL.
+        delimiter = re.search(r"\$(?:[A-Za-z_]\w*)?\$", block.body) if block.kind == "FUNCTION" else None
+        if delimiter:
+            end = block.body.rfind(delimiter.group()) + len(delimiter.group())
+            prefix = rewrite_defaults(rewrite_types(strip_schema(block.body[:delimiter.start()])))
+            suffix = rewrite_defaults(rewrite_types(strip_schema(block.body[end:])))
+            body = (prefix + block.body[delimiter.start():end] + suffix).strip()
+        else:
+            body = rewrite_defaults(rewrite_types(strip_schema(block.body))).strip()
 
         if block.kind == "EXTENSION":
             if body.startswith("CREATE EXTENSION"):
