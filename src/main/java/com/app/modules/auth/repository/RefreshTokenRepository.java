@@ -20,6 +20,33 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
 
     Optional<RefreshToken> findByTokenHash(String tokenHash);
 
+    interface RotationRetry {
+        UUID getUserId();
+        String getTokenHash();
+    }
+
+    /** Reads committed child state, including after losing a concurrent rotation CAS. */
+    @Query(value = """
+        SELECT child.user_id AS "userId", child.token_hash AS "tokenHash"
+        FROM refresh_tokens parent JOIN refresh_tokens child ON child.id = parent.rotated_to_id
+        WHERE parent.token_hash = :tokenHash AND parent.rotation_request_hash = :requestHash
+          AND parent.revoked_at >= :retryAfter AND parent.revoked_at <= :now
+          AND child.user_id = parent.user_id AND child.revoked_at IS NULL AND child.expires_at > :now
+        """, nativeQuery = true)
+    Optional<RotationRetry> findRotationRetry(@Param("tokenHash") String tokenHash,
+            @Param("requestHash") String requestHash, @Param("retryAfter") OffsetDateTime retryAfter,
+            @Param("now") OffsetDateTime now);
+
+    /** Links the consumed parent and issued child in the same rotation transaction. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+        UPDATE refresh_tokens SET rotation_request_hash = :requestHash,
+          rotated_to_id = (SELECT id FROM refresh_tokens WHERE token_hash = :childHash)
+        WHERE token_hash = :tokenHash AND revoked_at IS NOT NULL AND rotation_request_hash IS NULL
+        """, nativeQuery = true)
+    int linkRotation(@Param("tokenHash") String tokenHash, @Param("requestHash") String requestHash,
+            @Param("childHash") String childHash);
+
     /**
      * Revokes every active refresh token belonging to the given user.
      *

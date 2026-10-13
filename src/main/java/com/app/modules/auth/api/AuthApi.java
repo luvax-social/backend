@@ -207,6 +207,9 @@ public interface AuthApi {
                                 mediaType = "application/json",
                                 schema = @Schema(implementation = ApiResponse.class)))
     })
+    @Parameter(name = "Idempotency-Key", in = ParameterIn.HEADER, required = false,
+            description = "Random UUID v4 retained for an exact retry after a lost refresh response; recovery is limited to sixty seconds and an active issued child.",
+            schema = @Schema(type = "string", format = "uuid"))
     @MalformedBodyErrorResponses
     @PostMapping(ApiConstants.Auth.REFRESH)
     ResponseEntity<ApiResponse<AuthResponse>> refresh(

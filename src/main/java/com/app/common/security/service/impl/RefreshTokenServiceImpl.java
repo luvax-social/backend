@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.security.GeneralSecurityException;
 import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -11,6 +12,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -46,6 +49,11 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         byte[] buf = new byte[32];
         SECURE_RANDOM.nextBytes(buf);
         String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(buf);
+        return persistIssuedToken(userId, deviceId, userAgent, ipAddress, rawToken);
+    }
+
+    private String persistIssuedToken(UUID userId, String deviceId, String userAgent,
+            String ipAddress, String rawToken) {
         RefreshToken entity =
                 RefreshToken.builder()
                         .id(UUID.randomUUID())
@@ -72,6 +80,19 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     // throws AppException here must be one whose writes are also meant to commit.
     @Transactional(propagation = Propagation.REQUIRES_NEW, noRollbackFor = AppException.class)
     public RotationResult rotate(String rawToken, String ipAddress) {
+        return rotateInternal(rawToken, ipAddress, null);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW, noRollbackFor = AppException.class)
+    public RotationResult rotate(String rawToken, String ipAddress, String requestKey) {
+        if (requestKey == null || !requestKey.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")) {
+            throw new AppException(ApiErrorCode.VALIDATION_ERROR);
+        }
+        return rotateInternal(rawToken, ipAddress, requestKey.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    private RotationResult rotateInternal(String rawToken, String ipAddress, String requestKey) {
         String hash = sha256(rawToken);
         RefreshToken existing = repository.findByTokenHash(hash).orElse(null);
 
@@ -88,6 +109,8 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         }
 
         if (existing.getRevokedAt() != null) {
+            RotationResult retry = recoverRotation(rawToken, hash, requestKey);
+            if (retry != null) return retry;
             // Replay of an already-revoked refresh token is the OAuth 2.0 Security BCP signal for
             // token theft -- without this log, revoking every session for the user is invisible.
             log.warn("Refresh token replay detected for userId={}", existing.getUserId());
@@ -106,6 +129,8 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         // for the user (token theft detection per OAuth 2.0 Security BCP).
         int revoked = repository.revokeByTokenHash(hash, now);
         if (revoked == 0) {
+            RotationResult retry = recoverRotation(rawToken, hash, requestKey);
+            if (retry != null) return retry;
             // Lost the conditional-UPDATE race: same replay-detection signal as an already-revoked
             // token above -- log before revoking every session for the user.
             log.warn(
@@ -114,13 +139,42 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
             repository.revokeAllActiveByUserId(existing.getUserId(), now);
             throw new AppException(ApiErrorCode.AUTH_REFRESH_TOKEN_INVALID);
         }
-        String newRaw =
-                issue(
+        String newRaw = requestKey == null
+                ? issue(
                         existing.getUserId(),
                         existing.getDeviceId(),
                         existing.getUserAgent(),
-                        ipAddress);
+                        ipAddress)
+                : persistIssuedToken(existing.getUserId(), existing.getDeviceId(),
+                        existing.getUserAgent(), ipAddress, deriveRotationToken(rawToken, requestKey));
+        if (requestKey != null && repository.linkRotation(hash, sha256(requestKey), sha256(newRaw)) != 1) {
+            // Roll back the entire rotation rather than commit a consumed token
+            // whose response could not be recovered after navigation.
+            throw new IllegalStateException("Unable to link refresh rotation");
+        }
         return new RotationResult(newRaw, existing.getUserId());
+    }
+
+    private RotationResult recoverRotation(String rawToken, String hash, String requestKey) {
+        if (requestKey == null) return null;
+        OffsetDateTime now = OffsetDateTime.now();
+        var retry = repository.findRotationRetry(hash, sha256(requestKey), now.minusSeconds(60), now);
+        if (retry.isEmpty()) return null;
+        String child = deriveRotationToken(rawToken, requestKey);
+        if (!MessageDigest.isEqual(sha256(child).getBytes(StandardCharsets.UTF_8),
+                retry.get().getTokenHash().getBytes(StandardCharsets.UTF_8))) return null;
+        return new RotationResult(child, retry.get().getUserId());
+    }
+
+    private String deriveRotationToken(String rawToken, String requestKey) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(jwtProperties.secret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] input = ("luvax:refresh-rotation:" + rawToken + ":" + requestKey).getBytes(StandardCharsets.UTF_8);
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(input));
+        } catch (GeneralSecurityException ex) {
+            throw new IllegalStateException("Unable to derive refresh rotation", ex);
+        }
     }
 
     @Override

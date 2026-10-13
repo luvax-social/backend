@@ -7,8 +7,7 @@ import java.util.UUID;
 /**
  * Issuance, rotation, and revocation of opaque refresh tokens.
  *
- * <p>Refresh tokens are random UUID strings. Only the SHA-256 hash is persisted; the raw value is
- * returned to the caller exactly once at issuance and from {@link #rotate(String, String)}.
+ * <p>Refresh tokens are opaque 256-bit values. Only their SHA-256 hashes are persisted.
  */
 public interface RefreshTokenService {
 
@@ -34,6 +33,16 @@ public interface RefreshTokenService {
      *     when the token has passed its expiry
      */
     RotationResult rotate(String rawToken, String ipAddress);
+
+    /**
+     * Rotates, or recovers the original active child within sixty seconds for the exact request.
+     *
+     * @param rawToken refresh credential presented by the client
+     * @param ipAddress source IP of the request
+     * @param requestKey random UUID v4 retained while the client awaits the response
+     * @return the newly issued or recovered child token and its owning user
+     */
+    RotationResult rotate(String rawToken, String ipAddress, String requestKey);
 
     /**
      * Revokes the supplied raw token. No-op when the token does not exist, allowing logout to be

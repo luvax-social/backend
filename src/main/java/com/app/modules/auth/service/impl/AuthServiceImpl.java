@@ -272,8 +272,11 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse refresh(String rawRefreshToken, HttpServletRequest httpRequest) {
+        String requestKey = httpRequest.getHeader("Idempotency-Key");
         RefreshTokenService.RotationResult rotation =
-                refreshTokenService.rotate(rawRefreshToken, ipExtractor.extract(httpRequest));
+                requestKey == null
+                    ? refreshTokenService.rotate(rawRefreshToken, ipExtractor.extract(httpRequest))
+                    : refreshTokenService.rotate(rawRefreshToken, ipExtractor.extract(httpRequest), requestKey);
 
         User user =
                 userRepository
