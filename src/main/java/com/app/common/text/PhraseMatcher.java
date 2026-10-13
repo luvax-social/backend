@@ -14,7 +14,7 @@ import java.util.Set;
  * <p>The matching contract is the "Text match normalisation" section of {@code
  * docs/modules/GLOBAL_RULES.md}. The cases that pin it are {@code
  * src/test/resources/text-match/text-match-vectors.json}, and the frontend mirror is {@code
- * frontend/src/utils/textMatch.js}; a change to the contract changes all of them together.
+ * frontend/src/utils/textMatch.ts}; a change to the contract changes all of them together.
  *
  * <p>{@link #compile} trusts its input to be the output of {@link
  * TextMatchNormalizer#normalizePhrase}: a raw phrase with a double space would split into an empty
