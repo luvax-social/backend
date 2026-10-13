@@ -106,8 +106,8 @@ public interface PostService {
     /**
      * Returns a moderation-removed post to the status it held before the removal.
      *
-     * <p>A post removed before that status was recorded comes back published, which is what restore
-     * did for every post at the time, so nothing about those rows changes.
+     * <p>Requires a recorded prior status and no owner deletion timestamp.
+     * Legacy ambiguous tombstones remain hidden rather than risking an owner deletion being undone.
      *
      * <p>Hashtag associations are re-derived and a search-index upsert is enqueued only when the
      * resulting status is published. A draft or an archived post belongs in neither, and the owner

@@ -21,6 +21,12 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
 
     Optional<Post> findByIdAndDeletedAtIsNull(UUID id);
 
+    /** Sets the owner tombstone even when moderation already hides the entity. */
+    @Modifying
+    @Query(value = "UPDATE posts SET status = 'removed', deleted_at = :deletedAt"
+            + " WHERE id = :postId AND deleted_at IS NULL", nativeQuery = true)
+    int applyOwnerDeletion(@Param("postId") UUID postId, @Param("deletedAt") OffsetDateTime deletedAt);
+
     /**
      * Loads posts by id with their media collections fetch-joined.
      *
@@ -61,7 +67,7 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
             value =
                     "SELECT user_id AS userId, caption AS caption, created_at AS createdAt,"
                             + " status::text AS status, status_before_moderation::text AS"
-                            + " statusBeforeModeration FROM posts WHERE id = :postId",
+                            + " statusBeforeModeration, deleted_at AS deletedAt FROM posts WHERE id = :postId",
             nativeQuery = true)
     Optional<PostModerationProjection> findModerationViewIncludingDeleted(
             @Param("postId") UUID postId);
@@ -70,17 +76,16 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
      * Removes a post by moderation, recording the status it held so restore can return it there.
      *
      * @param postId post identifier
-     * @param deletedAt soft-delete timestamp
      * @return number of updated posts
      */
     @Modifying
     @Query(
             value =
-                    "UPDATE posts SET status_before_moderation = status, status = 'removed',"
-                            + " deleted_at = :deletedAt WHERE id = :postId",
+                    "UPDATE posts SET status_before_moderation = status, status = 'removed'"
+                            + " WHERE id = :postId AND deleted_at IS NULL"
+                            + " AND status_before_moderation IS NULL AND status <> 'removed'",
             nativeQuery = true)
-    int applyModerationRemoval(
-            @Param("postId") UUID postId, @Param("deletedAt") OffsetDateTime deletedAt);
+    int applyModerationRemoval(@Param("postId") UUID postId);
 
     /**
      * Restores a moderation-removed post to the given status and clears the recorded prior status.
@@ -93,7 +98,9 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @Query(
             value =
                     "UPDATE posts SET status = CAST(:status AS post_status),"
-                            + " status_before_moderation = NULL, deleted_at = NULL WHERE id = :postId",
+                            + " status_before_moderation = NULL WHERE id = :postId"
+                            + " AND deleted_at IS NULL AND status_before_moderation IS NOT NULL"
+                            + " AND status = 'removed'",
             nativeQuery = true)
     int applyModerationRestore(@Param("postId") UUID postId, @Param("status") String status);
 

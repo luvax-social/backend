@@ -577,6 +577,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Post moderation hides content independently of owner deletion, allows owners to delete already moderated posts and never restores an owner-deleted post.
 - A message permission is now stored and read with the root locale, so an account set to `following` no longer fails to load when the server runs under a Turkish default locale.
 - Notification previews now hide blocked or unapproved comment and parent text from viewers who cannot see it.
 - A sender can no longer message a peer who left a conversation and then blocked them, and that peer's membership stays inactive.

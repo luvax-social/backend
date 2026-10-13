@@ -46,4 +46,6 @@ public record AdminPostSummaryResponse(
                                         + " text post. The same shape the report-anchored"
                                         + " moderation view returns, so a reviewer sees the same"
                                         + " thing on both screens.")
-                List<String> mediaUrls) {}
+                List<String> mediaUrls,
+        @Schema(description = "Whether moderation can restore this post without undoing owner deletion")
+                boolean restorable) {}

@@ -465,13 +465,14 @@ class PostServiceImplTest {
 
     @Test
     void deletePost_owner_setsDeletedAtAndRemovedStatus() {
-        Post post = ownedPost(PostStatus.PUBLISHED);
-        when(postRepository.findByIdAndDeletedAtIsNull(postId)).thenReturn(Optional.of(post));
+        PostModerationProjection post = Mockito.mock(PostModerationProjection.class);
+        when(post.getUserId()).thenReturn(authorId);
+        when(postRepository.findModerationViewIncludingDeleted(postId)).thenReturn(Optional.of(post));
+        when(postRepository.applyOwnerDeletion(eq(postId), any())).thenReturn(1);
 
         service.deletePost(authorId, postId);
 
-        assertThat(post.getStatus()).isEqualTo(PostStatus.REMOVED);
-        assertThat(post.getDeletedAt()).isNotNull();
+        verify(postRepository).applyOwnerDeletion(eq(postId), any(OffsetDateTime.class));
         verify(hashtagService).removeHashtagsForPost(postId);
         verify(outboxService)
                 .enqueue(
@@ -485,8 +486,9 @@ class PostServiceImplTest {
 
     @Test
     void deletePost_nonOwnerNonAdmin_throwsPostForbidden() {
-        when(postRepository.findByIdAndDeletedAtIsNull(postId))
-                .thenReturn(Optional.of(ownedPost(PostStatus.PUBLISHED)));
+        PostModerationProjection post = Mockito.mock(PostModerationProjection.class);
+        when(post.getUserId()).thenReturn(authorId);
+        when(postRepository.findModerationViewIncludingDeleted(postId)).thenReturn(Optional.of(post));
 
         assertThatThrownBy(() -> service.deletePost(strangerId, postId))
                 .isInstanceOf(AppException.class)
@@ -757,19 +759,26 @@ class PostServiceImplTest {
     }
 
     @Test
-    void applyModerationRestore_blankPriorStatus_restoresAsPublished() {
+    void applyModerationRestore_blankPriorStatus_rejectsAmbiguousRemoval() {
         PostModerationProjection post = Mockito.mock(PostModerationProjection.class);
-        when(post.getUserId()).thenReturn(authorId);
-        when(post.getCaption()).thenReturn(null);
-        when(post.getCreatedAt()).thenReturn(java.time.Instant.now());
         when(post.getStatusBeforeModeration()).thenReturn("   ");
         when(postRepository.findModerationViewIncludingDeleted(postId))
                 .thenReturn(Optional.of(post));
 
-        var result = service.applyModerationRestore(postId);
+        assertThatThrownBy(() -> service.applyModerationRestore(postId))
+                .isInstanceOf(AppException.class);
+        verify(postRepository, never()).applyModerationRestore(any(), any());
+    }
 
-        assertThat(result.status()).isEqualTo(PostStatus.PUBLISHED);
-        verify(postRepository).applyModerationRestore(postId, "published");
+    @Test
+    void applyModerationRestore_ownerDeletion_rejectsRestoration() {
+        PostModerationProjection post = Mockito.mock(PostModerationProjection.class);
+        when(post.getStatusBeforeModeration()).thenReturn("published");
+        when(post.getDeletedAt()).thenReturn(java.time.Instant.now());
+        when(postRepository.findModerationViewIncludingDeleted(postId)).thenReturn(Optional.of(post));
+        assertThatThrownBy(() -> service.applyModerationRestore(postId)).isInstanceOf(AppException.class);
+        verify(postRepository, never()).applyModerationRestore(any(), any());
+        verifyNoInteractions(hashtagService);
     }
 
     private List<Post> buildPosts(UUID userId, int count) {

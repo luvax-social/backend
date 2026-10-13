@@ -65,7 +65,7 @@ public class AdminContentRepository {
                         .sql(
                                 """
 						SELECT p.id, p.user_id, u.username, p.status::text AS status,
-							p.caption, p.deleted_at, p.like_count, p.comment_count, p.created_at
+							p.caption, p.deleted_at, p.status_before_moderation, p.like_count, p.comment_count, p.created_at
 						FROM posts p
 						LEFT JOIN users u ON u.id = p.user_id
 						WHERE p.user_id = :userId
@@ -88,14 +88,18 @@ public class AdminContentRepository {
                                                 rs.getString("username"),
                                                 rs.getString("status"),
                                                 rs.getString("caption"),
-                                                rs.getObject("deleted_at") != null,
+                                                rs.getObject("deleted_at") != null || "removed".equals(rs.getString("status")),
                                                 rs.getInt("like_count"),
                                                 rs.getInt("comment_count"),
                                                 rs.getObject("created_at", OffsetDateTime.class),
                                                 // Filled in below. Reading media here would issue
                                                 // one
                                                 // query per row.
-                                                List.of()))
+                                                List.of(),
+                                                rs.getObject("deleted_at") == null
+                                                        && "removed".equals(rs.getString("status"))
+                                                        && rs.getObject("status_before_moderation") != null
+                                                        && !"removed".equals(rs.getString("status_before_moderation"))))
                         .list();
         return attachMedia(rows);
     }
@@ -147,7 +151,8 @@ public class AdminContentRepository {
                                         row.likeCount(),
                                         row.commentCount(),
                                         row.createdAt(),
-                                        byPost.getOrDefault(row.id(), List.of())))
+                                        byPost.getOrDefault(row.id(), List.of()),
+                                        row.restorable()))
                 .toList();
     }
 

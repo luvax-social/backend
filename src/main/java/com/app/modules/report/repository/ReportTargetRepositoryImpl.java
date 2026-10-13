@@ -22,7 +22,8 @@ public class ReportTargetRepositoryImpl implements ReportTargetRepository {
         String query =
                 switch (reportType) {
                     case POST ->
-                            "SELECT user_id FROM posts WHERE id = :entityId AND deleted_at IS NULL";
+                            "SELECT user_id FROM posts WHERE id = :entityId AND deleted_at IS NULL"
+                                    + " AND status_before_moderation IS NULL AND status <> 'removed'";
                     case COMMENT ->
                             "SELECT user_id FROM comments WHERE id = :entityId "
                                     + "AND deleted_at IS NULL AND admin_removed_at IS NULL "
