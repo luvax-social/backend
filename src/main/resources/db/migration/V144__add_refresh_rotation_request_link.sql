@@ -2,7 +2,7 @@ ALTER TABLE refresh_tokens
     ADD COLUMN rotation_request_hash VARCHAR(64),
     ADD COLUMN rotated_to_id UUID REFERENCES refresh_tokens(id) ON DELETE SET NULL;
 
-CREATE INDEX idx_refresh_tokens_rotated_to
+CREATE INDEX CONCURRENTLY idx_refresh_tokens_rotated_to
     ON refresh_tokens(rotated_to_id) WHERE rotated_to_id IS NOT NULL;
 
 COMMENT ON COLUMN refresh_tokens.rotation_request_hash IS
