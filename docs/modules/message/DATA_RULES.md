@@ -49,6 +49,12 @@ These tables cannot be rebuilt from any other source if lost.
 
 ### B. Rules Enforced by Application Code
 
+Conversation summaries include both membership rows even when the other person has hidden the
+conversation from their own inbox. Hiding a chat does not erase that person's identity for the
+remaining participant. Access gates, unread counts and delivery still require active membership.
+Participant responses expose a nickname only on the requesting user's own membership row; another
+person's private label is null in both summaries and details, including former memberships.
+
 | Rule | Service / Component |
 |------|---------------------|
 | A user may only send messages to conversations they are an active participant of (`left_at IS NULL`) | `MessageServiceImpl.sendMessage`, `MessageServiceImpl.listHistory`, `MessageServiceImpl.markRead` |

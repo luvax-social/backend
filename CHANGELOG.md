@@ -577,6 +577,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Conversation summaries retain counterpart identity when that person hides the conversation, while each participants private nickname remains visible only to its owner.
 - Post moderation hides content independently of owner deletion, allows owners to delete already moderated posts and never restores an owner-deleted post.
 - A message permission is now stored and read with the root locale, so an account set to `following` no longer fails to load when the server runs under a Turkish default locale.
 - Notification previews now hide blocked or unapproved comment and parent text from viewers who cannot see it.

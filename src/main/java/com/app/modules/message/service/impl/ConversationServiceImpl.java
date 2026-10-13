@@ -196,12 +196,12 @@ public class ConversationServiceImpl implements ConversationService {
         }
 
         List<UUID> conversationIds = allConversations.stream().map(Conversation::getId).toList();
-        List<ConversationParticipant> activeParticipants =
-                participantRepository.findByIdConversationIdInAndLeftAtIsNull(conversationIds);
+        List<ConversationParticipant> participants =
+                participantRepository.findByIdConversationIdIn(conversationIds);
         Map<UUID, List<ParticipantResponse>> participantsByConversation =
-                groupParticipantResponses(activeParticipants);
+                groupParticipantResponses(participants, actorId);
         Map<UUID, ConversationParticipant> myParticipantByConversation =
-                activeParticipants.stream()
+                participants.stream()
                         .filter(p -> p.getId().getUserId().equals(actorId))
                         .collect(
                                 Collectors.toMap(
@@ -387,27 +387,27 @@ public class ConversationServiceImpl implements ConversationService {
         boolean pinned = mine != null && mine.getPinnedAt() != null;
         boolean muted = mine != null && mine.isMuted();
         return mapper.toConversationResponse(
-                conversation, assembleParticipants(conversation.getId()), pinned, muted);
+                conversation, assembleParticipants(conversation.getId(), actorId), pinned, muted);
     }
 
-    private List<ParticipantResponse> assembleParticipants(UUID conversationId) {
+    private List<ParticipantResponse> assembleParticipants(UUID conversationId, UUID actorId) {
         List<ConversationParticipant> participants =
                 participantRepository.findByIdConversationIdOrderByJoinedAtAsc(conversationId);
         Map<UUID, User> users = hydrateUsers(participants);
         return participants.stream()
-                .map(p -> mapper.toParticipantResponse(p, users.get(p.getId().getUserId())))
+                .map(p -> mapper.toParticipantResponse(p, users.get(p.getId().getUserId()), actorId))
                 .toList();
     }
 
     private Map<UUID, List<ParticipantResponse>> groupParticipantResponses(
-            List<ConversationParticipant> participants) {
+            List<ConversationParticipant> participants, UUID actorId) {
         Map<UUID, User> users = hydrateUsers(participants);
         Map<UUID, List<ParticipantResponse>> result = new LinkedHashMap<>();
         for (ConversationParticipant participant : participants) {
             result.computeIfAbsent(participant.getId().getConversationId(), k -> new ArrayList<>())
                     .add(
                             mapper.toParticipantResponse(
-                                    participant, users.get(participant.getId().getUserId())));
+                                    participant, users.get(participant.getId().getUserId()), actorId));
         }
         return result;
     }

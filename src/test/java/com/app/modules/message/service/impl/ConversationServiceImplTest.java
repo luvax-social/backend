@@ -82,7 +82,7 @@ class ConversationServiceImplTest {
         lenient().when(socialService.isBlockedBetween(any(), any())).thenReturn(false);
         lenient().when(userSettingsRepository.findById(any())).thenReturn(Optional.empty());
         lenient()
-                .when(mapper.toParticipantResponse(any(), any()))
+                .when(mapper.toParticipantResponse(any(), any(), any()))
                 .thenAnswer(
                         inv -> {
                             ConversationParticipant p = inv.getArgument(0);
@@ -96,7 +96,7 @@ class ConversationServiceImplTest {
                                     u == null ? null : u.getAvatarUrl(),
                                     p.getJoinedAt(),
                                     p.getLeftAt(),
-                                    p.getNickname());
+                                    p.getId().getUserId().equals(inv.getArgument(2)) ? p.getNickname() : null);
                         });
         lenient()
                 .when(
@@ -517,6 +517,50 @@ class ConversationServiceImplTest {
     }
 
     @Test
+    void participantProjection_nicknameIsPrivateToOwningMember() {
+        UUID ownerId = UUID.randomUUID();
+        UUID otherId = UUID.randomUUID();
+        ConversationParticipant row = participant(UUID.randomUUID(), ownerId, null);
+        row.setNickname("private label");
+        MessageMapper actualMapper = org.mapstruct.factory.Mappers.getMapper(MessageMapper.class);
+
+        assertThat(actualMapper.toParticipantResponse(row, null, ownerId).nickname())
+                .isEqualTo("private label");
+        assertThat(actualMapper.toParticipantResponse(row, null, otherId).nickname()).isNull();
+        row.setLeftAt(OffsetDateTime.now(ZoneOffset.UTC));
+        assertThat(actualMapper.toParticipantResponse(row, null, otherId).nickname()).isNull();
+    }
+
+    @Test
+    void listMyConversations_counterpartHiddenInOwnInbox_retainsIdentity() {
+        UUID actorId = UUID.randomUUID();
+        UUID otherId = UUID.randomUUID();
+        UUID convId = UUID.randomUUID();
+        Conversation conv = Conversation.builder().id(convId).build();
+        ConversationParticipant mine = participant(convId, actorId, null);
+        ConversationParticipant hidden =
+                participant(convId, otherId, OffsetDateTime.now(ZoneOffset.UTC));
+        User other = User.builder().id(otherId).username("counterpart").build();
+        when(conversationRepository.findFirstMyConversations(eq(actorId), any(Pageable.class)))
+                .thenReturn(List.of(conv));
+        when(participantRepository.findByIdConversationIdIn(List.of(convId)))
+                .thenReturn(List.of(mine, hidden));
+        when(userRepository.findAllByIdInAndDeletedAtIsNull(Set.of(actorId, otherId)))
+                .thenReturn(List.of(other));
+        when(messageRepository.countUnreadPerConversation(actorId, List.of(convId)))
+                .thenReturn(List.of());
+
+        var result = service.listMyConversations(actorId, null, 20);
+
+        assertThat(result.getContent().get(0).participants())
+                .anySatisfy(p -> {
+                    assertThat(p.userId()).isEqualTo(otherId);
+                    assertThat(p.username()).isEqualTo("counterpart");
+                    assertThat(p.leftAt()).isNotNull();
+                });
+    }
+
+    @Test
     void listMyConversations_manuallyUnreadRow_carriesFlagIntoSummary() {
         UUID actorId = UUID.randomUUID();
         UUID convId = UUID.randomUUID();
@@ -525,7 +569,7 @@ class ConversationServiceImplTest {
         myRow.setManuallyUnread(true);
         when(conversationRepository.findFirstMyConversations(eq(actorId), any(Pageable.class)))
                 .thenReturn(List.of(conv));
-        when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(List.of(convId)))
+        when(participantRepository.findByIdConversationIdIn(List.of(convId)))
                 .thenReturn(List.of(myRow));
         when(messageRepository.countUnreadPerConversation(eq(actorId), eq(List.of(convId))))
                 .thenReturn(List.of());
@@ -547,7 +591,7 @@ class ConversationServiceImplTest {
                 Conversation.builder().id(conv2Id).lastMessageAt(now.minusMinutes(5)).build();
         when(conversationRepository.findFirstMyConversations(eq(actorId), any(Pageable.class)))
                 .thenReturn(List.of(conv1, conv2));
-        when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(
+        when(participantRepository.findByIdConversationIdIn(
                         List.of(conv1Id, conv2Id)))
                 .thenReturn(List.of());
         when(messageRepository.countUnreadPerConversation(
@@ -579,7 +623,7 @@ class ConversationServiceImplTest {
                 .thenReturn(List.of(unpinnedConv));
         when(conversationRepository.findMyPinnedConversations(actorId))
                 .thenReturn(List.of(pinnedConv));
-        when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(
+        when(participantRepository.findByIdConversationIdIn(
                         List.of(pinnedConvId, unpinnedConvId)))
                 .thenReturn(List.of(myPinnedRow));
         when(messageRepository.countUnreadPerConversation(
@@ -641,7 +685,7 @@ class ConversationServiceImplTest {
         when(conversationRepository.findMyConversationsBefore(
                         eq(actorId), eq(cursorTime), eq(cursorConvId), any(Pageable.class)))
                 .thenReturn(List.of(conv1));
-        when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(List.of(conv1Id)))
+        when(participantRepository.findByIdConversationIdIn(List.of(conv1Id)))
                 .thenReturn(List.of());
         when(messageRepository.countUnreadPerConversation(eq(actorId), eq(List.of(conv1Id))))
                 .thenReturn(List.of());
@@ -660,7 +704,7 @@ class ConversationServiceImplTest {
         Conversation conv1 = Conversation.builder().id(conv1Id).lastMessageAt(null).build();
         when(conversationRepository.findFirstMyConversations(eq(actorId), any(Pageable.class)))
                 .thenReturn(List.of(conv1));
-        when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(List.of(conv1Id)))
+        when(participantRepository.findByIdConversationIdIn(List.of(conv1Id)))
                 .thenReturn(List.of());
         when(messageRepository.countUnreadPerConversation(eq(actorId), eq(List.of(conv1Id))))
                 .thenReturn(List.of());
@@ -678,7 +722,7 @@ class ConversationServiceImplTest {
         when(conversationRepository.findMyConversationsBefore(
                         eq(actorId), isNull(), eq(conv1Id), any(Pageable.class)))
                 .thenReturn(List.of(conv2));
-        when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(List.of(conv2Id)))
+        when(participantRepository.findByIdConversationIdIn(List.of(conv2Id)))
                 .thenReturn(List.of());
         when(messageRepository.countUnreadPerConversation(eq(actorId), eq(List.of(conv2Id))))
                 .thenReturn(List.of());
