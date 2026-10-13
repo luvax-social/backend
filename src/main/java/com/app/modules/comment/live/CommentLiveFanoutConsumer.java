@@ -44,6 +44,7 @@ public class CommentLiveFanoutConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(CommentLiveFanoutConsumer.class);
     private static final String VISIBILITY_HIDDEN = "hidden";
+    private static final String VISIBILITY_VISIBLE = "visible";
 
     private final DomainEventMessageParser parser;
     private final SimpMessagingTemplate messagingTemplate;
@@ -137,8 +138,10 @@ public class CommentLiveFanoutConsumer {
                 // An edit can newly hide a comment viewers already hold. They get a removal in the
                 // deleted frame's shape for that one comment and never the text; the author is
                 // excluded because their own view must not change. A comment hidden before the
-                // edit was never on a viewer's screen, so it removes nothing.
-                if (VISIBILITY_HIDDEN.equals(data.get("previousVisibility"))) {
+                // edit was never on a viewer's screen, so it removes nothing. An event without
+                // previousVisibility predates the field, and claiming a removal there could name
+                // a comment no viewer held, so only an explicit "visible" counts as one.
+                if (!VISIBILITY_VISIBLE.equals(data.get("previousVisibility"))) {
                     return new LiveFrame(
                             CommentEventTypes.COMMENT_DELETED_V1, noViewerRemoval(data), true);
                 }

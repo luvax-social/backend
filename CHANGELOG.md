@@ -579,6 +579,7 @@ The audit log records server-derived facts only, and a request that still sends 
 
 ### Fixed
 - A message permission is now stored and read with the root locale, so an account set to `following` no longer fails to load when the server runs under a Turkish default locale.
+- The deletion count a caller sees now leaves out comments a moderator removed, and a live edit frame from an event with no recorded previous visibility is sent as a removal of nothing instead of claiming a comment viewers may never have held.
 - Notification previews now hide blocked or unapproved comment and parent text from viewers who cannot see it.
 - A sender can no longer message a peer who left a conversation and then blocked them, and that peer's membership stays inactive.
 - Reusing a message send key with a different reply target now returns a conflict instead of replaying the earlier message.

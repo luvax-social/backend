@@ -412,6 +412,25 @@ class CommentHiddenSideChannelIT {
     }
 
     @Test
+    void live_editThatHidesACommentWithoutPreviousVisibility_removesNothingFromViewers() {
+        Fixture f = fixture("liveeditlegacy");
+        UUID visible = idOf(postComment(f.author(), f.postId(), null, "perfectly fine"));
+        editComment(f.author(), visible, "now a badword sneaks in");
+
+        LiveFrame frame =
+                liveFrameWithoutField(
+                                visible, CommentEventTypes.COMMENT_EDITED_V1, "previousVisibility")
+                        .orElseThrow();
+
+        assertThat(frame.eventType()).isEqualTo(CommentEventTypes.COMMENT_DELETED_V1);
+        assertThat(frame.data().get("deletedCommentCount")).isEqualTo(0);
+        assertThat(frame.data())
+                .containsOnlyKeys("postId", "commentId", "deletedCommentCount")
+                .doesNotContainKeys("commentOwnerId", "rootId", "parentId");
+        assertThat(frame.droppedViewers()).contains(f.author().id());
+    }
+
+    @Test
     void live_editOfAnAlreadyHiddenComment_removesNothingFromViewers() {
         Fixture f = fixture("liveeditagain");
 
@@ -473,6 +492,24 @@ class CommentHiddenSideChannelIT {
         assertThat(((Map<?, ?>) deleted.getBody().get("data")).get("deletedCommentCount"))
                 .isEqualTo(scope);
         assertThat(deletedAtIsSet(hiddenReply)).isTrue();
+    }
+
+    @Test
+    void deletionScope_excludesAModeratorRemovedReplyByAnotherUser_forAnOrdinaryCaller() {
+        Fixture f = fixture("scoperemoved");
+        UUID parent = idOf(postComment(f.other(), f.postId(), null, "an ordinary parent"));
+        idOf(postComment(f.owner(), f.postId(), parent, "an approved reply"));
+        UUID removedReply = idOf(postComment(f.author(), f.postId(), parent, "a removed reply"));
+        jdbcTemplate.update(
+                "UPDATE comments SET admin_removed_at = now() WHERE id = ?", removedReply);
+
+        int scope = scopeCount(f.other(), parent);
+        ResponseEntity<Map> deleted = deleteComment(f.other(), parent);
+
+        assertThat(statusOf(removedReply)).isEqualTo("approved");
+        assertThat(scope).isEqualTo(2);
+        assertThat(((Map<?, ?>) deleted.getBody().get("data")).get("deletedCommentCount"))
+                .isEqualTo(scope);
     }
 
     @Test
@@ -540,6 +577,32 @@ class CommentHiddenSideChannelIT {
     }
 
     private Optional<LiveFrame> liveFrame(UUID commentId, String eventType) {
+        return liveFrame(messageFor(commentId, eventType));
+    }
+
+    private Optional<LiveFrame> liveFrameWithoutField(
+            UUID commentId, String eventType, String field) {
+        DomainEventEnvelope original = latestEvent(commentId, eventType);
+        Map<String, Object> data = new HashMap<>(original.data());
+        data.remove(field);
+        DomainEventEnvelope stripped =
+                new DomainEventEnvelope(
+                        original.eventId(),
+                        original.eventType(),
+                        original.occurredAt(),
+                        original.actorId(),
+                        original.aggregateType(),
+                        original.aggregateId(),
+                        data);
+        return liveFrame(
+                MessageBuilder.withBody(
+                                DomainEventEnvelopeJson.write(stripped)
+                                        .getBytes(StandardCharsets.UTF_8))
+                        .setDeliveryTag(0L)
+                        .build());
+    }
+
+    private Optional<LiveFrame> liveFrame(Message message) {
         SimpMessagingTemplate template = mock(SimpMessagingTemplate.class);
         CommentLiveServerQueueInitializer queue = mock(CommentLiveServerQueueInitializer.class);
         when(queue.getServerId()).thenReturn("it-server");
@@ -547,7 +610,7 @@ class CommentHiddenSideChannelIT {
                 new CommentLiveFanoutConsumer(
                         parser, template, commentMetrics, queue, blockRepository);
 
-        consumer.consume(messageFor(commentId, eventType));
+        consumer.consume(message);
 
         List<Invocation> sent =
                 mockingDetails(template).getInvocations().stream()
