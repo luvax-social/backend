@@ -129,9 +129,11 @@ class PostVisibilityServiceImplTest {
                 .thenReturn(
                         Map.of(
                                 privateFollowed,
-                                new ViewerRelationshipResponse(true, false, false, false, false),
+                                new ViewerRelationshipResponse(
+                                        true, false, false, false, false, false, false, false),
                                 privateNotFollowed,
-                                new ViewerRelationshipResponse(false, false, false, false, false)));
+                                new ViewerRelationshipResponse(
+                                        false, false, false, false, false, false, false, false)));
         when(postUserRepository.findAllByIdInAndDeletedAtIsNull(candidates))
                 .thenReturn(
                         List.of(

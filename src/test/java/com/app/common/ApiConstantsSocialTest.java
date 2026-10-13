@@ -22,5 +22,11 @@ class ApiConstantsSocialTest {
                 .isEqualTo("/api/v1/social/follow-requests/{requesterId}/approve");
         assertThat(ApiConstants.Social.ROOT + ApiConstants.Social.FOLLOW_REQUEST_REJECT)
                 .isEqualTo("/api/v1/social/follow-requests/{requesterId}/reject");
+        assertThat(ApiConstants.Social.ROOT + ApiConstants.Social.SHOW_FEWER)
+                .isEqualTo("/api/v1/social/show-fewer/{authorId}");
+        assertThat(ApiConstants.Social.ROOT + ApiConstants.Social.MUTES)
+                .isEqualTo("/api/v1/social/mutes");
+        assertThat(ApiConstants.Social.ROOT + ApiConstants.Social.MUTE_BY_ID)
+                .isEqualTo("/api/v1/social/mutes/{targetUserId}");
     }
 }

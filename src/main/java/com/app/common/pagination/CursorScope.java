@@ -59,6 +59,7 @@ public final class CursorScope {
     public static final String SOCIAL_FOLLOWERS = "flw";
     public static final String SOCIAL_FOLLOWING = "flg";
     public static final String SOCIAL_BLOCKED = "blk";
+    public static final String SOCIAL_MUTES = "mut";
     public static final String SOCIAL_PENDING_REQUESTS = "frq";
     public static final String STORY_VIEWERS = "stv";
 }

@@ -108,6 +108,9 @@ public final class ApiConstants {
         public static final String FOLLOW_REQUEST_REJECT = "/follow-requests/{requesterId}/reject";
         public static final String BLOCK = "/block/{targetUserId}";
         public static final String BLOCKED = "/blocked";
+        public static final String SHOW_FEWER = "/show-fewer/{authorId}";
+        public static final String MUTES = "/mutes";
+        public static final String MUTE_BY_ID = "/mutes/{targetUserId}";
     }
 
     public static final class Messages {

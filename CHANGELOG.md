@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- Blocking an account now also removes the mutes and show-fewer requests between the two accounts in both directions.
 - `posts.comment_count` and a comment's `reply_count` now count only approved comments, so a hidden comment is not counted until its post owner unhides it.
 - `GET` and `PATCH /users/me/settings` carry `hiddenWordsSystemEnabled`, the account choice to apply the platform-wide hidden word list alongside its personal one; it defaults to true and a request that omits it leaves it unchanged.
 - The `allowMessageRequests` setting is replaced by `messagePermission` (`everyone`, `following` or `nobody`) on `GET` and `PUT /users/me/settings`; existing accounts keep their behaviour (`true` becomes `everyone`, `false` becomes `following`), and a request that still sends `allowMessageRequests` is rejected.
@@ -33,6 +34,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The deletion count a comment owner sees in the confirmation and in the delete response no longer includes hidden replies by other users, and the live update for a hidden comment no longer names its author or thread.
 
 ### Added
+- An account can mute another account's posts, stories or both with `PUT /social/mutes/{targetUserId}`, remove the mute with `DELETE` or by sending both flags false, and list its mutes newest first with `GET /social/mutes`; the muted account is not told, and a mute emits `user.muted.v1` or `user.unmuted.v1` only when it changed, but it does not yet change any feed or story tray.
+- An account can ask to see fewer recommendations from an author with `POST /social/show-fewer/{authorId}` and take that back with `DELETE`; the author is not told, and a request for oneself, a missing account or a blocked account answers the same not-found response.
+- A viewer's relationship to another account now reports `isMutingPosts`, `isMutingStories` and `isShowingFewer`, resolved with one extra batched query and never shown to the muted account.
 - A viewer can mark a post as not interested with `POST /posts/{postId}/not-interested` and take the mark back with `DELETE`; the call is idempotent, the author is not told, marking your own post answers `POST_FEEDBACK_SELF`, and the mark enqueues `post.not-interested.v1` or `post.not-interested-undone.v1` but does not yet change any feed or recommendation.
 - A post owner can list the hidden comments of their post with `GET /posts/{postId}/comments/hidden`, newest first with each comment's `hiddenReason` (`hidden_words`, `limited_interaction` or `hidden_parent`), and release one with `POST /comments/{commentId}/unhide`, which also releases the replies hidden only because of it and answers `COMMENT_PARENT_STILL_HIDDEN` (409) while the comment it answers is still hidden.
 - A released comment is sent to live viewers of the post as `comment.unhidden.v1`, one event for the comment and one for each reply released with it; no notification is created.
