@@ -28,10 +28,10 @@ public interface ConversationParticipantRepository
     List<ConversationParticipant> findByIdConversationIdOrderByJoinedAtAsc(UUID conversationId);
 
     /**
-     * Active members across many conversations in one query, for batched conversation-list
+     * Active and former members across many conversations in one query, for batched conversation-list
      * hydration (avoids one query per conversation).
      */
-    List<ConversationParticipant> findByIdConversationIdInAndLeftAtIsNull(
+    List<ConversationParticipant> findByIdConversationIdIn(
             Collection<UUID> conversationIds);
 
     int countByIdConversationIdAndLeftAtIsNull(UUID conversationId);

@@ -2,6 +2,7 @@ package com.app.modules.message.mapper;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.UUID;
 
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -25,6 +26,7 @@ public interface MessageMapper {
      * Projects a membership row and its hydrated user onto the participant summary shape.
      *
      * @param participant the membership row
+     * @param actorId the requesting user, whose own nickname may be included
      * @param user the participating user, separately hydrated; display fields are null if the
      *     lookup missed
      * @return the participant summary
@@ -35,8 +37,8 @@ public interface MessageMapper {
     @Mapping(source = "user.verifiedCategory", target = "verifiedCategory")
     @Mapping(source = "user.displayName", target = "displayName")
     @Mapping(source = "user.avatarUrl", target = "avatarUrl")
-    @Mapping(source = "participant.nickname", target = "nickname")
-    ParticipantResponse toParticipantResponse(ConversationParticipant participant, User user);
+    @Mapping(target = "nickname", expression = "java(participant.getId().getUserId().equals(actorId) ? participant.getNickname() : null)")
+    ParticipantResponse toParticipantResponse(ConversationParticipant participant, User user, UUID actorId);
 
     /**
      * Builds the conversation detail response from the entity, its already-assembled participant
@@ -55,12 +57,12 @@ public interface MessageMapper {
             boolean muted);
 
     /**
-     * Builds one conversation-list row from the entity, its active participants, a
+     * Builds one conversation-list row from the entity, its active and former participants, a
      * separately-computed unread count, its newest message preview, and the caller's own pin/mute
      * state.
      *
      * @param conversation the source conversation
-     * @param participants active members, already hydrated
+     * @param participants active and former members, already hydrated
      * @param unreadCount unread-message count for the requesting user, computed by the caller
      * @param lastMessage the conversation's newest message, or null if none yet
      * @param pinned whether the requesting caller has pinned this conversation

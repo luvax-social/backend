@@ -8,7 +8,7 @@ import java.util.UUID;
  * soft-deleted.
  *
  * <p>Native and projection-shaped on purpose. {@code Post} carries
- * {@code @SQLRestriction("deleted_at IS NULL")}, so a removed post cannot be loaded through the
+ * an entity restriction for both owner and moderation tombstones, so a removed post cannot be loaded through the
  * entity at all, and restore has to read one.
  */
 public interface PostModerationProjection {
@@ -26,6 +26,9 @@ public interface PostModerationProjection {
     Instant getCreatedAt();
 
     String getStatus();
+
+    /** Owner deletion timestamp; moderation cannot clear it. */
+    Instant getDeletedAt();
 
     /** Status held before the moderation removal, or null for a post removed before V59. */
     String getStatusBeforeModeration();

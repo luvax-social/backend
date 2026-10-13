@@ -11,7 +11,7 @@
 | `users` | `id`, `username`, `email`, `role`, `status`, `is_private`, `is_verified`, `registration_ip`, `last_login_ip`, `last_login_at` | Core user identity. Canonical for all user-referencing modules. Soft-deleted via `deleted_at`. `registration_ip` is written once, in the same transaction as the row insert, on both the local and the OAuth creation path. `last_login_ip` and `last_login_at` advance on session issuance only and are deliberately not advanced by a token refresh, so `last_login_at` stays a sign-in signal rather than an activity signal. All three come from `IpExtractor`, which honours `X-Forwarded-For` only from a configured trusted proxy. |
 | `user_credentials` | `user_id` (PK/FK), `password_hash`, `email_verified`, `email_verified_at` | Local auth credentials. `password_hash` is nullable — OAuth-only users have no local password. |
 | `oauth_accounts` | `id`, `user_id`, `provider`, `provider_id` | Canonical record that a user authenticated via an external OAuth provider. One row per (provider, provider_id) pair. |
-| `refresh_tokens` | `id`, `user_id`, `token_hash`, `expires_at`, `revoked_at` | Durable record of issued refresh tokens. Token itself is never stored — only its bcrypt hash. |
+| `refresh_tokens` | `id`, `user_id`, `token_hash`, `expires_at`, `revoked_at`, `rotation_request_hash`, `rotated_to_id` | Durable record of issued refresh tokens. Only SHA-256 hashes are stored. The optional request hash and child row link support recovery of an interrupted rotation. |
 
 These tables cannot be rebuilt from any other source if lost.
 
@@ -72,6 +72,15 @@ These tables cannot be rebuilt from any other source if lost.
 | Soft-deleted users (`deleted_at IS NOT NULL`) cannot authenticate | `AuthServiceImpl` |
 
 ### C. Field Clarifications
+
+`POST /auth/refresh` accepts an optional UUID `Idempotency-Key`. A consumed token may recover its
+original child for sixty seconds only when the same request key is presented, the child belongs to
+the same user and is still active and unexpired. The child raw value is reconstructed with a
+domain-separated HMAC using the server signing secret; no raw credential is stored in PostgreSQL,
+Redis or logs. Account status and current role/token epoch are checked again on every recovery.
+The child's refresh expiry is not extended. Missing or different keys retain strict replay
+rejection and all-session revocation. Losing a response beyond the recovery window still requires
+sign-in. Browser storage contains only the pending random request identifier, never token values.
 
 **`users.is_verified` vs `user_credentials.email_verified`**:
 - `user_credentials.email_verified` — confirms the user owns the email address. Set to `true` after the user clicks the email verification link. This is an authentication concern.

@@ -52,6 +52,64 @@ class RefreshTokenServiceImplTest {
     }
 
     @Test
+    void rotate_sameRequestAfterLostResponse_returnsOriginalActiveChild() {
+        String raw = UUID.randomUUID().toString();
+        String requestKey = UUID.randomUUID().toString();
+        UUID userId = UUID.randomUUID();
+        RefreshToken parent = RefreshToken.builder().id(UUID.randomUUID()).userId(userId)
+                .tokenHash(sha256(raw)).expiresAt(OffsetDateTime.now().plusMinutes(30)).build();
+        when(repository.findByTokenHash(sha256(raw))).thenReturn(Optional.of(parent));
+        when(repository.revokeByTokenHash(eq(sha256(raw)), any())).thenReturn(1);
+        when(repository.linkRotation(eq(sha256(raw)), eq(sha256(requestKey)), anyString())).thenReturn(1);
+        var issued = service.rotate(raw, "127.0.0.1", requestKey);
+        parent.setRevokedAt(OffsetDateTime.now());
+        var retry = org.mockito.Mockito.mock(RefreshTokenRepository.RotationRetry.class);
+        when(retry.getUserId()).thenReturn(userId);
+        when(retry.getTokenHash()).thenReturn(sha256(issued.newRawToken()));
+        when(repository.findRotationRetry(eq(sha256(raw)), eq(sha256(requestKey)), any(), any()))
+                .thenReturn(Optional.of(retry));
+
+        var recovered = service.rotate(raw, "127.0.0.1", requestKey);
+
+        assertThat(recovered).isEqualTo(issued);
+        verify(repository, never()).revokeAllActiveByUserId(any(), any());
+    }
+
+    @Test
+    void rotate_differentRequestOnConsumedToken_keepsReplayRevocation() {
+        String raw = UUID.randomUUID().toString();
+        String requestKey = UUID.randomUUID().toString();
+        UUID userId = UUID.randomUUID();
+        RefreshToken parent = RefreshToken.builder().id(UUID.randomUUID()).userId(userId)
+                .tokenHash(sha256(raw)).revokedAt(OffsetDateTime.now())
+                .expiresAt(OffsetDateTime.now().plusMinutes(30)).build();
+        when(repository.findByTokenHash(sha256(raw))).thenReturn(Optional.of(parent));
+        when(repository.findRotationRetry(eq(sha256(raw)), eq(sha256(requestKey)), any(), any()))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.rotate(raw, "127.0.0.1", requestKey)).isInstanceOf(AppException.class);
+        verify(repository).revokeAllActiveByUserId(eq(userId), any());
+    }
+
+    @Test
+    void rotate_retryWithMismatchedChildHash_keepsReplayRevocation() {
+        String raw = UUID.randomUUID().toString();
+        String requestKey = UUID.randomUUID().toString();
+        UUID userId = UUID.randomUUID();
+        RefreshToken parent = RefreshToken.builder().id(UUID.randomUUID()).userId(userId)
+                .tokenHash(sha256(raw)).revokedAt(OffsetDateTime.now())
+                .expiresAt(OffsetDateTime.now().plusMinutes(30)).build();
+        var retry = org.mockito.Mockito.mock(RefreshTokenRepository.RotationRetry.class);
+        when(retry.getTokenHash()).thenReturn(sha256("another child"));
+        when(repository.findByTokenHash(sha256(raw))).thenReturn(Optional.of(parent));
+        when(repository.findRotationRetry(eq(sha256(raw)), eq(sha256(requestKey)), any(), any()))
+                .thenReturn(Optional.of(retry));
+
+        assertThatThrownBy(() -> service.rotate(raw, "127.0.0.1", requestKey)).isInstanceOf(AppException.class);
+        verify(repository).revokeAllActiveByUserId(eq(userId), any());
+    }
+
+    @Test
     void issue_persistsHashedTokenNotRawValue() {
         UUID userId = UUID.randomUUID();
 

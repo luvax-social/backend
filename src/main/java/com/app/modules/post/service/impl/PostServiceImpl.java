@@ -301,22 +301,28 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional
     public void deletePost(UUID requesterId, UUID postId) {
-        Post post =
-                postRepository
-                        .findByIdAndDeletedAtIsNull(postId)
-                        .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
+        PostModerationProjection post = requireModerationView(postId);
+        if (post.getDeletedAt() != null) {
+            throw new AppException(ApiErrorCode.POST_NOT_FOUND);
+        }
         if (!requesterId.equals(post.getUserId()) && !isCurrentUserAdmin()) {
             throw new AppException(ApiErrorCode.POST_FORBIDDEN);
         }
-        softDelete(post);
+        if (postRepository.applyOwnerDeletion(postId, OffsetDateTime.now()) != 1) {
+            throw new AppException(ApiErrorCode.POST_NOT_FOUND);
+        }
+        hashtagService.removeHashtagsForPost(postId);
+        enqueuePostIndexDelete(postId, post.getUserId());
     }
 
     @Override
     @Transactional
     public PostModerationResult applyModerationRemoval(UUID postId) {
         PostModerationProjection post = requireModerationView(postId);
+        if (postRepository.applyModerationRemoval(postId) != 1) {
+            throw new AppException(ApiErrorCode.ADMIN_INVALID_TRANSITION);
+        }
         hashtagService.removeHashtagsForPost(postId);
-        postRepository.applyModerationRemoval(postId, OffsetDateTime.now());
         enqueuePostIndexDelete(postId, post.getUserId());
         log.info("Post removed by moderation: postId={}, from={}", postId, post.getStatus());
         return new PostModerationResult(post.getUserId(), PostStatus.REMOVED, List.of());
@@ -326,11 +332,13 @@ public class PostServiceImpl implements PostService {
     @Transactional
     public PostModerationResult applyModerationRestore(UUID postId) {
         PostModerationProjection post = requireModerationView(postId);
-        // Null for a post removed before the prior status was recorded. Published is the right
-        // fallback rather than a guess: it is what restore did for every post back then, so a row
-        // from that era lands exactly where it would have.
-        PostStatus restored = restoredStatusOrPublished(post.getStatusBeforeModeration());
-        postRepository.applyModerationRestore(postId, restored.toJson());
+        // A legacy deleted_at value cannot prove who deleted the post. Fail closed
+        // rather than treating an owner tombstone as a moderation-only removal.
+        PostStatus restored = PostStatus.fromJson(post.getStatusBeforeModeration());
+        if (post.getDeletedAt() != null || restored == null || restored == PostStatus.REMOVED
+                || postRepository.applyModerationRestore(postId, restored.toJson()) != 1) {
+            throw new AppException(ApiErrorCode.ADMIN_INVALID_TRANSITION);
+        }
         // Only a published post belongs in post_hashtags and in the search index; the owner path
         // keeps a draft and an archived post out of both. The hashtag-eligibility check belongs on
         // this re-derivation rather than on the removal arm, because removal detaches every
@@ -358,11 +366,6 @@ public class PostServiceImpl implements PostService {
                 restored,
                 remainingBannedHashtags);
         return new PostModerationResult(post.getUserId(), restored, remainingBannedHashtags);
-    }
-
-    private static PostStatus restoredStatusOrPublished(String statusBeforeModeration) {
-        PostStatus restored = PostStatus.fromJson(statusBeforeModeration);
-        return restored == null ? PostStatus.PUBLISHED : restored;
     }
 
     @Override

@@ -71,7 +71,7 @@ public class AdminReportTargetRepository {
                                         rs.getString("status"),
                                         rs.getString("caption"),
                                         findPostMediaUrls(entityId),
-                                        rs.getObject("deleted_at") != null,
+                                        rs.getObject("deleted_at") != null || "removed".equals(rs.getString("status")),
                                         rs.getObject("created_at", java.time.OffsetDateTime.class)))
                 .optional();
     }

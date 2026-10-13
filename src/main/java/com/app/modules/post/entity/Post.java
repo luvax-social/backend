@@ -43,8 +43,8 @@ import lombok.Setter;
  */
 @Entity
 @Table(name = "posts")
-// Soft-delete filter: every query on posts must exclude deleted rows (GLOBAL_RULES §3).
-@SQLRestriction("deleted_at IS NULL")
+// Public entity reads exclude both independent owner and moderation tombstones.
+@SQLRestriction("deleted_at IS NULL AND status_before_moderation IS NULL")
 @Getter
 @Setter
 @NoArgsConstructor

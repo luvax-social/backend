@@ -56,6 +56,12 @@ public class RefreshToken {
     @Column(name = "revoked_at")
     private OffsetDateTime revokedAt;
 
+    @Column(name = "rotation_request_hash", length = 64)
+    private String rotationRequestHash;
+
+    @Column(name = "rotated_to_id")
+    private UUID rotatedToId;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
