@@ -1024,6 +1024,11 @@ class CommentControllerIT {
      * two pinned comments are also the two oldest. At a page size of two that puts them on the
      * first page as pinned and on the last chronological page as body rows, which is the shape that
      * exposes the duplicate.
+     *
+     * <p>Each comment's {@code created_at} is then restamped a minute apart. The column defaults to
+     * the database transaction start, so the order of the six rows would otherwise rest on the
+     * database clock advancing between six separate HTTP requests; an explicit spacing makes the
+     * expected order a property of the fixture alone.
      */
     private SortFixture buildSortFixture(TestUser author, TestUser liker, UUID postId) {
         UUID t1 = createComment(author, postId, null, "T1 oldest", null);
@@ -1032,10 +1037,21 @@ class CommentControllerIT {
         UUID t4 = createComment(author, postId, null, "T4", null);
         UUID t5 = createComment(author, postId, null, "T5", null);
         UUID t6 = createComment(author, postId, null, "T6 newest", null);
+        stampOneMinuteApart(t1, t2, t3, t4, t5, t6);
         likeAs(liker, t1);
         likeAs(author, t1);
         likeAs(liker, t2);
         return new SortFixture(t1, t2, t3, t4, t5, t6);
+    }
+
+    private void stampOneMinuteApart(UUID... oldestFirst) {
+        OffsetDateTime oldest = OffsetDateTime.now().minusHours(1);
+        for (int i = 0; i < oldestFirst.length; i++) {
+            jdbcTemplate.update(
+                    "UPDATE comments SET created_at = ? WHERE id = ?",
+                    oldest.plusMinutes(i),
+                    oldestFirst[i]);
+        }
     }
 
     private void likeAs(TestUser user, UUID commentId) {
