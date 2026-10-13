@@ -366,6 +366,12 @@ public class CommentServiceImpl implements CommentService {
             // carries only this number: the full count below would tell every viewer how many
             // hidden comments the subtree held.
             int visibleDeletedCount = commentRepository.countVisibleSubtree(commentId);
+            // The deleter is told how many comments they could see go, which is every row only
+            // for an administrator or the post owner; anyone else would learn of hidden replies
+            // by other users from a larger number.
+            boolean seesEveryRow = canSeeEveryComment(actorId, comment);
+            int deleterCount =
+                    seesEveryRow ? 0 : commentRepository.countSubtreeVisibleTo(commentId, actorId);
             // The statement's own affected-row count is the authoritative figure for how many
             // comments this delete removed; no second query can match it without a race.
             int deletedCommentCount =
@@ -392,7 +398,8 @@ public class CommentServiceImpl implements CommentService {
                     comment.getId(),
                     actorId,
                     data);
-            return new CommentDeletionScopeResponse(deletedCommentCount);
+            return new CommentDeletionScopeResponse(
+                    seesEveryRow ? deletedCommentCount : deleterCount);
         } finally {
             clearWriteMdc();
         }
@@ -415,7 +422,21 @@ public class CommentServiceImpl implements CommentService {
         if (!comment.getUserId().equals(actorId) && !isCurrentUserAdmin()) {
             throw new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
         }
-        return new CommentDeletionScopeResponse(commentRepository.countSubtree(commentId));
+        // The same definition the delete answers with, so the dialogue and the delete agree.
+        return new CommentDeletionScopeResponse(
+                canSeeEveryComment(actorId, comment)
+                        ? commentRepository.countSubtree(commentId)
+                        : commentRepository.countSubtreeVisibleTo(commentId, actorId));
+    }
+
+    // An administrator and the owner of the post both read hidden comments, so for them the
+    // deletion count may include every row.
+    private boolean canSeeEveryComment(UUID actorId, Comment comment) {
+        return isCurrentUserAdmin()
+                || postRepository
+                        .findById(comment.getPostId())
+                        .map(post -> post.getUserId().equals(actorId))
+                        .orElse(false);
     }
 
     @Override

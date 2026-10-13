@@ -394,4 +394,46 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
 					""",
             nativeQuery = true)
     int countVisibleSubtree(@Param("commentId") UUID commentId);
+
+    /**
+     * Counts the comments in the target's subtree that a viewer without access to hidden comments
+     * can see: not soft-deleted, and either approved or hidden and written by that viewer.
+     *
+     * <p>This is the deletion count for anyone who is neither an administrator nor the owner of the
+     * post, who both see every row and use {@link #countSubtree}. Counting a hidden reply by
+     * another user would tell the caller that it exists. The walk and its thread bound are those of
+     * {@link #countSubtree}.
+     *
+     * @param commentId root of the subtree to measure
+     * @param viewerId the account the count is for
+     * @return number of such comments in that subtree; zero when the comment does not exist
+     */
+    @Query(
+            value =
+                    """
+					WITH RECURSIVE anchor AS (
+						SELECT id, coalesce(root_id, id) AS thread_id
+						FROM comments WHERE id = :commentId
+					),
+					thread AS (
+						SELECT c.id, c.parent_id, c.deleted_at, c.user_id, c.moderation_status
+						FROM comments c JOIN anchor a ON c.id = a.thread_id
+						UNION ALL
+						SELECT c.id, c.parent_id, c.deleted_at, c.user_id, c.moderation_status
+						FROM comments c JOIN anchor a ON c.root_id = a.thread_id
+					),
+					subtree AS (
+						SELECT t.id, t.deleted_at, t.user_id, t.moderation_status
+						FROM thread t JOIN anchor a ON t.id = a.id
+						UNION ALL
+						SELECT t.id, t.deleted_at, t.user_id, t.moderation_status
+						FROM thread t JOIN subtree s ON t.parent_id = s.id
+					)
+					SELECT count(*) FROM subtree
+					WHERE deleted_at IS NULL
+						AND (moderation_status = 'approved'
+							OR (moderation_status = 'hidden' AND user_id = :viewerId))
+					""",
+            nativeQuery = true)
+    int countSubtreeVisibleTo(@Param("commentId") UUID commentId, @Param("viewerId") UUID viewerId);
 }

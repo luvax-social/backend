@@ -387,6 +387,15 @@ class CommentHiddenSideChannelIT {
     }
 
     @Test
+    void live_noUnlikeFrameForHiddenComment() {
+        Fixture f = fixture("liveunlike");
+        like(f.author(), f.hidden());
+        unlike(f.author(), f.hidden());
+
+        assertThat(liveFrame(f.hidden(), CommentEventTypes.COMMENT_UNLIKED_V1)).isEmpty();
+    }
+
+    @Test
     void live_editThatNewlyHidesAComment_becomesARemovalForOtherViewersWithoutText() {
         Fixture f = fixture("liveedit");
         UUID visible = idOf(postComment(f.author(), f.postId(), null, "perfectly fine"));
@@ -412,6 +421,9 @@ class CommentHiddenSideChannelIT {
         assertThat(frame.eventType()).isEqualTo(CommentEventTypes.COMMENT_DELETED_V1);
         assertThat(frame.data().get("deletedCommentCount")).isEqualTo(0);
         assertThat(frame.data().toString()).doesNotContain("polite words");
+        assertThat(frame.data())
+                .containsOnlyKeys("postId", "commentId", "deletedCommentCount")
+                .doesNotContainKeys("commentOwnerId", "rootId", "parentId");
         assertThat(frame.droppedViewers()).contains(f.author().id());
     }
 
@@ -427,6 +439,70 @@ class CommentHiddenSideChannelIT {
         LiveFrame frame = liveFrame(f.hidden(), CommentEventTypes.COMMENT_DELETED_V1).orElseThrow();
         assertThat(frame.data().get("deletedCommentCount")).isEqualTo(0);
         assertThat(frame.data()).doesNotContainKey("visibleDeletedCount");
+        assertThat(frame.data())
+                .containsOnlyKeys("postId", "commentId", "deletedCommentCount")
+                .doesNotContainKeys("commentOwnerId", "rootId", "parentId");
+    }
+
+    @Test
+    void deleteHiddenReply_liveFrameDoesNotNameTheThreadOrTheAuthor() {
+        Fixture f = fixture("livedelreply");
+        UUID parent = idOf(postComment(f.other(), f.postId(), null, "an ordinary parent"));
+        UUID hiddenReply = idOf(postComment(f.author(), f.postId(), parent, HIDDEN_TEXT));
+
+        deleteComment(f.author(), hiddenReply);
+
+        LiveFrame frame =
+                liveFrame(hiddenReply, CommentEventTypes.COMMENT_DELETED_V1).orElseThrow();
+        assertThat(frame.data())
+                .containsOnlyKeys("postId", "commentId", "deletedCommentCount")
+                .doesNotContainKeys("commentOwnerId", "rootId", "parentId");
+    }
+
+    @Test
+    void deletionScope_excludesAnotherUsersHiddenReplies_forAnOrdinaryCaller() {
+        Fixture f = fixture("scopeother");
+        UUID parent = idOf(postComment(f.other(), f.postId(), null, "an ordinary parent"));
+        idOf(postComment(f.owner(), f.postId(), parent, "an approved reply"));
+        UUID hiddenReply = idOf(postComment(f.author(), f.postId(), parent, HIDDEN_TEXT));
+
+        int scope = scopeCount(f.other(), parent);
+        ResponseEntity<Map> deleted = deleteComment(f.other(), parent);
+
+        assertThat(scope).isEqualTo(2);
+        assertThat(((Map<?, ?>) deleted.getBody().get("data")).get("deletedCommentCount"))
+                .isEqualTo(scope);
+        assertThat(deletedAtIsSet(hiddenReply)).isTrue();
+    }
+
+    @Test
+    void deletionScope_postOwnerSeesTheWholeSubtree() {
+        Fixture f = fixture("scopeowner");
+        UUID parent = idOf(postComment(f.owner(), f.postId(), null, "the owner's own comment"));
+        idOf(postComment(f.other(), f.postId(), parent, "an approved reply"));
+        idOf(postComment(f.author(), f.postId(), parent, HIDDEN_TEXT));
+
+        int scope = scopeCount(f.owner(), parent);
+        ResponseEntity<Map> deleted = deleteComment(f.owner(), parent);
+
+        assertThat(scope).isEqualTo(3);
+        assertThat(((Map<?, ?>) deleted.getBody().get("data")).get("deletedCommentCount"))
+                .isEqualTo(3);
+    }
+
+    @Test
+    void deletionScope_countsTheCallersOwnHiddenRowButNotSomeoneElses() {
+        Fixture f = fixture("scopeown");
+        UUID parent = idOf(postComment(f.author(), f.postId(), null, "a polite parent"));
+        idOf(postComment(f.author(), f.postId(), parent, HIDDEN_TEXT));
+        idOf(postComment(f.other(), f.postId(), parent, HIDDEN_TEXT));
+
+        int scope = scopeCount(f.author(), parent);
+        ResponseEntity<Map> deleted = deleteComment(f.author(), parent);
+
+        assertThat(scope).isEqualTo(2);
+        assertThat(((Map<?, ?>) deleted.getBody().get("data")).get("deletedCommentCount"))
+                .isEqualTo(2);
     }
 
     @Test
@@ -438,8 +514,9 @@ class CommentHiddenSideChannelIT {
 
         ResponseEntity<Map> deleted = deleteComment(f.other(), parent);
 
+        // The deleter sees the approved rows only; the hidden reply by another user is not counted.
         assertThat(((Map<?, ?>) deleted.getBody().get("data")).get("deletedCommentCount"))
-                .isEqualTo(3);
+                .isEqualTo(2);
         LiveFrame frame = liveFrame(parent, CommentEventTypes.COMMENT_DELETED_V1).orElseThrow();
         assertThat(frame.data().get("deletedCommentCount")).isEqualTo(2);
     }
@@ -655,6 +732,20 @@ class CommentHiddenSideChannelIT {
     private int commentCount(UUID postId) {
         return jdbcTemplate.queryForObject(
                 "SELECT comment_count FROM posts WHERE id = ?", Integer.class, postId);
+    }
+
+    private int scopeCount(TestUser user, UUID commentId) {
+        ResponseEntity<Map> response =
+                get("/api/v1/comments/" + commentId + "/deletion-scope", user);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return (Integer) ((Map<?, ?>) response.getBody().get("data")).get("deletedCommentCount");
+    }
+
+    private boolean deletedAtIsSet(UUID commentId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT deleted_at IS NOT NULL FROM comments WHERE id = ?",
+                Boolean.class,
+                commentId);
     }
 
     private int totalComments(UUID postId) {

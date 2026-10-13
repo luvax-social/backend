@@ -45,7 +45,9 @@ public interface CommentService {
      *
      * @param actorId authenticated user; must own the comment or be an admin
      * @param commentId root of the subtree to delete
-     * @return how many comments were soft-deleted, counting the target itself
+     * @return how many comments were soft-deleted that the caller can see, counting the target
+     *     itself; every comment for an administrator or the post owner, otherwise approved comments
+     *     and the caller's own hidden ones
      */
     CommentDeletionScopeResponse deleteComment(UUID actorId, UUID commentId);
 
@@ -64,7 +66,9 @@ public interface CommentService {
      *
      * @param actorId authenticated user; must own the comment or be an admin
      * @param commentId root of the subtree to measure
-     * @return how many comments the deletion would cover, counting the target itself
+     * @return how many comments the deletion would cover that the caller can see, counting the
+     *     target itself; every comment for an administrator or the post owner, otherwise approved
+     *     comments and the caller's own hidden ones
      */
     CommentDeletionScopeResponse getDeletionScope(UUID actorId, UUID commentId);
 

@@ -229,6 +229,39 @@ class CommentNotificationConsumerIT {
     }
 
     @Test
+    void handle_hiddenCommentLiked_createsNoNotification() throws Exception {
+        Channel channel = mock(Channel.class);
+        User commentOwner = userRepository.save(activeUser("hiddenliked_" + suffix()));
+        UUID postId =
+                jdbcTemplate.queryForObject(
+                        "INSERT INTO posts (user_id) VALUES (?) RETURNING id",
+                        UUID.class,
+                        commentOwner.getId());
+        UUID commentId =
+                jdbcTemplate.queryForObject(
+                        "INSERT INTO comments (post_id, user_id, content, moderation_status,"
+                                + " hidden_reason) VALUES (?, ?, 'hi', 'hidden', 'hidden_words')"
+                                + " RETURNING id",
+                        UUID.class,
+                        postId,
+                        commentOwner.getId());
+        jdbcTemplate.update(
+                "INSERT INTO comment_likes (user_id, comment_id) VALUES (?, ?)",
+                actor.getId(),
+                commentId);
+        Map<String, Object> data = new HashMap<>();
+        data.put("commentId", commentId.toString());
+        data.put("commentOwnerId", commentOwner.getId().toString());
+        data.put("postId", postId.toString());
+        data.put("visibility", "hidden");
+
+        consumer.consume(
+                message(UUID.randomUUID(), CommentEventTypes.COMMENT_LIKED_V1, data), channel);
+
+        assertThat(notificationRepository.findAll()).isEmpty();
+    }
+
+    @Test
     void handle_selfLike_doesNotCreateNotification() throws Exception {
         Channel channel = mock(Channel.class);
         Map<String, Object> data = new HashMap<>();

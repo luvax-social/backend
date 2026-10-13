@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -186,7 +188,7 @@ class CommentKeysetRowLossIT {
     }
 
     @Test
-    void firstTopLevelPage_withTheViewerOrPredicate_stillUsesTheKeysetIndex() {
+    void firstTopLevelPage_withTheViewerOrPredicate_stillUsesTheKeysetIndex() throws Exception {
         UUID owner = insertUser("explain_owner");
         UUID author = insertUser("explain_author");
         UUID target = insertPost(owner);
@@ -216,29 +218,26 @@ class CommentKeysetRowLossIT {
                 .update();
         jdbcClient.sql("ANALYZE comments").update();
 
-        // Mirrors the predicate and ordering of CommentRepository.findFirstTopLevelExcluding; the
-        // statement is restated because a repository query cannot be EXPLAINed through Spring Data.
+        // The statement is read from the repository method's own @Query, so a change to the
+        // predicate or the ordering changes what this test explains. Spring Data appends the
+        // page size as LIMIT, which is restated here.
+        String repositorySql =
+                CommentRepository.class
+                        .getMethod(
+                                "findFirstTopLevelExcluding",
+                                UUID.class,
+                                UUID[].class,
+                                UUID.class,
+                                Pageable.class)
+                        .getAnnotation(Query.class)
+                        .value();
         String plan =
                 String.join(
                         "\n",
                         jdbcClient
-                                .sql(
-                                        """
-										EXPLAIN SELECT * FROM comments
-										WHERE post_id = :postId AND parent_id IS NULL
-										AND (moderation_status = 'approved'
-											OR (moderation_status = 'hidden' AND user_id = :viewerId))
-										AND deleted_at IS NULL AND admin_removed_at IS NULL
-										AND id <> ALL(CAST('{}' AS uuid[]))
-										AND NOT EXISTS (SELECT 1 FROM blocks b
-											WHERE (b.blocker_id = :viewerId
-												AND b.blocked_id = comments.user_id)
-											OR (b.blocker_id = comments.user_id
-												AND b.blocked_id = :viewerId))
-										ORDER BY created_at DESC, id DESC
-										LIMIT 21
-										""")
+                                .sql("EXPLAIN " + repositorySql + " LIMIT 21")
                                 .param("postId", target)
+                                .param("excludedIds", "{}")
                                 .param("viewerId", author)
                                 .query(String.class)
                                 .list());

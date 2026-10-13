@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Allowed WebSocket origins for direct messages are now split without a backtracking-prone pattern, and empty entries in the list are ignored.
 - `.worktrees/` is now git-ignored, and the rule against creating or keeping a git worktree for implementation work is now documented in the agent rules.
 - A comment saved hidden is now visible to its author only on every path: comment and reply lists, the context chain, like and unlike, replies to it, edits, deletes, reports, notifications and live updates answer a non-author as if it did not exist, and the live delete update carries only the number of comments viewers could see.
+- The deletion count a comment owner sees in the confirmation and in the delete response no longer includes hidden replies by other users, and the live update for a hidden comment no longer names its author or thread.
 
 ### Added
 - A comment the post owner's Hidden Words or interaction limit filters is now saved hidden instead of shown, with its author told nothing and any account it mentions not notified; a reply to a comment whose author blocked the replier answers `COMMENT_NOT_FOUND`, and an edit can hide an approved comment but never approves a hidden one.

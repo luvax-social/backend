@@ -165,6 +165,10 @@ class CommentServiceImplTest {
                 .build();
     }
 
+    private Post postOwnedBy(UUID ownerId) {
+        return Post.builder().id(postId).userId(ownerId).status(PostStatus.PUBLISHED).build();
+    }
+
     private InteractionRequest commentRequestTo(UUID postOwnerId) {
         return new InteractionRequest(
                 actorId, postOwnerId, InteractionType.COMMENT, "hello world", List.of(), null);
@@ -1015,7 +1019,8 @@ class CommentServiceImplTest {
     }
 
     @Test
-    void deleteComment_success_returnsAndPublishesTheAffectedRowCount() {
+    void deleteComment_postOwner_returnsAndPublishesTheAffectedRowCount() {
+        when(postRepository.findById(postId)).thenReturn(Optional.of(postOwnedBy(actorId)));
         Comment comment =
                 Comment.builder()
                         .id(commentId)
@@ -1043,7 +1048,8 @@ class CommentServiceImplTest {
     }
 
     @Test
-    void getDeletionScope_owner_returnsTheSubtreeCount() {
+    void getDeletionScope_postOwner_returnsTheWholeSubtreeCount() {
+        when(postRepository.findById(postId)).thenReturn(Optional.of(postOwnedBy(actorId)));
         Comment comment =
                 Comment.builder()
                         .id(commentId)
@@ -1057,6 +1063,57 @@ class CommentServiceImplTest {
 
         assertThat(service.getDeletionScope(actorId, commentId).deletedCommentCount())
                 .isEqualTo(11);
+    }
+
+    @Test
+    void getDeletionScope_ordinaryCaller_countsOnlyWhatTheyCanSee() {
+        Comment comment =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(actorId)
+                        .moderationStatus("approved")
+                        .build();
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(commentRepository.countSubtreeVisibleTo(commentId, actorId)).thenReturn(4);
+
+        assertThat(service.getDeletionScope(actorId, commentId).deletedCommentCount()).isEqualTo(4);
+        verify(commentRepository, never()).countSubtree(any());
+    }
+
+    @Test
+    void deleteComment_ordinaryCaller_returnsTheVisibleCountAndPublishesBoth() {
+        Comment comment =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(actorId)
+                        .moderationStatus("approved")
+                        .build();
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(commentRepository.countSubtreeVisibleTo(commentId, actorId)).thenReturn(4);
+        when(commentRepository.countVisibleSubtree(commentId)).thenReturn(3);
+        when(commentRepository.softDeleteSubtree(eq(commentId), any())).thenReturn(6);
+
+        CommentDeletionScopeResponse response = service.deleteComment(actorId, commentId);
+
+        assertThat(response.deletedCommentCount()).isEqualTo(4);
+        ArgumentCaptor<java.util.Map<String, Object>> data = ArgumentCaptor.forClass(Map.class);
+        verify(outboxService)
+                .enqueue(
+                        eq(CommentEventTypes.COMMENT_DELETED_V1),
+                        any(),
+                        any(),
+                        eq(commentId),
+                        eq(actorId),
+                        data.capture());
+        assertThat(data.getValue())
+                .containsEntry("deletedCommentCount", 6)
+                .containsEntry("visibleDeletedCount", 3);
     }
 
     @Test
@@ -1160,6 +1217,48 @@ class CommentServiceImplTest {
                         eq(commentId),
                         eq(actorId),
                         anyMap());
+    }
+
+    @Test
+    void likeComment_hiddenCommentOfAnotherUser_throwsNotFoundAndEnqueuesNothing() {
+        Comment hidden =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("hidden")
+                        .hiddenReason("hidden_words")
+                        .build();
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(hidden));
+
+        assertThatThrownBy(() -> service.likeComment(actorId, commentId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.COMMENT_NOT_FOUND);
+        verify(commentLikeRepository, never()).saveAndFlush(any());
+        verify(outboxService, never()).enqueue(any(), any(), any(), any(), any(), anyMap());
+    }
+
+    @Test
+    void unlikeComment_hiddenCommentOfAnotherUser_throwsNotFoundAndEnqueuesNothing() {
+        Comment hidden =
+                Comment.builder()
+                        .id(commentId)
+                        .postId(postId)
+                        .userId(UUID.randomUUID())
+                        .moderationStatus("hidden")
+                        .hiddenReason("hidden_words")
+                        .build();
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(hidden));
+
+        assertThatThrownBy(() -> service.unlikeComment(actorId, commentId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.COMMENT_NOT_FOUND);
+        verify(commentLikeRepository, never()).deleteByUserAndComment(any(), any());
+        verify(outboxService, never()).enqueue(any(), any(), any(), any(), any(), anyMap());
     }
 
     @Test

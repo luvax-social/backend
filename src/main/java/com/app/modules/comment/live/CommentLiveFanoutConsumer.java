@@ -119,9 +119,15 @@ public class CommentLiveFanoutConsumer {
                 // The frame carries the visible count only, so viewers cannot learn how many
                 // hidden comments were removed. An event without the field comes from before it
                 // existed; reporting zero is the choice that cannot leak a hidden count.
+                Object visibleCount = data.get("visibleDeletedCount");
+                if (!(visibleCount instanceof Number count) || count.intValue() == 0) {
+                    // No viewer held anything this delete removed, so the frame must not say who
+                    // wrote the comment or where it sat.
+                    return new LiveFrame(event.eventType(), noViewerRemoval(data), false);
+                }
                 Map<String, Object> frameData = new HashMap<>(data);
-                Object visibleCount = frameData.remove("visibleDeletedCount");
-                frameData.put("deletedCommentCount", visibleCount == null ? 0 : visibleCount);
+                frameData.remove("visibleDeletedCount");
+                frameData.put("deletedCommentCount", count);
                 return new LiveFrame(event.eventType(), frameData, false);
             }
             case CommentEventTypes.COMMENT_EDITED_V1 -> {
@@ -132,6 +138,10 @@ public class CommentLiveFanoutConsumer {
                 // deleted frame's shape for that one comment and never the text; the author is
                 // excluded because their own view must not change. A comment hidden before the
                 // edit was never on a viewer's screen, so it removes nothing.
+                if (VISIBILITY_HIDDEN.equals(data.get("previousVisibility"))) {
+                    return new LiveFrame(
+                            CommentEventTypes.COMMENT_DELETED_V1, noViewerRemoval(data), true);
+                }
                 Map<String, Object> removal = new HashMap<>();
                 removal.put("postId", data.get("postId"));
                 removal.put("commentId", data.get("commentId"));
@@ -139,15 +149,23 @@ public class CommentLiveFanoutConsumer {
                 if (data.get("rootId") != null) {
                     removal.put("rootId", data.get("rootId"));
                 }
-                removal.put(
-                        "deletedCommentCount",
-                        VISIBILITY_HIDDEN.equals(data.get("previousVisibility")) ? 0 : 1);
+                removal.put("deletedCommentCount", 1);
                 return new LiveFrame(CommentEventTypes.COMMENT_DELETED_V1, removal, true);
             }
             default -> {
                 return hidden ? null : new LiveFrame(event.eventType(), data, false);
             }
         }
+    }
+
+    // The only fields a removal of something nobody saw may carry: the post it belongs to and an
+    // opaque id. Author, thread and parent would each identify the hidden comment's author.
+    private static Map<String, Object> noViewerRemoval(Map<String, Object> data) {
+        Map<String, Object> removal = new HashMap<>();
+        removal.put("postId", data.get("postId"));
+        removal.put("commentId", data.get("commentId"));
+        removal.put("deletedCommentCount", 0);
+        return removal;
     }
 
     private Set<UUID> resolveDroppedViewers(DomainEventEnvelope event, LiveFrame frame) {

@@ -62,8 +62,9 @@ V143 refuses to run while any existing row is not `approved`, with a message nam
 | A comment whose `depth` would exceed 10 is rejected before the database call | `CommentServiceImpl.create` — throws `COMMENT_DEPTH_EXCEEDED` (400) |
 | A user may like their own comment, matching post likes | `CommentServiceImpl.likeComment` — no owner check |
 | Soft delete sets `deleted_at` on the comment **and its whole subtree** in one statement | `CommentRepository.softDeleteSubtree`, called by `CommentServiceImpl.deleteComment` |
-| The delete reports how many comments it removed, counting the target itself | `CommentServiceImpl.deleteComment` returns the statement's own affected-row count as `deletedCommentCount`, and puts the same number in `comment.deleted.v1` |
-| The same number is available before the delete, under the same name and the same definition | `CommentServiceImpl.getDeletionScope` via `CommentRepository.countSubtree` |
+| The delete reports how many of the comments it removed the caller can see, counting the target itself; that is every comment for an administrator or the owner of the post, and otherwise the approved comments plus the caller's own hidden ones, so a hidden reply by another user is never counted | `CommentServiceImpl.deleteComment` returns the statement's own affected-row count to an administrator or the post owner and `CommentRepository.countSubtreeVisibleTo` to anyone else |
+| `comment.deleted.v1` carries the statement's full affected-row count as `deletedCommentCount` for the record, and `visibleDeletedCount` for live viewers | `CommentServiceImpl.deleteComment` |
+| The same number is available before the delete, under the same name and the same definition, for the same caller | `CommentServiceImpl.getDeletionScope` via `CommentRepository.countSubtree` for an administrator or the post owner and `countSubtreeVisibleTo` for anyone else |
 | A caller without the authority to delete a comment cannot read its deletion scope | `CommentServiceImpl.getDeletionScope` — owner or admin, answering `COMMENT_NOT_FOUND` (404) rather than 403 to anyone else |
 | Soft-deleted comments are excluded from every query | `@SQLRestriction("deleted_at IS NULL")` on the `Comment` entity |
 | Only the comment owner may edit their comment | `CommentServiceImpl.edit` — throws `COMMENT_FORBIDDEN` (403) |
@@ -101,7 +102,7 @@ V143 refuses to run while any existing row is not `approved`, with a message nam
 | The author of a hidden comment may reply to it, and the reply goes through the interaction policy like any comment; the reply is saved hidden with the parent's `hidden_reason`, so a visible reply never carries a hidden parent's id into counters, lists or live frames | `CommentServiceImpl.doCreateComment` |
 | `comment.liked.v1` carries `visibility` like the created and edited events, so the live consumer can skip a hidden comment's likes | `CommentServiceImpl.likeComment`, `unlikeComment` |
 | The delete event carries both the full subtree count and `visibleDeletedCount`, the approved comments with neither tombstone that the delete removes, counted before the soft delete in the same transaction | `CommentServiceImpl.deleteComment`, `CommentRepository.countVisibleSubtree` |
-| The HTTP response to the deleter keeps the full count, because it is their own action | `CommentDeletionScopeResponse` through `CommentServiceImpl.deleteComment` |
+| The HTTP response to the deleter and the live frame use different counts: the response counts what the deleter can see, the frame counts what every viewer can see | `CommentDeletionScopeResponse` and `visibleDeletedCount` through `CommentServiceImpl.deleteComment` |
 | The edited event carries `previousVisibility` and `rootId`, so a live removal frame can say whether viewers held the comment | `CommentServiceImpl.editComment` |
 
 Notifications are delivered asynchronously through the transactional outbox, not written inline.
@@ -148,6 +149,7 @@ Nobody else may learn that it exists, so every delivery path that carries a comm
 | An edit that leaves a comment hidden is sent to viewers as a removal in the shape of a `comment.deleted.v1` frame for that one comment, never as the edit, and never with the text | `CommentLiveFanoutConsumer.frameFor` |
 | That removal carries `deletedCommentCount` 1 when the comment counted as visible before the edit and 0 when it was already hidden, read from `previousVisibility` | `CommentLiveFanoutConsumer.frameFor` |
 | The removal frame is not delivered to the author's own sessions, because the author's view of their comment must not change | The author is added to the dropped-viewer set that `CommentLiveBlockFilterInterceptor` already applies per session |
+| A removal frame for a comment no viewer held (a delete with `visibleDeletedCount` 0, or an edit of a comment that was already hidden) carries exactly `postId`, `commentId` and `deletedCommentCount` 0, with no `commentOwnerId`, `rootId` or `parentId`, because each of those would identify the hidden comment's author or thread | `CommentLiveFanoutConsumer.noViewerRemoval` |
 | The live delete frame forwards `visibleDeletedCount` as its `deletedCommentCount` and carries no other count, so viewers cannot learn how many hidden comments a delete removed; an event without the field reports 0 | `CommentLiveFanoutConsumer.frameFor` |
 | The post owner may report a hidden comment, and the author's attempt is refused with `REPORT_SELF_NOT_ALLOWED` as for a visible comment; anyone else is answered `REPORT_TARGET_NOT_FOUND` | `ReportTargetRepositoryImpl.findOwnerId`, see the report module's data rules |
 | `posts.comment_count` and `reply_count` come from triggers that ignore hidden rows, so an author sees a count one lower than the comments they can read; this is accepted and is never patched on the client | Triggers `fn_post_comment_count` and `fn_comment_reply_count` (V143) |
@@ -174,12 +176,14 @@ Nobody else may learn that it exists, so every delivery path that carries a comm
   The subtree can grow or shrink between the scope call and the delete, and no lock is taken to prevent that.
   The confirmation dialogue shows the estimate; the delete's own return value is authoritative.
   Closing the gap would mean locking a subtree across two requests, which costs more than the discrepancy it prevents.
-- The deletion scope counts every comment the delete would remove, including replies by users the caller has blocked.
+- The deletion scope counts every comment the caller can see that the delete would remove, including replies by users the caller has blocked.
   Filtering those out would make the number disagree with what the delete does, which is the defect the endpoint exists to close.
+- The one exception is a hidden comment written by another user, which is not counted for anyone but an administrator or the post owner.
+  Counting it would tell the caller that the hidden reply exists.
 - Top comments are pinned to the first page only, rather than the whole list being ranked by like count.
   A full ranking would put a mutable column in the keyset sort key, which is the defect class the `(created_at, id)` cursor exists to prevent.
   The accepted degradation is that a highly-liked comment is not surfaced anywhere on page two onward.
-- A live frame that removes a hidden comment (a delete, or an edit that leaves it hidden) still names the comment id, with a count of zero when no viewer held it.
+- A live frame that removes a comment no viewer held (a delete, or an edit of a comment that was already hidden) carries only the post id, the comment id and a count of zero.
   The topic is shared by every subscriber, so the frame cannot be limited to the author without a per-session audience filter.
   The id is opaque and the frame carries no text, author or position, which is the disclosure accepted in exchange for the author's other sessions learning of the delete.
 
