@@ -171,6 +171,7 @@ class CommentUnhideIT {
         UUID underHidden = idOf(post(f.author(), f.postId(), secondWords, "a polite follow-up"));
         addLimit(f.owner());
         UUID limited = idOf(post(f.other(), f.postId(), null, "from a stranger"));
+        restampMinutesApart(visible, firstWords, secondWords, underHidden, limited);
 
         ResponseEntity<Map> firstPage = hiddenList(f.owner(), f.postId(), null, 3);
 
@@ -195,6 +196,49 @@ class CommentUnhideIT {
         assertThat(pageInfoOf(secondPage).get("hasNextPage")).isEqualTo(false);
         assertThat(rowsOf(secondPage).get(0).get("hiddenReason")).isEqualTo("hidden_words");
         assertThat(firstRows.stream().map(row -> row.get("id"))).doesNotContain(visible.toString());
+    }
+
+    @Test
+    void ownerList_leavesOutCommentsByAccountsInABlockWithTheOwnerInEitherDirection() {
+        Fixture f = fixture("listblock");
+        TestUser control = registerUser("hu_listblock_control");
+        UUID ownerBlocked = idOf(post(f.author(), f.postId(), null, "owner blocked badword"));
+        UUID blockedOwner = idOf(post(f.other(), f.postId(), null, "blocked owner badword"));
+        UUID kept = idOf(post(control, f.postId(), null, "kept badword"));
+        block(f.owner(), f.author());
+        block(f.other(), f.owner());
+
+        List<Object> listed =
+                rowsOf(hiddenList(f.owner(), f.postId(), null, 20)).stream()
+                        .map(row -> row.get("id"))
+                        .toList();
+
+        assertThat(listed).containsExactly(kept.toString());
+        assertThat(listed).doesNotContain(ownerBlocked.toString(), blockedOwner.toString());
+    }
+
+    @Test
+    void ownerList_leavesOutSoftDeletedAndModeratorRemovedHiddenComments() {
+        Fixture f = fixture("listgone");
+        UUID kept = idOf(post(f.author(), f.postId(), null, "kept badword"));
+        UUID deleted = idOf(post(f.author(), f.postId(), null, "deleted badword"));
+        UUID removed = idOf(post(f.author(), f.postId(), null, "removed badword"));
+        assertThat(
+                        rest.exchange(
+                                        "/api/v1/comments/" + deleted,
+                                        HttpMethod.DELETE,
+                                        new HttpEntity<>(authHeaders(f.author())),
+                                        Map.class)
+                                .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        jdbcTemplate.update("UPDATE comments SET admin_removed_at = now() WHERE id = ?", removed);
+
+        List<Object> listed =
+                rowsOf(hiddenList(f.owner(), f.postId(), null, 20)).stream()
+                        .map(row -> row.get("id"))
+                        .toList();
+
+        assertThat(listed).containsExactly(kept.toString());
     }
 
     @Test
@@ -367,6 +411,58 @@ class CommentUnhideIT {
     }
 
     @Test
+    void unhide_aModeratorRemovedReplyWhoseParentIsHidden_answersNotFoundNotConflict() {
+        Fixture f = fixture("removedunderhidden");
+        UUID parent = idOf(post(f.author(), f.postId(), null, HIDDEN_TEXT));
+        UUID child = idOf(post(f.author(), f.postId(), parent, "a polite follow-up"));
+        jdbcTemplate.update("UPDATE comments SET admin_removed_at = now() WHERE id = ?", child);
+
+        ResponseEntity<Map> response = unhide(f.owner(), child);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody().get("code")).isEqualTo("COMMENT_NOT_FOUND");
+    }
+
+    @Test
+    void unhide_aHiddenParentReplyEditedIntoAHiddenWord_staysHiddenWhenTheParentIsReleased()
+            throws Exception {
+        Fixture f = fixture("editedreply");
+        TestUser viewer = registerUser("hu_editedreply_viewer");
+        UUID parent = idOf(post(f.author(), f.postId(), null, HIDDEN_TEXT));
+        UUID reply = idOf(post(f.author(), f.postId(), parent, "a polite follow-up"));
+        assertThat(hiddenReasonOf(reply)).isEqualTo("hidden_parent");
+
+        ResponseEntity<Map> edited =
+                rest.exchange(
+                        "/api/v1/comments/" + reply,
+                        HttpMethod.PATCH,
+                        new HttpEntity<>(
+                                Map.of("content", "now a badword"), authHeaders(f.author())),
+                        Map.class);
+        assertThat(edited.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(hiddenReasonOf(reply)).isEqualTo("hidden_words");
+        LinkedBlockingQueue<String> frames = subscribe(viewer, f.postId());
+
+        assertThat(unhide(f.owner(), parent).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        assertThat(statusOf(parent)).isEqualTo("approved");
+        assertThat(statusOf(reply)).isEqualTo("hidden");
+        assertThat(hiddenReasonOf(reply)).isEqualTo("hidden_words");
+        assertThat(unhiddenEvents(reply)).isEmpty();
+        // The reply's earlier edit may still be in flight on the live tier, so frames are
+        // judged by type and comment rather than by position.
+        Set<String> unhiddenFrames = new HashSet<>();
+        String frame;
+        while ((frame = frames.poll(unhiddenFrames.isEmpty() ? 20 : 2, TimeUnit.SECONDS)) != null) {
+            Map<?, ?> payload = objectMapper.readValue(frame, Map.class);
+            if (UNHIDDEN_EVENT.equals(payload.get("eventType"))) {
+                unhiddenFrames.add((String) ((Map<?, ?>) payload.get("data")).get("commentId"));
+            }
+        }
+        assertThat(unhiddenFrames).containsExactly(parent.toString());
+    }
+
+    @Test
     void unhide_deliversALiveFrameForEveryReleasedCommentExceptToABlockedViewer() throws Exception {
         Fixture f = fixture("live");
         TestUser viewer = registerUser("hu_live_viewer");
@@ -435,6 +531,18 @@ class CommentUnhideIT {
                 "badword",
                 "badword");
         return new Fixture(owner, author, other, postId);
+    }
+
+    // Sequential creates can share a wall-clock instant at the resolution the assertions need, so
+    // an ordering test restamps them a minute apart, oldest first.
+    private void restampMinutesApart(UUID... oldestFirst) {
+        for (int i = 0; i < oldestFirst.length; i++) {
+            jdbcTemplate.update(
+                    "UPDATE comments SET created_at = now() - make_interval(mins => ?) WHERE id ="
+                            + " ?",
+                    oldestFirst.length - i,
+                    oldestFirst[i]);
+        }
     }
 
     private void addLimit(TestUser owner) {

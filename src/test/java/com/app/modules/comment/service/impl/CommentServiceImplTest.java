@@ -700,6 +700,23 @@ class CommentServiceImplTest {
     }
 
     @Test
+    void unhide_aModeratorRemovedCommentWhoseParentIsHidden_throwsNotFoundNotConflict() {
+        UUID parentId = UUID.randomUUID();
+        Comment reply = hiddenComment(commentId, UUID.randomUUID(), "hidden_parent");
+        reply.setParentId(parentId);
+        reply.setAdminRemovedAt(EPOCH);
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(reply));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(postOwnedBy(actorId)));
+
+        assertThatThrownBy(() -> service.unhideComment(actorId, commentId))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.COMMENT_NOT_FOUND);
+        verify(commentRepository, never()).findByIdAndDeletedAtIsNull(parentId);
+    }
+
+    @Test
     void unhide_whenAConcurrentUnhideWonTheRace_throwsNotFoundWithoutReleasingReplies() {
         when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
                 .thenReturn(
@@ -988,6 +1005,58 @@ class CommentServiceImplTest {
 
         assertThat(comment.getModerationStatus()).isEqualTo("hidden");
         assertThat(comment.getHiddenReason()).isEqualTo("limited_interaction");
+    }
+
+    @Test
+    void edit_hiddenParentReplyGainingAHiddenWord_takesThePolicyReason() {
+        Comment comment = hiddenParentReplyOfTheActor();
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ALLOW_HIDDEN, InteractionReason.HIDDEN_WORD));
+
+        service.editComment(actorId, commentId, new EditCommentRequest("a badword"));
+
+        assertThat(comment.getModerationStatus()).isEqualTo("hidden");
+        assertThat(comment.getHiddenReason()).isEqualTo("hidden_words");
+    }
+
+    @Test
+    void edit_hiddenParentReplyNowUnderAnInteractionLimit_takesTheLimitedInteractionReason() {
+        Comment comment = hiddenParentReplyOfTheActor();
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ALLOW_HIDDEN,
+                                InteractionReason.LIMITED_NON_FOLLOWER));
+
+        service.editComment(actorId, commentId, new EditCommentRequest("still polite"));
+
+        assertThat(comment.getHiddenReason()).isEqualTo("limited_interaction");
+    }
+
+    @Test
+    void edit_hiddenParentReplyTheEditLeavesAllowed_keepsHiddenParent() {
+        Comment comment = hiddenParentReplyOfTheActor();
+
+        service.editComment(actorId, commentId, new EditCommentRequest("still polite"));
+
+        assertThat(comment.getModerationStatus()).isEqualTo("hidden");
+        assertThat(comment.getHiddenReason()).isEqualTo("hidden_parent");
+    }
+
+    private Comment hiddenParentReplyOfTheActor() {
+        Comment comment = approvedComment(actorId);
+        comment.setModerationStatus("hidden");
+        comment.setHiddenReason("hidden_parent");
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(commentRepository.saveAndFlush(any())).thenReturn(comment);
+        when(mapper.toResponse(eq(comment), any(), anyBoolean(), anyBoolean()))
+                .thenReturn(sampleResponse());
+        return comment;
     }
 
     @Test

@@ -674,10 +674,14 @@ public class CommentServiceImpl implements CommentService {
                     postRepository
                             .findById(comment.getPostId())
                             .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
-            // Every reason to refuse before the conflict answers as a missing comment: only the
-            // post owner may act on a hidden comment at all, and a comment by an account in a
-            // block with the owner is one the owner cannot see in the review list either.
+            // Every reason to refuse before the conflict answers as a missing comment, a tombstone
+            // included, so a removed comment never reveals through a 409 that it has a hidden
+            // parent. Only the post owner may act on a hidden comment at all, and a comment by an
+            // account in a block with the owner is one the owner cannot see in the review list
+            // either.
             if (!ownerId.equals(post.getUserId())
+                    || comment.getDeletedAt() != null
+                    || comment.getAdminRemovedAt() != null
                     || !STATUS_HIDDEN.equals(comment.getModerationStatus())
                     || blockRepository.existsBetween(ownerId, comment.getUserId())) {
                 throw new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
@@ -1015,8 +1019,11 @@ public class CommentServiceImpl implements CommentService {
 
     // The policy runs for every edit, hidden comment or not, so an author the post owner blocked
     // after the comment was hidden cannot push new text into the owner's hidden review list. Its
-    // answer can only move an approved comment to hidden: a hidden comment stays hidden through an
-    // edit, so the post owner's unhide is the single way back to approved.
+    // answer can only move a comment towards hidden: a hidden comment stays hidden through an
+    // edit, so the post owner's unhide is the single way back to approved. A reply recorded as
+    // hidden_parent is the one reason an edit may replace: if the new text is filtered in its own
+    // right, releasing the parent must not release it unreviewed, so it takes the policy's reason.
+    // Any other recorded reason is kept.
     private void applyInteractionPolicyToEdit(UUID actorId, Comment comment, String content) {
         Post post =
                 postRepository
@@ -1041,8 +1048,11 @@ public class CommentServiceImpl implements CommentService {
         if (decision.denied()) {
             throw refusalFor(actorId, post);
         }
-        if (decision.outcome() == InteractionOutcome.ALLOW_HIDDEN
-                && STATUS_APPROVED.equals(comment.getModerationStatus())) {
+        if (decision.outcome() != InteractionOutcome.ALLOW_HIDDEN) {
+            return;
+        }
+        if (STATUS_APPROVED.equals(comment.getModerationStatus())
+                || CommentHiddenReason.HIDDEN_PARENT.value().equals(comment.getHiddenReason())) {
             comment.setModerationStatus(STATUS_HIDDEN);
             comment.setHiddenReason(hiddenReasonOf(decision));
         }
