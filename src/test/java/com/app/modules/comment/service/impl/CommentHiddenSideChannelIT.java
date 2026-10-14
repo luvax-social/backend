@@ -385,6 +385,14 @@ class CommentHiddenSideChannelIT {
     }
 
     @Test
+    void live_noFrameForTheInternalHiddenEvent() {
+        Fixture f = fixture("livehiddenevent");
+
+        assertThat(latestEvent(f.hidden(), CommentEventTypes.COMMENT_HIDDEN_V1)).isNotNull();
+        assertThat(liveFrame(f.hidden(), CommentEventTypes.COMMENT_HIDDEN_V1)).isEmpty();
+    }
+
+    @Test
     void live_noLikeFrameForHiddenComment() {
         Fixture f = fixture("livelike");
         like(f.author(), f.hidden());

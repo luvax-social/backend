@@ -34,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The deletion count a comment owner sees in the confirmation and in the delete response no longer includes hidden replies by other users, and the live update for a hidden comment no longer names its author or thread.
 
 ### Added
+- A comment that is hidden when it is written, or newly hidden by an edit, now enqueues an internal `comment.hidden.v1` event naming the reason; live viewers and the author are never sent it.
 - An account can mute another account's posts, stories or both with `PUT /social/mutes/{targetUserId}`, remove the mute with `DELETE` or by sending both flags false, and list its mutes newest first with `GET /social/mutes`; the muted account is not told, and a mute emits `user.muted.v1` or `user.unmuted.v1` only when it changed, but it does not yet change any feed or story tray.
 - An account can ask to see fewer recommendations from an author with `POST /social/show-fewer/{authorId}` and take that back with `DELETE`; the author is not told, and a request for oneself, a missing account or a blocked account answers the same not-found response.
 - A viewer's relationship to another account now reports `isMutingPosts`, `isMutingStories` and `isShowingFewer`, resolved with one extra batched query and never shown to the muted account.

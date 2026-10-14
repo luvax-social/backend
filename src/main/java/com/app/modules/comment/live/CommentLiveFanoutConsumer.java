@@ -161,6 +161,11 @@ public class CommentLiveFanoutConsumer {
                 // carries no visibility marker: nothing releases a comment that is still hidden.
                 return new LiveFrame(event.eventType(), data, false);
             }
+            case CommentEventTypes.COMMENT_HIDDEN_V1 -> {
+                // Analytics only. The comment's author is the one account that must never be told
+                // it was hidden, and every other viewer never held it, so no frame goes out.
+                return null;
+            }
             default -> {
                 return hidden ? null : new LiveFrame(event.eventType(), data, false);
             }

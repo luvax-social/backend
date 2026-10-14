@@ -1045,6 +1045,170 @@ class CommentServiceImplTest {
         assertThat(comment.getHiddenReason()).isEqualTo("hidden_parent");
     }
 
+    @Test
+    void create_hiddenByTheHiddenWordsList_enqueuesOneHiddenEventWithTheReasonOnly() {
+        Post post = publishedPost();
+        when(postRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(interactionPolicy.evaluate(commentRequestTo(post.getUserId())))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ALLOW_HIDDEN, InteractionReason.HIDDEN_WORD));
+        stubSave();
+
+        service.createComment(actorId, createRequest(null), null);
+
+        assertThat(hiddenEventData())
+                .containsOnlyKeys("postId", "commentId", "reason")
+                .containsEntry("postId", postId.toString())
+                .containsEntry("commentId", commentId.toString())
+                .containsEntry("reason", "hidden_words");
+    }
+
+    @Test
+    void create_hiddenByAnInteractionLimit_enqueuesTheLimitedInteractionReason() {
+        Post post = publishedPost();
+        when(postRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(interactionPolicy.evaluate(commentRequestTo(post.getUserId())))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ALLOW_HIDDEN,
+                                InteractionReason.LIMITED_NON_FOLLOWER));
+        stubSave();
+
+        service.createComment(actorId, createRequest(null), null);
+
+        assertThat(hiddenEventData()).containsEntry("reason", "limited_interaction");
+    }
+
+    @Test
+    void create_replyUnderAHiddenParent_enqueuesTheHiddenParentReason() {
+        UUID parentId = UUID.randomUUID();
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(commentRepository.findByIdAndDeletedAtIsNull(parentId))
+                .thenReturn(Optional.of(hiddenComment(parentId, actorId, "limited_interaction")));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        stubSave();
+
+        service.createComment(actorId, createRequest(parentId), null);
+
+        assertThat(hiddenEventData()).containsEntry("reason", "hidden_parent");
+    }
+
+    @Test
+    void create_approvedComment_enqueuesNoHiddenEvent() {
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        stubSave();
+
+        service.createComment(actorId, createRequest(null), null);
+
+        verifyNoHiddenEvent();
+    }
+
+    @Test
+    void edit_approvedCommentNewlyHidden_enqueuesOneHiddenEventWithTheNewReason() {
+        Post post = publishedPost();
+        Comment comment = approvedComment(actorId);
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(post));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ALLOW_HIDDEN, InteractionReason.HIDDEN_WORD));
+        when(commentRepository.saveAndFlush(any())).thenReturn(comment);
+        when(mapper.toResponse(eq(comment), any(), anyBoolean(), anyBoolean()))
+                .thenReturn(sampleResponse());
+
+        service.editComment(actorId, commentId, new EditCommentRequest("updated"));
+
+        assertThat(hiddenEventData())
+                .containsOnlyKeys("postId", "commentId", "reason")
+                .containsEntry("reason", "hidden_words");
+    }
+
+    @Test
+    void edit_approvedCommentThatStaysApproved_enqueuesNoHiddenEvent() {
+        Comment comment = approvedComment(actorId);
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(commentRepository.saveAndFlush(any())).thenReturn(comment);
+        when(mapper.toResponse(eq(comment), any(), anyBoolean(), anyBoolean()))
+                .thenReturn(sampleResponse());
+
+        service.editComment(actorId, commentId, new EditCommentRequest("updated"));
+
+        verifyNoHiddenEvent();
+    }
+
+    @Test
+    void edit_commentThatWasAlreadyHidden_enqueuesNoHiddenEvent() {
+        Comment comment = approvedComment(actorId);
+        comment.setModerationStatus("hidden");
+        comment.setHiddenReason("hidden_words");
+        when(commentRepository.findByIdAndDeletedAtIsNull(commentId))
+                .thenReturn(Optional.of(comment));
+        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
+        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ALLOW_HIDDEN, InteractionReason.HIDDEN_WORD));
+        when(commentRepository.saveAndFlush(any())).thenReturn(comment);
+        when(mapper.toResponse(eq(comment), any(), anyBoolean(), anyBoolean()))
+                .thenReturn(sampleResponse());
+
+        service.editComment(actorId, commentId, new EditCommentRequest("updated"));
+
+        verifyNoHiddenEvent();
+    }
+
+    @Test
+    void edit_hiddenParentReplyTakingAPolicyReason_enqueuesNoHiddenEvent() {
+        Comment comment = hiddenParentReplyOfTheActor();
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ALLOW_HIDDEN, InteractionReason.HIDDEN_WORD));
+
+        service.editComment(actorId, commentId, new EditCommentRequest("now filtered"));
+
+        assertThat(comment.getHiddenReason()).isEqualTo("hidden_words");
+        verifyNoHiddenEvent();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> hiddenEventData() {
+        ArgumentCaptor<Map<String, Object>> data =
+                (ArgumentCaptor<Map<String, Object>>)
+                        (ArgumentCaptor<?>) ArgumentCaptor.forClass(Map.class);
+        verify(outboxService)
+                .enqueue(
+                        eq(CommentEventTypes.COMMENT_HIDDEN_V1),
+                        eq(CommentEventTypes.COMMENT_HIDDEN_V1),
+                        eq("comment"),
+                        eq(commentId),
+                        eq(actorId),
+                        data.capture());
+        return data.getValue();
+    }
+
+    private void verifyNoHiddenEvent() {
+        verify(outboxService, never())
+                .enqueue(
+                        eq(CommentEventTypes.COMMENT_HIDDEN_V1),
+                        any(),
+                        any(),
+                        any(),
+                        any(),
+                        anyMap());
+    }
+
     private Comment hiddenParentReplyOfTheActor() {
         Comment comment = approvedComment(actorId);
         comment.setModerationStatus("hidden");

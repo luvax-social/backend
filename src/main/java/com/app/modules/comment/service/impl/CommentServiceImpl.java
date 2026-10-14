@@ -225,6 +225,10 @@ public class CommentServiceImpl implements CommentService {
         boolean policyHidden = decision.outcome() == InteractionOutcome.ALLOW_HIDDEN;
         boolean parentHidden = parent != null && STATUS_HIDDEN.equals(parent.getModerationStatus());
         boolean hidden = policyHidden || parentHidden;
+        String hiddenReason =
+                policyHidden
+                        ? hiddenReasonOf(decision)
+                        : (parentHidden ? CommentHiddenReason.HIDDEN_PARENT.value() : null);
 
         // Reserve the idempotency key in the same transaction via ON CONFLICT DO NOTHING. A
         // duplicate key returns a clean replay/conflict instead of poisoning the transaction with a
@@ -251,12 +255,7 @@ public class CommentServiceImpl implements CommentService {
                                 .depth(depth)
                                 .content(content)
                                 .moderationStatus(hidden ? STATUS_HIDDEN : STATUS_APPROVED)
-                                .hiddenReason(
-                                        policyHidden
-                                                ? hiddenReasonOf(decision)
-                                                : (parentHidden
-                                                        ? CommentHiddenReason.HIDDEN_PARENT.value()
-                                                        : null))
+                                .hiddenReason(hiddenReason)
                                 .build());
         MDC.put("commentId", saved.getId().toString());
 
@@ -278,6 +277,9 @@ public class CommentServiceImpl implements CommentService {
 
         List<String> mentionedUserIds = resolveMentions(content, actorId);
         enqueueCreated(post, saved, actorId, parentOwnerId, mentionedUserIds, response, hidden);
+        if (hidden) {
+            enqueueHidden(saved, actorId, hiddenReason);
+        }
         return response;
     }
 
@@ -347,6 +349,12 @@ public class CommentServiceImpl implements CommentService {
                     saved.getId(),
                     actorId,
                     data);
+            // Only the approved-to-hidden transition counts. A comment that was already hidden
+            // stays hidden through an edit, and a hidden_parent reply that takes a policy reason
+            // was hidden before the edit too, so neither is a new hiding.
+            if (!hiddenBeforeEdit && STATUS_HIDDEN.equals(saved.getModerationStatus())) {
+                enqueueHidden(saved, actorId, saved.getHiddenReason());
+            }
             return response;
         } finally {
             clearWriteMdc();
@@ -968,6 +976,25 @@ public class CommentServiceImpl implements CommentService {
                 saved.getId(),
                 actorId,
                 data);
+    }
+
+    // An internal analytics signal: the live tier ignores it and no notification queue is bound to
+    // it, because the author is deliberately never told a comment was hidden. The payload names
+    // the reason and nothing of the text, the Hidden Words entry that matched, or the post owner.
+    private void enqueueHidden(Comment comment, UUID actorId, String reason) {
+        outboxService.enqueue(
+                CommentEventTypes.COMMENT_HIDDEN_V1,
+                CommentEventTypes.COMMENT_HIDDEN_V1,
+                AGGREGATE_TYPE,
+                comment.getId(),
+                actorId,
+                Map.of(
+                        "postId",
+                        comment.getPostId().toString(),
+                        "commentId",
+                        comment.getId().toString(),
+                        "reason",
+                        reason));
     }
 
     // A mention the interaction policy does not allow resolves to nothing, whether it is denied by
