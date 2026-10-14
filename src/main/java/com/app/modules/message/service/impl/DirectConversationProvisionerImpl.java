@@ -50,13 +50,21 @@ public class DirectConversationProvisionerImpl implements DirectConversationProv
                 conversationRepository.findDirectConversationBetween(userIdA, userIdB);
         if (existing.isPresent()) {
             Conversation current = existing.get();
-            if (current.getRequestStatus() == ConversationRequestStatus.PENDING) {
+            // The recipient's decline takes this same pair lock before the row lock, so the status
+            // is decided here from the locked row, not from the entity read above, which may
+            // predate a decline that committed while this call waited for the pair lock.
+            ConversationRequestStatus status =
+                    conversationRepository
+                            .lockRequestStatus(current.getId())
+                            .map(value -> ConversationRequestStatus.valueOf(value.toUpperCase()))
+                            .orElse(ConversationRequestStatus.ACCEPTED);
+            if (status == ConversationRequestStatus.PENDING) {
                 // A mutual follow is the strongest signal that the two want to talk, so it settles
                 // a request that was still waiting instead of leaving it in a folder
                 accept(current);
                 return;
             }
-            if (current.getRequestStatus() == ConversationRequestStatus.ACCEPTED) {
+            if (status == ConversationRequestStatus.ACCEPTED) {
                 return;
             }
             // A declined request is not reopened: its recipient chose to end it, so the pair gets

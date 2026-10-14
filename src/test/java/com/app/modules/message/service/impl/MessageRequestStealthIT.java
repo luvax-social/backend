@@ -123,6 +123,29 @@ class MessageRequestStealthIT {
     }
 
     @Test
+    void recipientDeletingTheConversation_isInvisibleToTheSenderToo() throws Exception {
+        TestUser alice = registerUser("st_a");
+        TestUser bob = registerUser("st_b");
+        UUID conversationId = createDirectOk(alice, bob.id());
+        assertThat(send(alice, conversationId, "hello bob").getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+
+        List<String> whilePending = senderView(alice, conversationId);
+        ResponseEntity<Map> deleted =
+                call(HttpMethod.DELETE, bob, "/api/v1/conversations/" + conversationId);
+        assertThat(deleted.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<String> afterDelete = senderView(alice, conversationId);
+
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT request_status::text FROM conversations WHERE id = ?",
+                                String.class,
+                                conversationId))
+                .isEqualTo("declined");
+        assertThat(afterDelete).isEqualTo(whilePending);
+    }
+
+    @Test
     void declinedRequest_theResolutionEventIsNeverPushedToTheThreadTopic() {
         TestUser alice = registerUser("st_a");
         TestUser bob = registerUser("st_b");

@@ -346,7 +346,14 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     @Transactional
     public void leaveConversation(UUID actorId, UUID conversationId) {
-        fetchConversation(conversationId);
+        Conversation conversation = fetchConversation(conversationId);
+        // Deleting a request from the inbox is declining it. A plain departure would leave the
+        // request pending with the recipient gone, which the sender could tell from silence.
+        if (conversation.getRequestStatus() == ConversationRequestStatus.PENDING
+                && actorId.equals(conversation.getRequestRecipientId())) {
+            deleteRequest(actorId, conversationId);
+            return;
+        }
         ConversationParticipant participant =
                 participantRepository
                         .findByIdConversationIdAndIdUserId(conversationId, actorId)
@@ -399,7 +406,13 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     @Transactional
     public ConversationResponse acceptRequest(UUID actorId, UUID conversationId) {
-        Conversation conversation = lockOpenRequest(actorId, conversationId);
+        OpenRequest request = lockOpenRequest(actorId, conversationId);
+        Conversation conversation = request.conversation();
+        // Accepting is interacting, so a block in either direction wins and answers as a missing
+        // request. Declining stays possible under a block: it only ends the recipient's side.
+        if (blockedBetween(actorId, request.requesterId())) {
+            throw new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND);
+        }
         conversation.setRequestStatus(ConversationRequestStatus.ACCEPTED);
         conversation.setRequestHidden(false);
         conversation.setRequestResolvedAt(OffsetDateTime.now(ZoneOffset.UTC));
@@ -411,25 +424,20 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     @Transactional
     public void deleteRequest(UUID actorId, UUID conversationId) {
-        decline(lockOpenRequest(actorId, conversationId), actorId, "deleted");
+        decline(lockOpenRequest(actorId, conversationId).conversation(), actorId, "deleted");
     }
 
     @Override
     @Transactional
     public void blockRequester(UUID actorId, UUID conversationId) {
-        Conversation conversation = lockOpenRequest(actorId, conversationId);
-        UUID requesterId =
-                participantRepository
-                        .findByIdConversationIdOrderByJoinedAtAsc(conversationId)
-                        .stream()
-                        .map(p -> p.getId().getUserId())
-                        .filter(userId -> !userId.equals(actorId))
-                        .findFirst()
-                        .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
-        decline(conversation, actorId, "blocked");
+        OpenRequest request = lockOpenRequest(actorId, conversationId);
+        decline(request.conversation(), actorId, "blocked");
         // Same transaction as the decline: a block that cannot be created leaves the request
-        // pending rather than declined and unblocked.
-        socialService.blockUser(actorId, requesterId);
+        // pending rather than declined and unblocked. When the recipient had already blocked the
+        // sender there is nothing to create, and the decline still has to resolve the request.
+        if (!conversationRepository.existsBlock(actorId, request.requesterId())) {
+            socialService.blockUser(actorId, request.requesterId());
+        }
     }
 
     // The sender keeps reading the request as pending, so nothing about the decline is written to
@@ -448,10 +456,23 @@ public class ConversationServiceImpl implements ConversationService {
         enqueueResolved(conversation.getId(), actorId, resolution);
     }
 
-    // Locks the conversation so a decision cannot interleave with a send into it. A request with no
-    // message yet is not listed to its recipient, so acting on it answers as if it did not exist;
-    // declining one would also leave a state the sender could tell from a pending one.
-    private Conversation lockOpenRequest(UUID actorId, UUID conversationId) {
+    private record OpenRequest(Conversation conversation, UUID requesterId) {}
+
+    // Takes the pair lock before the row lock, the order every other writer of a pair's
+    // conversation uses, so a decision cannot deadlock with or be overwritten by the mutual follow
+    // provisioner. A request with no message yet is not listed to its recipient, so acting on it
+    // answers as if it did not exist; declining one would also leave a state the sender could tell
+    // from a pending one.
+    private OpenRequest lockOpenRequest(UUID actorId, UUID conversationId) {
+        UUID requesterId =
+                participantRepository
+                        .findByIdConversationIdOrderByJoinedAtAsc(conversationId)
+                        .stream()
+                        .map(p -> p.getId().getUserId())
+                        .filter(userId -> !userId.equals(actorId))
+                        .findFirst()
+                        .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
+        conversationRepository.lockDirectConversationPair(actorId, requesterId);
         Conversation conversation =
                 conversationRepository
                         .lockById(conversationId)
@@ -465,7 +486,22 @@ public class ConversationServiceImpl implements ConversationService {
         if (!open) {
             throw new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND);
         }
-        return conversation;
+        return new OpenRequest(conversation, requesterId);
+    }
+
+    // The policy's block rule alone, asked through a send into an accepted conversation.
+    private boolean blockedBetween(UUID actorId, UUID otherId) {
+        InteractionDecision decision =
+                interactionPolicy.evaluate(
+                        new InteractionRequest(
+                                actorId,
+                                otherId,
+                                InteractionType.MESSAGE_SEND,
+                                null,
+                                null,
+                                new ConversationContext(
+                                        ConversationRequestState.ACCEPTED, true, 0, "text")));
+        return decision.denied() && decision.reason() == InteractionReason.BLOCKED;
     }
 
     private void enqueueResolved(UUID conversationId, UUID actorId, String resolution) {
@@ -597,10 +633,11 @@ public class ConversationServiceImpl implements ConversationService {
                 .toList();
     }
 
-    // The recipient of a declined request has left it, which would show on their participant row.
-    // The sender must see the row a pending request has, so the departure is not reported to them.
+    // The recipient of an unaccepted request may have left it, which would show on their
+    // participant row. The sender must see the row an untouched pending request has, so the
+    // departure is not reported to them.
     private static boolean hidesDecline(Conversation conversation, UUID actorId) {
-        return conversation.getRequestStatus() == ConversationRequestStatus.DECLINED
+        return conversation.getRequestStatus() != ConversationRequestStatus.ACCEPTED
                 && !actorId.equals(conversation.getRequestRecipientId());
     }
 
@@ -617,8 +654,8 @@ public class ConversationServiceImpl implements ConversationService {
                 response.nickname());
     }
 
-    // The list reads only active participants, so a declined request's recipient would drop out of
-    // the sender's row. They are put back, as a pending request still shows them.
+    // The list reads only active participants, so the recipient who left an unaccepted request
+    // would drop out of the sender's row. They are put back, as a pending request still shows them.
     private void restoreDeclinedRecipients(
             List<Conversation> conversations,
             UUID actorId,

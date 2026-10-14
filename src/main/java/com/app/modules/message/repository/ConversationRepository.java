@@ -34,9 +34,21 @@ public interface ConversationRepository
 			AND CASE CAST(:folder AS text)
 				WHEN 'primary' THEN (c.request_status = 'accepted' OR c.request_recipient_id <> :userId)
 				WHEN 'requests' THEN (c.request_status = 'pending' AND c.request_recipient_id = :userId
-					AND NOT c.request_hidden AND c.last_message_at IS NOT NULL)
+					AND NOT c.request_hidden AND c.last_message_at IS NOT NULL
+					AND NOT EXISTS (
+					SELECT 1 FROM blocks b
+					JOIN conversation_participants op
+						ON op.conversation_id = c.id AND op.user_id <> :userId
+					WHERE (b.blocker_id = :userId AND b.blocked_id = op.user_id)
+						OR (b.blocker_id = op.user_id AND b.blocked_id = :userId)))
 				WHEN 'hidden_requests' THEN (c.request_status = 'pending' AND c.request_recipient_id = :userId
-					AND c.request_hidden AND c.last_message_at IS NOT NULL)
+					AND c.request_hidden AND c.last_message_at IS NOT NULL
+					AND NOT EXISTS (
+					SELECT 1 FROM blocks b
+					JOIN conversation_participants op
+						ON op.conversation_id = c.id AND op.user_id <> :userId
+					WHERE (b.blocker_id = :userId AND b.blocked_id = op.user_id)
+						OR (b.blocker_id = op.user_id AND b.blocked_id = :userId)))
 				ELSE FALSE
 			END
 			""";
@@ -197,4 +209,33 @@ public interface ConversationRepository
 					""",
             nativeQuery = true)
     List<Conversation> findMyPinnedConversations(UUID userId);
+
+    /**
+     * Takes a row lock on the conversation and returns its request status as the database holds it
+     * now, without loading the entity.
+     *
+     * <p>For a caller that already read the conversation under the pair lock: the entity in its
+     * persistence context may be older than the row, and a status decided from it could overwrite a
+     * decline that committed in between.
+     *
+     * @param conversationId the conversation to lock
+     * @return {@code accepted}, {@code pending} or {@code declined}, or empty when the row is gone
+     */
+    @Query(
+            value =
+                    "SELECT CAST(c.request_status AS text) FROM conversations c WHERE c.id = :conversationId FOR UPDATE",
+            nativeQuery = true)
+    Optional<String> lockRequestStatus(UUID conversationId);
+
+    /**
+     * Whether {@code blockerId} has blocked {@code blockedId}, in that direction only.
+     *
+     * @param blockerId the account that would hold the block
+     * @param blockedId the account that would be blocked
+     */
+    @Query(
+            value =
+                    "SELECT EXISTS (SELECT 1 FROM blocks WHERE blocker_id = :blockerId AND blocked_id = :blockedId)",
+            nativeQuery = true)
+    boolean existsBlock(UUID blockerId, UUID blockedId);
 }

@@ -140,6 +140,12 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
 					AND c.request_recipient_id = :userId
 					AND NOT c.request_hidden
 					AND c.last_message_at IS NOT NULL
+					AND NOT EXISTS (
+						SELECT 1 FROM blocks b
+						JOIN conversation_participants op
+							ON op.conversation_id = c.id AND op.user_id <> :userId
+						WHERE (b.blocker_id = :userId AND b.blocked_id = op.user_id)
+							OR (b.blocker_id = op.user_id AND b.blocked_id = :userId))
 					""",
             nativeQuery = true)
     long countPendingRequests(@Param("userId") UUID userId);

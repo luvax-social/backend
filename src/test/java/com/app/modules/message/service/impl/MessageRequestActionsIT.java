@@ -5,6 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +31,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.app.modules.message.service.DirectConversationProvisioner;
 import com.app.testsupport.TestContainerImages;
 
 /** The recipient of a message request accepting it, deleting it, or deleting it and blocking. */
@@ -78,6 +83,7 @@ class MessageRequestActionsIT {
 
     @Autowired private TestRestTemplate rest;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private DirectConversationProvisioner provisioner;
 
     private record TestUser(UUID id, String token) {}
 
@@ -196,8 +202,8 @@ class MessageRequestActionsIT {
         TestUser alice = registerUser("ra_a");
         TestUser bob = registerUser("ra_b");
         UUID conversationId = pendingRequest(alice, bob);
-        jdbc.update(
-                "INSERT INTO blocks(blocker_id, blocked_id) VALUES (?, ?)", bob.id(), alice.id());
+        // The requester's account is gone, so creating the block fails after the decline ran.
+        jdbc.update("UPDATE users SET deleted_at = NOW() WHERE id = ?", alice.id());
 
         ResponseEntity<Map> response =
                 call(HttpMethod.POST, bob, "/api/v1/conversations/" + conversationId + "/block");
@@ -239,6 +245,133 @@ class MessageRequestActionsIT {
                         "/api/v1/conversations/" + conversationId + "/request");
         assertThat(again.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(conversationRow(conversationId).get("status")).isEqualTo("accepted");
+    }
+
+    @Test
+    void block_whenTheRecipientAlreadyBlockedTheSender_stillResolvesTheRequest() {
+        TestUser alice = registerUser("ra_a");
+        TestUser bob = registerUser("ra_b");
+        UUID conversationId = pendingRequest(alice, bob);
+        blockBetween(bob, alice);
+
+        ResponseEntity<Map> response =
+                call(HttpMethod.POST, bob, "/api/v1/conversations/" + conversationId + "/block");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(conversationRow(conversationId).get("status")).isEqualTo("declined");
+        assertThat(recipientLeft(conversationId, bob)).isTrue();
+        assertThat(resolution(conversationId)).containsExactly("blocked");
+        assertThat(
+                        jdbc.queryForObject(
+                                "SELECT COUNT(*) FROM blocks WHERE blocker_id = ? AND blocked_id = ?",
+                                Integer.class,
+                                bob.id(),
+                                alice.id()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void aBlockInEitherDirection_removesTheRequestFromTheRecipientAndStopsAccepting() {
+        for (boolean recipientBlocks : new boolean[] {false, true}) {
+            TestUser alice = registerUser("ra_a");
+            TestUser bob = registerUser("ra_b");
+            UUID conversationId = pendingRequest(alice, bob);
+            assertThat(requestCount(bob)).isEqualTo(1);
+            if (recipientBlocks) {
+                blockBetween(bob, alice);
+            } else {
+                blockBetween(alice, bob);
+            }
+
+            assertThat(folderIds(bob, "requests")).doesNotContain(conversationId);
+            assertThat(requestCount(bob)).isZero();
+            ResponseEntity<Map> accept =
+                    call(
+                            HttpMethod.POST,
+                            bob,
+                            "/api/v1/conversations/" + conversationId + "/accept");
+            assertThat(accept.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(accept.getBody().get("code")).isEqualTo("CONVERSATION_NOT_FOUND");
+            assertThat(conversationRow(conversationId).get("status")).isEqualTo("pending");
+        }
+    }
+
+    @Test
+    void aBlockInEitherDirection_removesAHiddenRequestFromTheHiddenFolder() {
+        TestUser alice = registerUser("ra_a");
+        TestUser bob = registerUser("ra_b");
+        addHiddenWord(bob, "zorblax");
+        UUID conversationId = createDirectOk(alice, bob.id());
+        send(alice, conversationId, "you are a Zorblax");
+        assertThat(folderIds(bob, "hidden_requests")).containsExactly(conversationId);
+
+        blockBetween(alice, bob);
+
+        assertThat(folderIds(bob, "hidden_requests")).isEmpty();
+    }
+
+    @Test
+    void provisionerRacingADecline_neverLeavesAnAcceptedConversationWithTheRecipientGone()
+            throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 8; round++) {
+                TestUser alice = registerUser("ra_a");
+                TestUser bob = registerUser("ra_b");
+                UUID conversationId = pendingRequest(alice, bob);
+                CountDownLatch ready = new CountDownLatch(2);
+                CountDownLatch start = new CountDownLatch(1);
+                Future<Integer> decline =
+                        pool.submit(
+                                () -> {
+                                    ready.countDown();
+                                    start.await();
+                                    return call(
+                                                    HttpMethod.DELETE,
+                                                    bob,
+                                                    "/api/v1/conversations/"
+                                                            + conversationId
+                                                            + "/request")
+                                            .getStatusCode()
+                                            .value();
+                                });
+                Future<Boolean> provision =
+                        pool.submit(
+                                () -> {
+                                    ready.countDown();
+                                    start.await();
+                                    provisioner.ensureDirectConversation(alice.id(), bob.id());
+                                    return true;
+                                });
+                ready.await();
+                start.countDown();
+
+                int declineStatus = decline.get();
+                assertThat(provision.get()).isTrue();
+
+                assertThat(declineStatus).isIn(204, 404);
+                Map<String, Object> row = conversationRow(conversationId);
+                boolean acceptedWithRecipientGone =
+                        row.get("status").equals("accepted") && recipientLeft(conversationId, bob);
+                assertThat(acceptedWithRecipientGone).isFalse();
+                assertThat(row.get("status"))
+                        .isEqualTo(declineStatus == 204 ? "declined" : "accepted");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private void blockBetween(TestUser blocker, TestUser blocked) {
+        jdbc.update(
+                "INSERT INTO blocks(blocker_id, blocked_id) VALUES (?, ?)",
+                blocker.id(),
+                blocked.id());
+    }
+
+    private long requestCount(TestUser user) {
+        Map<?, ?> data = dataOf(call(HttpMethod.GET, user, "/api/v1/conversations/unread-count"));
+        return ((Number) data.get("requestCount")).longValue();
     }
 
     private UUID pendingRequest(TestUser requester, TestUser recipient) {
