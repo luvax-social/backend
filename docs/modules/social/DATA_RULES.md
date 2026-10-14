@@ -53,6 +53,7 @@ These tables cannot be rebuilt from any other source if lost.
 | Rule | Service / Component |
 |------|---------------------|
 | The blocked list returns the viewer's **outgoing** blocks only, newest first; incoming blocks are not exposed by any endpoint | `SocialServiceImpl.getBlockedUsers` |
+| V147 builds `idx_follows_following_accepted` (accepted follows of an account by `accepted_at`, for the limit rule's recent follower check), `idx_user_mutes_user_updated` (the mute list's `(updated_at, muted_user_id)` keyset) and `idx_user_hidden_words_user` (a personal list, newest first) `CONCURRENTLY` | `V147__add_interaction_control_indexes.sql`, `InteractionControlIndexesIT` |
 | The blocked list keysets on the `(created_at, blocked_id)` row-value tuple, served by `idx_blocks_blocker_created_blocked` (V40) | `BlockRepository.findFirstBlocked` / `findBlockedBefore` |
 | A blocked account since soft-deleted stays in the list as a placeholder rather than being dropped | `SocialServiceImpl.getBlockedUsers` via `UserSummaryService.loadSummaries` |
 | When target account has `is_private = TRUE`, a new follow row is created with `status = 'pending'` | `SocialServiceImpl.followUser` |

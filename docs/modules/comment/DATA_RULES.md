@@ -131,6 +131,7 @@ The cursor is the opaque base64url encoding of that tuple and carries no other f
 | Rule | Enforced By |
 |------|-------------|
 | A reply or top-level list shows an approved comment to everyone and a hidden comment to its author only, by the predicate `moderation_status = 'approved' OR (moderation_status = 'hidden' AND user_id = :viewerId)`; a null viewer matches no author and sees approved comments only, and nothing marks the author's own hidden row | `CommentRepository.findFirstTopLevelExcluding`, `findTopLevelBefore`, `findFirstReplies`, `findRepliesBefore` |
+| V147 builds `idx_comments_post_hidden` `CONCURRENTLY`, partial on hidden, undeleted and not administratively removed comments, for the post owner's hidden list | `V147__add_interaction_control_indexes.sql`, `InteractionControlIndexesIT` |
 | The first-page top-level query still seeks `idx_comments_post_root_id` (V36) with the `OR` predicate, pinned by an `EXPLAIN` assertion | `CommentKeysetRowLossIT.firstTopLevelPage_withTheViewerOrPredicate_stillUsesTheKeysetIndex` |
 | A hidden comment is never pinned, not even for its author | `findTopLikedTopLevel` keeps `moderation_status = 'approved'` |
 | Replies are ordered newest-first by `(created_at, id)` on every page, with no pinned block | `CommentRepository.findFirstReplies`, `findRepliesBefore` |

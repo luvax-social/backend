@@ -142,6 +142,46 @@ class MessageReactionRepositoryIT {
         return reactionRepository.findLatestVisiblePerConversation(List.of(conversation), viewer);
     }
 
+    // The statement is read from the repository's own @Query annotation. The read starts from the
+    // reactions newer than the conversation's last message, so the plan has to reach
+    // idx_message_reactions_reacted_at (V147) rather than walk every reaction of every message.
+    @Test
+    void latestVisible_plan_usesTheReactedAtIndex() throws NoSuchMethodException {
+        UUID viewer = insertUser("latest_plan_viewer");
+        UUID other = insertUser("latest_plan_other");
+        UUID conversation = insertConversation();
+        UUID last = insertMessage(conversation, other, NOW, false, false);
+        for (int i = 0; i < 300; i++) {
+            UUID older = insertMessage(conversation, viewer, NOW.minusHours(2 + i), false, false);
+            insertReaction(older, other, "a", NOW.minusHours(1 + i), false);
+        }
+        insertReaction(last, viewer, "newest", NOW.plusMinutes(1), false);
+        jdbcClient.sql("ANALYZE message_reactions").update();
+        jdbcClient.sql("ANALYZE messages").update();
+        jdbcClient.sql("ANALYZE conversations").update();
+        jdbcClient.sql("SET LOCAL enable_seqscan = off").update();
+        String statement =
+                MessageReactionRepository.class
+                        .getMethod(
+                                "findLatestVisiblePerConversation",
+                                java.util.Collection.class,
+                                UUID.class)
+                        .getAnnotation(org.springframework.data.jpa.repository.Query.class)
+                        .value();
+
+        String plan =
+                String.join(
+                        "\n",
+                        jdbcClient
+                                .sql("EXPLAIN " + statement)
+                                .param("conversationIds", List.of(conversation))
+                                .param("viewerId", viewer)
+                                .query(String.class)
+                                .list());
+
+        assertThat(plan).contains("idx_message_reactions_reacted_at");
+    }
+
     private UUID insertUser(String username) {
         return jdbcClient
                 .sql(
