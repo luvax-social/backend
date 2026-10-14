@@ -273,6 +273,47 @@ class MessageReactionControllerIT {
         assertThat(reactionsOf(chat.alice(), chat.id(), message)).isEmpty();
     }
 
+    @Test
+    void unreact_withoutAReaction_emitsNothingAndARealRemovalEmitsExactlyOne() {
+        Chat chat = openAcceptedChat("rx_unreact_events");
+        UUID message = sendId(chat.bob(), chat.id(), "remove me");
+
+        assertThat(delete(chat.alice(), chat.id(), message).getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(reactionEvents(message)).isZero();
+
+        put(chat.alice(), chat.id(), message, THUMBS_UP);
+        assertThat(reactionEvents(message)).isEqualTo(1);
+        delete(chat.alice(), chat.id(), message);
+        delete(chat.alice(), chat.id(), message);
+
+        assertThat(reactionEvents(message)).isEqualTo(2);
+    }
+
+    @Test
+    void unreact_reactionAnAdministratorRemoved_emitsNothing() {
+        Chat chat = openAcceptedChat("rx_unreact_modded");
+        UUID message = sendId(chat.bob(), chat.id(), "moderated reaction");
+        put(chat.alice(), chat.id(), message, THUMBS_UP);
+        jdbc.update(
+                "UPDATE message_reactions SET admin_removed_at = NOW() WHERE message_id = ?",
+                message);
+
+        assertThat(delete(chat.alice(), chat.id(), message).getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
+
+        assertThat(reactionRows(message)).isZero();
+        assertThat(reactionEvents(message)).isEqualTo(1);
+    }
+
+    private int reactionEvents(UUID messageId) {
+        return jdbc.queryForObject(
+                "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
+                        + " 'message.reaction.changed.v1' AND aggregate_id = ?",
+                Integer.class,
+                messageId);
+    }
+
     private Chat openAcceptedChat(String prefix) {
         TestUser alice = registerUser(prefix + "_alice");
         TestUser bob = registerUser(prefix + "_bob");

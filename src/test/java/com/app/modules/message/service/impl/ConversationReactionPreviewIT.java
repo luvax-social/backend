@@ -219,6 +219,13 @@ class ConversationReactionPreviewIT {
         jdbc.update(
                 "UPDATE messages SET created_at = created_at - interval '1 hour' WHERE id = ?",
                 messageId);
+        // The list read compares reactions with the conversation's last_message_at, which the
+        // insert trigger stamped from the application clock, so it moves with the message.
+        jdbc.update(
+                "UPDATE conversations c SET last_message_at = (SELECT MAX(created_at) FROM messages"
+                        + " WHERE conversation_id = c.id) WHERE c.id = (SELECT conversation_id FROM"
+                        + " messages WHERE id = ?)",
+                messageId);
     }
 
     private ResponseEntity<Map> put(

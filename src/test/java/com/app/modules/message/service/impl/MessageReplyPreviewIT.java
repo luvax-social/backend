@@ -127,6 +127,8 @@ class MessageReplyPreviewIT {
 
         assertThat(replyTo.get("unavailable")).isEqualTo(true);
         assertThat(replyTo.get("snippet")).isNull();
+        assertThat(replyTo.get("senderId")).isNull();
+        assertThat(replyTo.get("messageType")).isNull();
     }
 
     @Test
@@ -140,6 +142,9 @@ class MessageReplyPreviewIT {
                 (Map<?, ?>) history(thread.bob(), thread.id(), 20).get(0).get("replyTo");
         assertThat(removed.get("unavailable")).isEqualTo(true);
         assertThat(removed.get("snippet")).isNull();
+        assertThat(removed.get("senderId")).isNull();
+        assertThat(removed.get("messageType")).isNull();
+        assertThat(removed.get("messageId")).isEqualTo(parent.toString());
 
         jdbc.update("UPDATE messages SET admin_removed_at = NULL WHERE id = ?", parent);
 

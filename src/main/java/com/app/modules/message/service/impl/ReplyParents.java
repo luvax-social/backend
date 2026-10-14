@@ -35,7 +35,9 @@ final class ReplyParents {
         if (parentIds.isEmpty()) {
             return Map.of();
         }
-        return repository.findReplyParents(parentIds).stream()
+        Set<UUID> conversationIds =
+                messages.stream().map(Message::getConversationId).collect(Collectors.toSet());
+        return repository.findReplyParents(parentIds, conversationIds).stream()
                 .collect(Collectors.toMap(Message::getId, Function.identity()));
     }
 }

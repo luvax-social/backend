@@ -27,11 +27,21 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
      * <p>Native so the reply preview can report a deleted or removed parent as unavailable instead
      * of losing it, and so it costs one statement per page rather than one per reply.
      *
+     * <p>Limited to the conversations of the replies, so a reply can never preview a message from a
+     * thread its reader is not in, whatever its {@code reply_to_id} says.
+     *
      * @param ids the replied-to message ids
+     * @param conversationIds the conversations the replies belong to
      * @return the matching rows, tombstoned ones included
      */
-    @Query(value = "SELECT m.* FROM messages m WHERE m.id IN (:ids)", nativeQuery = true)
-    List<Message> findReplyParents(@Param("ids") Collection<UUID> ids);
+    @Query(
+            value =
+                    "SELECT m.* FROM messages m WHERE m.id IN (:ids)"
+                            + " AND m.conversation_id IN (:conversationIds)",
+            nativeQuery = true)
+    List<Message> findReplyParents(
+            @Param("ids") Collection<UUID> ids,
+            @Param("conversationIds") Collection<UUID> conversationIds);
 
     /**
      * Counts every message a user has sent into a conversation, tombstoned ones included.
@@ -59,13 +69,21 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
      * newest-first order.
      *
      * <p>The id breaks ties between messages sharing a timestamp, so a tie group that straddles a
-     * page boundary is neither skipped nor repeated.
+     * page boundary is neither skipped nor repeated. The {@code created_at <=} bound in front of
+     * the tie-break group is redundant for correctness and present so the planner can turn it into
+     * an index range on {@code (conversation_id, created_at DESC)}; the bare OR group alone cannot
+     * be used to seek, and a deep page would walk every newer message of the conversation.
      */
     @Query(
-            "SELECT m FROM Message m WHERE m.conversationId = :conversationId "
-                    + "AND (m.createdAt < :cursorTime "
-                    + "OR (m.createdAt = :cursorTime AND m.id < :cursorId)) "
-                    + "ORDER BY m.createdAt DESC, m.id DESC")
+            value =
+                    """
+					SELECT m.* FROM messages m
+					WHERE m.conversation_id = :conversationId
+					AND m.created_at <= :cursorTime
+					AND (m.created_at < :cursorTime OR m.id < :cursorId)
+					ORDER BY m.created_at DESC, m.id DESC
+					""",
+            nativeQuery = true)
     List<Message> findByConversationBefore(
             @Param("conversationId") UUID conversationId,
             @Param("cursorTime") OffsetDateTime cursorTime,

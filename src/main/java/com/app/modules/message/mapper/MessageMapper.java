@@ -215,29 +215,28 @@ public interface MessageMapper {
     /**
      * Builds the preview of a replied-to message.
      *
-     * <p>Either tombstone makes the parent unavailable and withholds its text; a restore clears the
-     * moderation tombstone, so the next read shows the snippet again. Only a text parent has a
-     * snippet, because an image or a share has no text to quote.
+     * <p>Either tombstone makes the parent unavailable and withholds everything but its id; a
+     * restore clears the moderation tombstone, so the next read shows the snippet again. Only a
+     * text parent has a snippet, because an image or a share has no text to quote.
      *
      * @param replyToId the id the reply points at
      * @param parent the parent row, or null when it no longer exists
      * @return the preview
      */
     default ReplyPreviewResponse toReplyPreview(UUID replyToId, Message parent) {
-        if (parent == null) {
+        boolean unavailable =
+                parent == null || parent.isDeleted() || parent.getAdminRemovedAt() != null;
+        // Every unavailable parent looks the same, so the preview cannot tell a deletion from a
+        // removal or from a missing row, and it carries nothing of the withheld message.
+        if (unavailable) {
             return new ReplyPreviewResponse(replyToId, null, null, null, true);
         }
-        boolean unavailable = parent.isDeleted() || parent.getAdminRemovedAt() != null;
         String snippet =
-                unavailable || parent.getMessageType() != MessageType.TEXT
-                        ? null
-                        : Snippets.of(parent.getContent());
+                parent.getMessageType() == MessageType.TEXT
+                        ? Snippets.of(parent.getContent())
+                        : null;
         return new ReplyPreviewResponse(
-                parent.getId(),
-                parent.getSenderId(),
-                parent.getMessageType(),
-                snippet,
-                unavailable);
+                parent.getId(), parent.getSenderId(), parent.getMessageType(), snippet, false);
     }
 
     /**

@@ -600,6 +600,9 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- A message reaction must now be exactly one emoji in the UTS #51 sense: trailing tag characters, stacked combining marks, a dangling joiner, repeated variation selectors, long joiner chains and a keycap mark on a non-keycap base are refused.
+- Deep message history pages now use a `created_at` bound the planner can seek on, a removal event is decided from the row the delete removed so a racing react can no longer lose it, and the conversation list reads only reactions newer than the last message.
+- An unavailable reply preview is now identical whether the parent was deleted, removed by an administrator or missing, and reply previews only read parents from the reply's own conversation.
 - Message history now pages on the `created_at` and `id` pair, so messages sharing a timestamp across a page boundary are no longer skipped or repeated; history cursors minted before this change still resume correctly.
 - Two first messages sent at the same moment into one message request no longer both get stored, and a retried first message replays instead of being refused.
 - The API document no longer declares a 429 response on setting or removing a mute or on the show-fewer endpoints, which have no rate limiter and could never return it.

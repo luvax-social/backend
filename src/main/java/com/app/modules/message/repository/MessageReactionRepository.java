@@ -46,19 +46,23 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
             @Param("emoji") String emoji);
 
     /**
-     * Removes a user's reaction to a message.
+     * Removes a user's reaction to a message and returns the row it removed.
+     *
+     * <p>One statement, so the caller decides whether a removal event is owed from the very row
+     * that was deleted, including whether an administrator had already hidden it, instead of from a
+     * separate read that a concurrent reaction could invalidate.
      *
      * @param messageId the message
      * @param userId the reacting user
-     * @return the number of rows removed, 0 when the user had no reaction
+     * @return the removed row, or empty when the user had no reaction
      */
-    @Modifying
     @Query(
             value =
                     "DELETE FROM message_reactions WHERE message_id = :messageId"
-                            + " AND user_id = :userId",
+                            + " AND user_id = :userId RETURNING *",
             nativeQuery = true)
-    int deleteReaction(@Param("messageId") UUID messageId, @Param("userId") UUID userId);
+    Optional<MessageReaction> deleteReaction(
+            @Param("messageId") UUID messageId, @Param("userId") UUID userId);
 
     /** Reads a user's own reaction row to a message, whatever its tombstone says. */
     Optional<MessageReaction> findByMessageIdAndUserId(UUID messageId, UUID userId);
@@ -94,10 +98,15 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
             @Param("messageIds") Collection<UUID> messageIds, @Param("viewerId") UUID viewerId);
 
     /**
-     * Reads the newest reaction the viewer may see in each of the given conversations.
+     * Reads the newest reaction the viewer may see in each of the given conversations, counting
+     * only reactions newer than the conversation's last message.
      *
-     * <p>Applies the same visibility rules as {@link #findVisibleForMessages}. One statement for
-     * the whole conversation list avoids a query per row.
+     * <p>The list shows a reaction only when it is the newest thing in the thread, so a reaction at
+     * or before {@code conversations.last_message_at} is never needed. Driving the read from {@code
+     * reacted_at} against that bound keeps the cost proportional to the reactions that arrived
+     * after the last message instead of every message of every listed conversation, and it is the
+     * reason the read joins {@code conversations}. Applies the same visibility rules as {@link
+     * #findVisibleForMessages}; one statement for the whole list avoids a query per row.
      *
      * @param conversationIds the conversations being listed
      * @param viewerId the user reading the list
@@ -106,10 +115,11 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
     @Query(
             value =
                     """
-					SELECT DISTINCT ON (m.conversation_id) r.*
-					FROM message_reactions r
-					JOIN messages m ON m.id = r.message_id
-					WHERE m.conversation_id IN (:conversationIds)
+					SELECT DISTINCT ON (c.id) r.*
+					FROM conversations c
+					JOIN message_reactions r ON r.reacted_at > c.last_message_at
+					JOIN messages m ON m.id = r.message_id AND m.conversation_id = c.id
+					WHERE c.id IN (:conversationIds)
 					AND r.admin_removed_at IS NULL
 					AND m.is_deleted = FALSE
 					AND m.admin_removed_at IS NULL
@@ -117,7 +127,7 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
 						SELECT 1 FROM blocks b
 						WHERE (b.blocker_id = :viewerId AND b.blocked_id = r.user_id)
 							OR (b.blocker_id = r.user_id AND b.blocked_id = :viewerId))
-					ORDER BY m.conversation_id, r.reacted_at DESC, r.id DESC
+					ORDER BY c.id, r.reacted_at DESC, r.id DESC
 					""",
             nativeQuery = true)
     List<MessageReaction> findLatestVisiblePerConversation(

@@ -127,13 +127,11 @@ public class ConversationServiceImpl implements ConversationService {
         return assetId == null ? null : media.get(assetId);
     }
 
-    // The preview shows a reaction only when it is the newest thing in the thread. A reaction older
-    // than the last message sits behind that message, which is already the row's preview, and a
-    // reaction never moves the row because it leaves last_message_at and the unread count alone.
+    // The query already returns only reactions newer than the conversation's last message, the
+    // only ones the row shows, so a reaction never competes with the last-message preview. A
+    // reaction leaves last_message_at and the unread count alone, so it never moves the row.
     private Map<UUID, LastReactionPreviewResponse> lastReactions(
-            UUID viewerId,
-            List<UUID> conversationIds,
-            Map<UUID, MessageResponse> lastMessageByConversation) {
+            UUID viewerId, List<UUID> conversationIds) {
         List<MessageReaction> latest =
                 reactionRepository.findLatestVisiblePerConversation(conversationIds, viewerId);
         if (latest.isEmpty()) {
@@ -148,13 +146,6 @@ public class ConversationServiceImpl implements ConversationService {
         for (MessageReaction reaction : latest) {
             Message message = reactedMessages.get(reaction.getMessageId());
             if (message == null) {
-                continue;
-            }
-            MessageResponse lastMessage =
-                    lastMessageByConversation.get(message.getConversationId());
-            if (lastMessage != null
-                    && lastMessage.createdAt() != null
-                    && !reaction.getReactedAt().isAfter(lastMessage.createdAt())) {
                 continue;
             }
             previews.put(
@@ -359,7 +350,7 @@ public class ConversationServiceImpl implements ConversationService {
                                                         lastMessageParents)));
 
         Map<UUID, LastReactionPreviewResponse> lastReactionByConversation =
-                lastReactions(actorId, conversationIds, lastMessageByConversation);
+                lastReactions(actorId, conversationIds);
         List<ConversationSummaryResponse> content =
                 allConversations.stream()
                         .map(

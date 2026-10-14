@@ -92,16 +92,20 @@ public class MessageReactionServiceImpl implements MessageReactionService {
         if (isTombstoned(message)) {
             return;
         }
-        boolean wasVisible =
-                reactionRepository
-                        .findByMessageIdAndUserId(messageId, actorId)
-                        .map(reaction -> reaction.getAdminRemovedAt() == null)
-                        .orElse(false);
-        int removed = reactionRepository.deleteReaction(messageId, actorId);
-        if (removed > 0 && wasVisible) {
-            enqueueChanged(
-                    conversationId, messageId, actorId, null, OffsetDateTime.now(ZoneOffset.UTC));
-        }
+        // The event is decided from the row this statement removed, in this transaction, so a
+        // concurrent react cannot make a read taken beforehand disagree with the delete. A
+        // reaction an administrator had already hidden was never shown, so its removal is not news.
+        reactionRepository
+                .deleteReaction(messageId, actorId)
+                .filter(removed -> removed.getAdminRemovedAt() == null)
+                .ifPresent(
+                        removed ->
+                                enqueueChanged(
+                                        conversationId,
+                                        messageId,
+                                        actorId,
+                                        null,
+                                        OffsetDateTime.now(ZoneOffset.UTC)));
     }
 
     // The block gate runs before anything else about the message is looked at, and its refusal is

@@ -143,6 +143,8 @@ class MessageMapperTest {
 
         assertThat(preview.unavailable()).isTrue();
         assertThat(preview.snippet()).isNull();
+        assertThat(preview.senderId()).isNull();
+        assertThat(preview.messageType()).isNull();
     }
 
     @Test
@@ -158,6 +160,8 @@ class MessageMapperTest {
 
         assertThat(preview.unavailable()).isTrue();
         assertThat(preview.snippet()).isNull();
+        assertThat(preview.senderId()).isNull();
+        assertThat(preview.messageType()).isNull();
     }
 
     @Test
@@ -175,6 +179,8 @@ class MessageMapperTest {
         assertThat(preview.messageId()).isEqualTo(reply.getReplyToId());
         assertThat(preview.unavailable()).isTrue();
         assertThat(preview.snippet()).isNull();
+        assertThat(preview.senderId()).isNull();
+        assertThat(preview.messageType()).isNull();
     }
 
     private static Message message() {

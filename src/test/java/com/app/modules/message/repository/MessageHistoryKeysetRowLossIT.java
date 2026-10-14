@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -110,6 +112,55 @@ class MessageHistoryKeysetRowLossIT {
         // comparison UUID.compareTo applies.
         assertThat(ids.stream().map(UUID::toString).toList())
                 .isSortedAccordingTo(java.util.Comparator.<String>naturalOrder().reversed());
+    }
+
+    // The statement is read from the repository's own @Query annotation, so a change to the page
+    // query is checked here without anyone copying it across. The only existing messages index on
+    // the conversation is partial (is_deleted = FALSE, V15) and cannot serve a history that
+    // includes tombstones, so the test builds, inside its own rolled-back transaction, the
+    // (conversation_id, created_at DESC, id DESC) index a later migration will add. What it pins is
+    // the predicate: a bounded range on created_at must reach the index condition, because a bare
+    // OR group cannot seek and a deep page would walk every newer message of the conversation.
+    @Test
+    void historyPage_deepCursor_seeksTheConversationIndexInsteadOfScanning()
+            throws NoSuchMethodException {
+        UUID sender = insertUser("history_plan_sender");
+        UUID conversationId = insertConversation();
+        for (int i = 0; i < 60; i++) {
+            insertMessage(conversationId, sender, SHARED_INSTANT.minusMinutes(i));
+        }
+        jdbcClient
+                .sql(
+                        "CREATE INDEX idx_messages_history_probe ON messages (conversation_id,"
+                                + " created_at DESC, id DESC)")
+                .update();
+        jdbcClient.sql("SET LOCAL enable_seqscan = off").update();
+        String statement =
+                MessageRepository.class
+                        .getMethod(
+                                "findByConversationBefore",
+                                UUID.class,
+                                OffsetDateTime.class,
+                                UUID.class,
+                                Pageable.class)
+                        .getAnnotation(Query.class)
+                        .value();
+
+        String plan =
+                String.join(
+                        "\n",
+                        jdbcClient
+                                .sql("EXPLAIN " + statement + " LIMIT 21")
+                                .param("conversationId", conversationId)
+                                .param("cursorTime", SHARED_INSTANT.minusMinutes(40))
+                                .param("cursorId", UUID.randomUUID())
+                                .query(String.class)
+                                .list());
+
+        assertThat(plan).contains("idx_messages_history_probe").doesNotContain("Seq Scan");
+        assertThat(plan)
+                .as("the timestamp bound is part of the index condition")
+                .containsPattern("Index Cond:.*created_at <=");
     }
 
     private UUID insertUser(String username) {
