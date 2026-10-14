@@ -955,6 +955,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
 
 ### Tests
+- A ClickHouse test now compares every `UserEventType` name and ordinal with the `user_events.event_type` column after the shipped migrations, so the enum and the column cannot drift apart unnoticed.
 - The comment sort fixture stamps its six comments a minute apart, so the newest-first listing test no longer depends on the database clock advancing between requests.
 - Comment preview integration coverage now checks moderation visibility and blocks in both directions.
 - The backend and frontend copies of the text match vectors are compared byte for byte whenever both checkouts are present.
