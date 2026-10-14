@@ -35,6 +35,12 @@ public record MessageResponse(
         @Schema(description = "Message this one replies to, or null.") UUID replyToId,
         @Schema(
                         description =
+                                "Server-resolved preview of the replied-to message; null when this"
+                                        + " message is not a reply or is itself no longer shown.",
+                        nullable = true)
+                ReplyPreviewResponse replyTo,
+        @Schema(
+                        description =
                                 "True if this message is no longer shown: either its sender deleted it"
                                         + " or an administrator removed it. The two are not distinguished"
                                         + " on the wire, because both render the same placeholder.")

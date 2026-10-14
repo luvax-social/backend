@@ -297,6 +297,7 @@ public class ConversationServiceImpl implements ConversationService {
                                 .collect(
                                         Collectors.toMap(
                                                 MediaAsset::getId, mapper::toMediaResponse));
+        Map<UUID, Message> lastMessageParents = ReplyParents.load(messageRepository, lastMessages);
         Map<UUID, MessageResponse> lastMessageByConversation =
                 lastMessages.stream()
                         .collect(
@@ -304,7 +305,9 @@ public class ConversationServiceImpl implements ConversationService {
                                         Message::getConversationId,
                                         m ->
                                                 mapper.toMessageResponse(
-                                                        m, mediaFor(lastMessageMedia, m))));
+                                                        m,
+                                                        mediaFor(lastMessageMedia, m),
+                                                        lastMessageParents)));
 
         List<ConversationSummaryResponse> content =
                 allConversations.stream()

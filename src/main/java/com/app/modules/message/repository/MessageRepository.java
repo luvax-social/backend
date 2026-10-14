@@ -1,6 +1,7 @@
 package com.app.modules.message.repository;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,6 +20,18 @@ import com.app.modules.message.entity.Message;
 public interface MessageRepository extends JpaRepository<Message, UUID> {
 
     Optional<Message> findByIdAndConversationId(UUID id, UUID conversationId);
+
+    /**
+     * Loads the messages a set of replies point at, whatever either tombstone says.
+     *
+     * <p>Native so the reply preview can report a deleted or removed parent as unavailable instead
+     * of losing it, and so it costs one statement per page rather than one per reply.
+     *
+     * @param ids the replied-to message ids
+     * @return the matching rows, tombstoned ones included
+     */
+    @Query(value = "SELECT m.* FROM messages m WHERE m.id IN (:ids)", nativeQuery = true)
+    List<Message> findReplyParents(@Param("ids") Collection<UUID> ids);
 
     /**
      * Counts every message a user has sent into a conversation, tombstoned ones included.

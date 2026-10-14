@@ -38,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The deletion count a comment owner sees in the confirmation and in the delete response no longer includes hidden replies by other users, and the live update for a hidden comment no longer names its author or thread.
 
 ### Added
+- Every message response now embeds a server-resolved `replyTo` preview (message id, sender, type, text snippet and an `unavailable` flag) in history, in the send response, in the live `message.sent.v1` payload and in the conversation list preview, so a client no longer has to page back to find the replied-to message.
 - The recipient of a message request can accept it, delete it, or delete it and block the sender (`POST /conversations/{id}/accept`, `DELETE /conversations/{id}/request`, `POST /conversations/{id}/block`); the sender sees a deleted request exactly as a pending one that was never answered, and a request with no message yet cannot be acted on.
 - Deleting a conversation as the recipient of a pending message request is now the same decline as deleting the request, accepting a request is refused while either account blocks the other, and the requests folders and request count leave out requests from blocked accounts.
 - Sending into a message request now follows the request rules: the sender may send one text message until the recipient answers, the recipient's reply accepts the request, and a refused send answers `MESSAGE_REQUEST_AWAITING_ACCEPTANCE` (409) for a pending and a declined request alike.

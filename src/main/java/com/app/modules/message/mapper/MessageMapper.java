@@ -2,19 +2,24 @@ package com.app.modules.message.mapper;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
+import com.app.common.text.Snippets;
 import com.app.modules.media.entity.MediaAsset;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
 import com.app.modules.message.dto.response.MessageMediaResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.ParticipantResponse;
+import com.app.modules.message.dto.response.ReplyPreviewResponse;
 import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.Message;
+import com.app.modules.message.enums.MessageType;
 import com.app.modules.users.entity.User;
 
 /** Maps conversation and participant entities to API response DTOs. */
@@ -130,14 +135,39 @@ public interface MessageMapper {
      * @return the message response
      */
     default MessageResponse toMessageResponse(Message message, MessageMediaResponse media) {
+        return toMessageResponse(message, media, null);
+    }
+
+    /**
+     * Projects a message with its resolved media and the parents its reply preview reads.
+     *
+     * <p>The parents arrive as one batched lookup per page, tombstoned rows included, so the
+     * preview of a reply to a deleted or removed message can say so instead of vanishing. A null
+     * map means the caller did not resolve parents and the preview is left out.
+     *
+     * @param message the source message
+     * @param media the resolved attachment, or null when the message carries none
+     * @param replyParents the parents of the rendered messages keyed by id, or null
+     * @return the message response
+     */
+    default MessageResponse toMessageResponse(
+            Message message, MessageMediaResponse media, Map<UUID, Message> replyParents) {
         if (message == null) {
             return null;
         }
         boolean adminRemoved = message.getAdminRemovedAt() != null;
+        boolean tombstoned = message.isDeleted() || adminRemoved;
         OffsetDateTime tombstonedAt =
                 message.getDeletedAt() != null
                         ? message.getDeletedAt()
                         : message.getAdminRemovedAt();
+        // A message that is itself no longer shown carries no preview: the placeholder it renders
+        // as has nothing to quote.
+        ReplyPreviewResponse replyTo =
+                message.getReplyToId() == null || replyParents == null || tombstoned
+                        ? null
+                        : toReplyPreview(
+                                message.getReplyToId(), replyParents.get(message.getReplyToId()));
         return new MessageResponse(
                 message.getId(),
                 message.getConversationId(),
@@ -149,9 +179,38 @@ public interface MessageMapper {
                 adminRemoved ? null : message.getSharedPostId(),
                 adminRemoved ? null : message.getSharedStoryId(),
                 message.getReplyToId(),
-                message.isDeleted() || adminRemoved,
+                replyTo,
+                tombstoned,
                 tombstonedAt,
                 message.getCreatedAt());
+    }
+
+    /**
+     * Builds the preview of a replied-to message.
+     *
+     * <p>Either tombstone makes the parent unavailable and withholds its text; a restore clears the
+     * moderation tombstone, so the next read shows the snippet again. Only a text parent has a
+     * snippet, because an image or a share has no text to quote.
+     *
+     * @param replyToId the id the reply points at
+     * @param parent the parent row, or null when it no longer exists
+     * @return the preview
+     */
+    default ReplyPreviewResponse toReplyPreview(UUID replyToId, Message parent) {
+        if (parent == null) {
+            return new ReplyPreviewResponse(replyToId, null, null, null, true);
+        }
+        boolean unavailable = parent.isDeleted() || parent.getAdminRemovedAt() != null;
+        String snippet =
+                unavailable || parent.getMessageType() != MessageType.TEXT
+                        ? null
+                        : Snippets.of(parent.getContent());
+        return new ReplyPreviewResponse(
+                parent.getId(),
+                parent.getSenderId(),
+                parent.getMessageType(),
+                snippet,
+                unavailable);
     }
 
     /**

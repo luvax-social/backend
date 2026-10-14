@@ -95,7 +95,7 @@ class MessageServiceImplTest {
                 .thenReturn(
                         new InteractionDecision(InteractionOutcome.ALLOW, InteractionReason.NONE));
         lenient()
-                .when(mapper.toMessageResponse(any(), any()))
+                .when(mapper.toMessageResponse(any(), any(), any()))
                 .thenAnswer(
                         inv -> {
                             Message m = inv.getArgument(0);
@@ -111,6 +111,7 @@ class MessageServiceImplTest {
                                     m.getSharedPostId(),
                                     m.getSharedStoryId(),
                                     m.getReplyToId(),
+                                    null,
                                     m.isDeleted(),
                                     m.getDeletedAt(),
                                     m.getCreatedAt());
@@ -343,6 +344,7 @@ class MessageServiceImplTest {
                         "hello",
                         null,
                         // mediaAssetId, then the resolved media, both absent on a text message
+                        null,
                         null,
                         null,
                         null,
@@ -756,6 +758,7 @@ class MessageServiceImplTest {
                         actorId,
                         MessageType.TEXT,
                         "hello",
+                        null,
                         null,
                         null,
                         null,

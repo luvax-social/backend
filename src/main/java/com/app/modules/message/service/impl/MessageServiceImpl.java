@@ -164,7 +164,11 @@ public class MessageServiceImpl implements MessageService {
                                 .sharedStoryId(request.sharedStoryId())
                                 .replyToId(request.replyToId())
                                 .build());
-        MessageResponse response = mapper.toMessageResponse(saved, resolveMedia(saved));
+        MessageResponse response =
+                mapper.toMessageResponse(
+                        saved,
+                        resolveMedia(saved),
+                        ReplyParents.load(messageRepository, List.of(saved)));
 
         if (idempotencyKey != null) {
             idempotencyRepository.updateResponseBody(
@@ -580,8 +584,11 @@ public class MessageServiceImpl implements MessageService {
         boolean hasNextPage = rows.size() > pageSize;
         List<Message> page = hasNextPage ? rows.subList(0, pageSize) : rows;
         Map<UUID, MessageMediaResponse> media = resolveMedia(page);
+        Map<UUID, Message> parents = ReplyParents.load(messageRepository, page);
         List<MessageResponse> content =
-                page.stream().map(m -> mapper.toMessageResponse(m, mediaFor(media, m))).toList();
+                page.stream()
+                        .map(m -> mapper.toMessageResponse(m, mediaFor(media, m), parents))
+                        .toList();
         String startCursor = page.isEmpty() ? null : encodeCursor(page.get(0).getCreatedAt());
         String endCursor =
                 page.isEmpty() ? null : encodeCursor(page.get(page.size() - 1).getCreatedAt());
