@@ -53,6 +53,7 @@ These tables cannot be rebuilt from any other source if lost.
 | Viewing a story inserts into `story_views`; duplicate inserts (same viewer) must be ignored | `StoryViewRepository.insertIgnoringDuplicate` (native `INSERT ... ON CONFLICT DO NOTHING`), called from `StoryViewServiceImpl.recordView` |
 | Stories from private accounts are only visible to accepted followers | `StoryVisibilityServiceImpl.isVisibleTo` — delegates to `SocialService.hasAcceptedFollow` for a private owner |
 | Stories from blocked accounts must be excluded from the viewer's feed | `StoryVisibilityServiceImpl.isVisibleTo` (block check via `SocialService.isBlockedBetween`) for single-story reads; `StoryServiceImpl.getStoryFeed` sources authors from `SocialService.getAcceptedFollowingExcludingBlocks` for the tray |
+| Accounts whose stories the viewer muted (`user_mutes.mute_stories`) must be excluded from the story tray and from story discovery; a mute of posts alone changes nothing, and the viewer's own tray entry is never removed | `StoryServiceImpl.getStoryFeed` subtracts `SocialService.findStoryMutedAuthors` from the queried authors before adding the viewer's own id; `StoryRepository.findDiscoverableAuthors` carries a `NOT EXISTS` against the viewer's mute row. The block exclusions stay as they are, and a mute written concurrently with a block can survive it, which is an accepted race |
 | Viewing a story generates a `story_view` notification for the story owner | `StoryViewServiceImpl.recordView` enqueues `story.viewed.v1` on first view only; `StoryNotificationConsumer.dispatch` creates the `STORY_VIEW` notification via `NotificationService.create` |
 | A background cleanup job removes rows that have already been soft-deleted (`deleted_at IS NOT NULL`) AND have passed their expiry time (`expires_at < NOW()`). Stories that are expired but not yet soft-deleted are NOT targets for the cleanup job. | `StoryCleanupScheduler.purgeSoftDeletedExpiredStories`, backed by the native `StoryRepository.purgeSoftDeletedExpired` query |
 | `user_settings.allow_story_replies` governs whether viewers can reply to a story | `[NOT YET IMPLEMENTED]` — blocked on the `message` module, which has no reply-send path yet; see Section C |
@@ -75,6 +76,7 @@ These tables cannot be rebuilt from any other source if lost.
 | `users` | inbound | Every story belongs to a `user_id`; viewer identity tracked via `story_views.viewer_id` |
 | `media` | outbound | Each story references exactly one `media_asset_id` |
 | `social` | inbound | Follow/block state governs story visibility |
+| `social` | outbound | `SocialService.findStoryMutedAuthors` supplies the accounts whose stories the viewer muted, and the discovery query reads `user_mutes` directly |
 | `notification` | outbound | Story view events trigger a `story_view` notification for the story owner; the views of one story aggregate into one group |
 | `notification` | inbound | `StoryPreviewService` gives the notification feed each story's availability, expiry and thumbnail |
 | `message` | inbound | Stories can be shared into conversations via `messages.shared_story_id` |

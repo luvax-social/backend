@@ -122,6 +122,43 @@ public interface UserMuteRepository extends JpaRepository<UserMute, UserMuteId> 
             Pageable pageable);
 
     /**
+     * Every author whose posts the viewer keeps out of a feed, in one round trip.
+     *
+     * <p>Authors whose posts the viewer muted are always returned. Authors the viewer asked to see
+     * fewer posts from are added only when {@code includeShowFewer} is set, because show fewer
+     * shapes recommendations and not the following feed. Both halves are index range scans on the
+     * leading {@code user_id} of their primary keys, and the viewer's own rows are all there are to
+     * read, so the cost does not grow with the size of the feed being filtered.
+     *
+     * @param viewerId the viewer whose preferences are read
+     * @param includeShowFewer whether show-fewer requests are part of the answer
+     * @return the distinct author ids; empty when the viewer holds no matching preference
+     */
+    @Query(
+            value =
+                    "SELECT muted_user_id FROM user_mutes"
+                            + " WHERE user_id = :viewerId AND mute_posts"
+                            + " UNION "
+                            + "SELECT author_id FROM account_show_fewer"
+                            + " WHERE user_id = :viewerId AND :includeShowFewer",
+            nativeQuery = true)
+    List<UUID> findFeedSuppressedAuthorIds(
+            @Param("viewerId") UUID viewerId, @Param("includeShowFewer") boolean includeShowFewer);
+
+    /**
+     * Every account whose stories the viewer muted.
+     *
+     * @param viewerId the viewer whose mutes are read
+     * @return the muted account ids; empty when the viewer muted no stories
+     */
+    @Query(
+            value =
+                    "SELECT muted_user_id FROM user_mutes"
+                            + " WHERE user_id = :viewerId AND mute_stories",
+            nativeQuery = true)
+    List<UUID> findStoryMutedAuthorIds(@Param("viewerId") UUID viewerId);
+
+    /**
      * The viewer's own mute and show-fewer choices about any of {@code userIds}, in one round trip.
      *
      * <p>Two index lookups on the primary keys appended in one statement, one per table. Only the

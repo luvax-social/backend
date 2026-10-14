@@ -27,8 +27,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.app.common.response.CursorPageResponse;
 import com.app.modules.post.dto.response.FeedPostResponse;
 import com.app.modules.post.entity.Post;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.enums.PostType;
+import com.app.modules.post.service.PostFeedbackService;
 import com.app.modules.post.service.PostLookupService;
 import com.app.modules.post.service.PostService;
 import com.app.modules.post.service.PostVisibilityService;
@@ -45,6 +47,7 @@ class RecommendationFeedServiceImplTest {
     @Mock private RecommendationSource recommendationSource;
     @Mock private PostLookupService postLookupService;
     @Mock private PostVisibilityService postVisibilityService;
+    @Mock private PostFeedbackService postFeedbackService;
     @Mock private PostService postService;
     @Mock private SocialService socialService;
     @Mock private RecommendationMetrics recommendationMetrics;
@@ -63,6 +66,7 @@ class RecommendationFeedServiceImplTest {
                         recommendationSource,
                         postLookupService,
                         postVisibilityService,
+                        postFeedbackService,
                         postService,
                         socialService,
                         gorseProperties,
@@ -136,7 +140,7 @@ class RecommendationFeedServiceImplTest {
         assertThat(page.getContent()).hasSize(1);
         assertThat(page.getContent().get(0).rankingScore()).isEqualTo(5.0);
         verify(recommendationSource).fetch(viewerId, 'g', 2, 0, 0);
-        verify(postService, never()).getFeed(any(), any(), anyInt());
+        verify(postService, never()).getFeed(any(), any(), anyInt(), any());
     }
 
     @Test
@@ -144,7 +148,8 @@ class RecommendationFeedServiceImplTest {
         String garbageCursor = "not-a-valid-ranked-cursor!!!";
         CursorPageResponse<FeedPostResponse> chronoPage =
                 CursorPageResponse.of(List.of(), false, null, null, true);
-        when(postService.getFeed(viewerId, garbageCursor, 20)).thenReturn(chronoPage);
+        when(postService.getFeed(viewerId, garbageCursor, 20, FeedSurface.FOR_YOU_FALLBACK))
+                .thenReturn(chronoPage);
 
         CursorPageResponse<FeedPostResponse> page =
                 service.getRecommendedFeed(viewerId, garbageCursor, 20, false);
@@ -215,7 +220,8 @@ class RecommendationFeedServiceImplTest {
         CursorPageResponse<FeedPostResponse> chronoPage =
                 CursorPageResponse.of(
                         List.of(feedResponse(UUID.randomUUID())), false, "a", "b", false);
-        when(postService.getFeed(viewerId, null, 5)).thenReturn(chronoPage);
+        when(postService.getFeed(viewerId, null, 5, FeedSurface.FOR_YOU_FALLBACK))
+                .thenReturn(chronoPage);
 
         CursorPageResponse<FeedPostResponse> page =
                 service.getRecommendedFeed(viewerId, null, 5, false);
@@ -244,7 +250,8 @@ class RecommendationFeedServiceImplTest {
         when(postLookupService.findActiveByIds(anyList())).thenReturn(List.of());
         CursorPageResponse<FeedPostResponse> chronoPage =
                 CursorPageResponse.of(List.of(), false, null, null, false);
-        when(postService.getFeed(viewerId, null, 5)).thenReturn(chronoPage);
+        when(postService.getFeed(viewerId, null, 5, FeedSurface.FOR_YOU_FALLBACK))
+                .thenReturn(chronoPage);
 
         CursorPageResponse<FeedPostResponse> page =
                 service.getRecommendedFeed(viewerId, null, 5, false);
@@ -307,7 +314,7 @@ class RecommendationFeedServiceImplTest {
                 service.getRecommendedFeed(viewerId, popularCursor, 5, false);
 
         assertThat(page.getContent()).isEmpty();
-        verify(postService, never()).getFeed(any(), any(), anyInt());
+        verify(postService, never()).getFeed(any(), any(), anyInt(), any());
     }
 
     @Test
@@ -408,6 +415,196 @@ class RecommendationFeedServiceImplTest {
     }
 
     @Test
+    void getRecommendedFeed_notInterestedAndSuppressedAuthorCandidates_areDroppedFromTheRound() {
+        UUID keptPost = UUID.randomUUID();
+        UUID notInterestedPost = UUID.randomUUID();
+        UUID suppressedAuthorPost = UUID.randomUUID();
+        UUID keptOwner = UUID.randomUUID();
+        UUID notInterestedOwner = UUID.randomUUID();
+        UUID suppressedOwner = UUID.randomUUID();
+        when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(4), eq(0), eq(0)))
+                .thenReturn(
+                        new SourceBatch(
+                                'g',
+                                List.of(
+                                        new GorseScore(notInterestedPost.toString(), 9.0),
+                                        new GorseScore(suppressedAuthorPost.toString(), 8.0),
+                                        new GorseScore(keptPost.toString(), 7.0)),
+                                3,
+                                0));
+        when(postLookupService.findActiveByIds(anyList()))
+                .thenReturn(
+                        List.of(
+                                publishedPost(notInterestedPost, notInterestedOwner),
+                                publishedPost(suppressedAuthorPost, suppressedOwner),
+                                publishedPost(keptPost, keptOwner)));
+        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
+                .thenReturn(Set.of(keptOwner, notInterestedOwner, suppressedOwner));
+        when(postFeedbackService.findNotInterested(eq(viewerId), any()))
+                .thenReturn(Set.of(notInterestedPost));
+        when(socialService.findFeedSuppressedAuthors(eq(viewerId), any(), eq(FeedSurface.FOR_YOU)))
+                .thenReturn(Set.of(suppressedOwner));
+        // The page of 2 is not full after the round, so a second one runs and finds nothing.
+        when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(4), eq(3), eq(0)))
+                .thenReturn(new SourceBatch('g', List.of(), 0, 0));
+
+        CursorPageResponse<FeedPostResponse> page =
+                service.getRecommendedFeed(viewerId, null, 2, false);
+
+        assertThat(page.getContent()).extracting(FeedPostResponse::id).containsExactly(keptPost);
+        // Dropped candidates are still consumed, so the next page does not read them again.
+        assertThat(decodeCursor(page.getPageInfo().getEndCursor())).isEqualTo("g:3:0");
+    }
+
+    @Test
+    void getRecommendedFeed_preferenceLookups_runOncePerRoundOverTheWholeCandidateSet() {
+        UUID postA = UUID.randomUUID();
+        UUID postB = UUID.randomUUID();
+        UUID ownerA = UUID.randomUUID();
+        UUID ownerB = UUID.randomUUID();
+        when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(4), eq(0), eq(0)))
+                .thenReturn(
+                        new SourceBatch(
+                                'g',
+                                List.of(
+                                        new GorseScore(postA.toString(), 9.0),
+                                        new GorseScore(postB.toString(), 8.0)),
+                                2,
+                                0));
+        when(postLookupService.findActiveByIds(anyList()))
+                .thenReturn(List.of(publishedPost(postA, ownerA), publishedPost(postB, ownerB)));
+        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
+                .thenReturn(Set.of(ownerA, ownerB));
+
+        service.getRecommendedFeed(viewerId, null, 2, false);
+
+        verify(postFeedbackService, times(1)).findNotInterested(viewerId, Set.of(postA, postB));
+        verify(socialService, times(1))
+                .findFeedSuppressedAuthors(viewerId, Set.of(ownerA, ownerB), FeedSurface.FOR_YOU);
+    }
+
+    @Test
+    void getRecommendedFeed_trendingTopUpCandidates_areFilteredLikeThePrimaryOnes() {
+        UUID primaryPost = UUID.randomUUID();
+        UUID topUpKept = UUID.randomUUID();
+        UUID topUpNotInterested = UUID.randomUUID();
+        UUID topUpSuppressed = UUID.randomUUID();
+        UUID primaryOwner = UUID.randomUUID();
+        UUID keptOwner = UUID.randomUUID();
+        UUID notInterestedOwner = UUID.randomUUID();
+        UUID suppressedOwner = UUID.randomUUID();
+        // One primary candidate followed by three that came from the trending topup.
+        when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(6), eq(0), eq(0)))
+                .thenReturn(
+                        new SourceBatch(
+                                'g',
+                                List.of(
+                                        new GorseScore(primaryPost.toString(), 9.0),
+                                        new GorseScore(topUpNotInterested.toString(), 5.0),
+                                        new GorseScore(topUpSuppressed.toString(), 4.0),
+                                        new GorseScore(topUpKept.toString(), 3.0)),
+                                1,
+                                10));
+        when(postLookupService.findActiveByIds(anyList()))
+                .thenReturn(
+                        List.of(
+                                publishedPost(primaryPost, primaryOwner),
+                                publishedPost(topUpNotInterested, notInterestedOwner),
+                                publishedPost(topUpSuppressed, suppressedOwner),
+                                publishedPost(topUpKept, keptOwner)));
+        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
+                .thenReturn(Set.of(primaryOwner, keptOwner, notInterestedOwner, suppressedOwner));
+        when(postFeedbackService.findNotInterested(eq(viewerId), any()))
+                .thenReturn(Set.of(topUpNotInterested));
+        when(socialService.findFeedSuppressedAuthors(eq(viewerId), any(), eq(FeedSurface.FOR_YOU)))
+                .thenReturn(Set.of(suppressedOwner));
+        // Four candidates were consumed, three past the primary one, so the topup chunk is spent.
+        when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(6), eq(1), eq(10)))
+                .thenReturn(new SourceBatch('g', List.of(), 0, 0));
+
+        CursorPageResponse<FeedPostResponse> page =
+                service.getRecommendedFeed(viewerId, null, 3, false);
+
+        assertThat(page.getContent())
+                .extracting(FeedPostResponse::id)
+                .containsExactly(primaryPost, topUpKept);
+    }
+
+    @Test
+    void getRecommendedFeed_popularityFallbackCandidates_areFilteredLikeTheRankedOnes() {
+        String popularCursor = Base64.getEncoder().encodeToString("p:0:0".getBytes());
+        UUID keptPost = UUID.randomUUID();
+        UUID notInterestedPost = UUID.randomUUID();
+        UUID suppressedPost = UUID.randomUUID();
+        UUID keptOwner = UUID.randomUUID();
+        UUID notInterestedOwner = UUID.randomUUID();
+        UUID suppressedOwner = UUID.randomUUID();
+        when(recommendationSource.fetch(eq(viewerId), eq('p'), eq(6), eq(0), eq(0)))
+                .thenReturn(
+                        new SourceBatch(
+                                'p',
+                                List.of(
+                                        new GorseScore(notInterestedPost.toString(), 9.0),
+                                        new GorseScore(suppressedPost.toString(), 8.0),
+                                        new GorseScore(keptPost.toString(), 7.0)),
+                                3,
+                                0));
+        when(postLookupService.findActiveByIds(anyList()))
+                .thenReturn(
+                        List.of(
+                                publishedPost(notInterestedPost, notInterestedOwner),
+                                publishedPost(suppressedPost, suppressedOwner),
+                                publishedPost(keptPost, keptOwner)));
+        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
+                .thenReturn(Set.of(keptOwner, notInterestedOwner, suppressedOwner));
+        when(postFeedbackService.findNotInterested(eq(viewerId), any()))
+                .thenReturn(Set.of(notInterestedPost));
+        when(socialService.findFeedSuppressedAuthors(eq(viewerId), any(), eq(FeedSurface.FOR_YOU)))
+                .thenReturn(Set.of(suppressedOwner));
+        // The page of 3 is not full after the round, so a second one runs and finds nothing.
+        when(recommendationSource.fetch(eq(viewerId), eq('p'), eq(6), eq(3), eq(0)))
+                .thenReturn(new SourceBatch('p', List.of(), 0, 0));
+
+        CursorPageResponse<FeedPostResponse> page =
+                service.getRecommendedFeed(viewerId, popularCursor, 3, false);
+
+        assertThat(page.getContent()).extracting(FeedPostResponse::id).containsExactly(keptPost);
+    }
+
+    @Test
+    void getRecommendedFeed_excludeFollowed_appliesTheForYouPreferences() {
+        UUID keptPost = UUID.randomUUID();
+        UUID suppressedPost = UUID.randomUUID();
+        UUID keptOwner = UUID.randomUUID();
+        UUID suppressedOwner = UUID.randomUUID();
+        when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(4), eq(0), eq(0)))
+                .thenReturn(
+                        new SourceBatch(
+                                'g',
+                                List.of(
+                                        new GorseScore(suppressedPost.toString(), 9.0),
+                                        new GorseScore(keptPost.toString(), 8.0)),
+                                2,
+                                0));
+        when(postLookupService.findActiveByIds(anyList()))
+                .thenReturn(
+                        List.of(
+                                publishedPost(suppressedPost, suppressedOwner),
+                                publishedPost(keptPost, keptOwner)));
+        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
+                .thenReturn(Set.of(keptOwner, suppressedOwner));
+        when(socialService.findFeedSuppressedAuthors(eq(viewerId), any(), eq(FeedSurface.FOR_YOU)))
+                .thenReturn(Set.of(suppressedOwner));
+        when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(4), eq(2), eq(0)))
+                .thenReturn(new SourceBatch('g', List.of(), 0, 0));
+
+        CursorPageResponse<FeedPostResponse> page =
+                service.getRecommendedFeed(viewerId, null, 2, true);
+
+        assertThat(page.getContent()).extracting(FeedPostResponse::id).containsExactly(keptPost);
+    }
+
+    @Test
     void
             getRecommendedFeed_excludeFollowedAndBothSourcesEmpty_returnsEmptyPageInsteadOfFollowingFeed() {
         when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(10), eq(0), eq(0)))
@@ -417,7 +614,7 @@ class RecommendationFeedServiceImplTest {
                 service.getRecommendedFeed(viewerId, null, 5, true);
 
         assertThat(page.getContent()).isEmpty();
-        verify(postService, never()).getFeed(any(), any(), anyInt());
+        verify(postService, never()).getFeed(any(), any(), anyInt(), any());
         // The chronological fallback is a distinct, real feed being served in place of the ranked
         // one; an honest empty Explore page under excludeFollowed is a different outcome and must
         // not be counted the same way.
@@ -433,6 +630,6 @@ class RecommendationFeedServiceImplTest {
                 service.getRecommendedFeed(viewerId, garbageCursor, 20, true);
 
         assertThat(page.getContent()).isEmpty();
-        verify(postService, never()).getFeed(any(), any(), anyInt());
+        verify(postService, never()).getFeed(any(), any(), anyInt(), any());
     }
 }

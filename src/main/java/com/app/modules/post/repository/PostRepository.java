@@ -233,23 +233,37 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
      * <p>Paired with {@link #findFeedPostsBefore}; the no-cursor variant avoids binding an untyped
      * null timestamp, which PostgreSQL cannot type-infer.
      *
+     * <p>Posts the viewer marked not interested are left out by an anti-join on the mark's primary
+     * key, so the keyset index on {@code (user_id, created_at, id)} still drives the scan and a
+     * viewer with no marks pays one failed index probe per candidate row.
+     *
      * @param authorIds post authors eligible to appear in the feed; must not be empty
+     * @param viewerId the viewer whose not-interested marks are excluded
      * @param pageable page size carrier (page number is always 0 for keyset paging)
      * @return posts ordered by the {@code (created_at, id)} tuple descending
      */
     @Query(
             value =
-                    "SELECT * FROM posts WHERE user_id IN (:authorIds) AND status = 'published'"
-                            + " AND deleted_at IS NULL "
-                            + "ORDER BY created_at DESC, id DESC",
+                    "SELECT p.* FROM posts p WHERE p.user_id IN (:authorIds)"
+                            + " AND p.status = 'published' AND p.deleted_at IS NULL "
+                            + "AND NOT EXISTS (SELECT 1 FROM post_not_interested n"
+                            + " WHERE n.user_id = :viewerId AND n.post_id = p.id) "
+                            + "ORDER BY p.created_at DESC, p.id DESC",
             nativeQuery = true)
-    List<Post> findFirstFeedPosts(@Param("authorIds") List<UUID> authorIds, Pageable pageable);
+    List<Post> findFirstFeedPosts(
+            @Param("authorIds") List<UUID> authorIds,
+            @Param("viewerId") UUID viewerId,
+            Pageable pageable);
 
     /**
      * Keyset page of published posts authored by any user in {@code authorIds}, older than the
      * cursor, newest first.
      *
+     * <p>Posts the viewer marked not interested are left out the same way as in {@link
+     * #findFirstFeedPosts}.
+     *
      * @param authorIds post authors eligible to appear in the feed; must not be empty
+     * @param viewerId the viewer whose not-interested marks are excluded
      * @param cursorTime {@code created_at} of the cursor row; never null
      * @param cursorId id of the cursor row, breaking ties on equal {@code created_at}; never null
      * @param pageable page size carrier
@@ -257,13 +271,16 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
      */
     @Query(
             value =
-                    "SELECT * FROM posts WHERE user_id IN (:authorIds) AND status = 'published'"
-                            + " AND deleted_at IS NULL "
-                            + "AND (created_at, id) < (:cursorTime, :cursorId) "
-                            + "ORDER BY created_at DESC, id DESC",
+                    "SELECT p.* FROM posts p WHERE p.user_id IN (:authorIds)"
+                            + " AND p.status = 'published' AND p.deleted_at IS NULL "
+                            + "AND (p.created_at, p.id) < (:cursorTime, :cursorId) "
+                            + "AND NOT EXISTS (SELECT 1 FROM post_not_interested n"
+                            + " WHERE n.user_id = :viewerId AND n.post_id = p.id) "
+                            + "ORDER BY p.created_at DESC, p.id DESC",
             nativeQuery = true)
     List<Post> findFeedPostsBefore(
             @Param("authorIds") List<UUID> authorIds,
+            @Param("viewerId") UUID viewerId,
             @Param("cursorTime") OffsetDateTime cursorTime,
             @Param("cursorId") UUID cursorId,
             Pageable pageable);

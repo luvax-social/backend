@@ -40,8 +40,11 @@ public interface MuteApi {
             summary = "Set what is muted for an account",
             description =
                     "Creates or replaces the caller's mute of the account. Posts, stories or both"
-                            + " can be muted; sending both as false removes the mute. The muted"
-                            + " account is not told.")
+                            + " can be muted; sending both as false removes the mute. Muted posts leave"
+                            + " the Following, For You and Explore feeds and muted stories leave the"
+                            + " story tray and story discovery. Profile pages, search, hashtag pages,"
+                            + " comments and direct messages are unchanged. The muted account is not"
+                            + " told.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "200",

@@ -243,6 +243,27 @@ class MuteControllerIT {
     }
 
     @Test
+    void followingFeed_postsMuteRemovesTheAuthorAndUnmuteRestoresThem() {
+        Account viewer = account("mt_feed_v");
+        Account muted = account("mt_feed_m");
+        Account storiesOnly = account("mt_feed_s");
+        follow(viewer.id(), muted.id());
+        follow(viewer.id(), storiesOnly.id());
+        UUID mutedPost = publishedPost(muted.id());
+        UUID storiesOnlyPost = publishedPost(storiesOnly.id());
+
+        put(muted.id(), Map.of("mutePosts", true, "muteStories", false), viewer.token());
+        put(storiesOnly.id(), Map.of("mutePosts", false, "muteStories", true), viewer.token());
+        List<String> whileMuted = feedPostIds(viewer.token());
+        send(HttpMethod.DELETE, mutePath(muted.id()), viewer.token());
+        List<String> afterUnmute = feedPostIds(viewer.token());
+
+        assertThat(whileMuted).containsExactly(storiesOnlyPost.toString());
+        assertThat(afterUnmute)
+                .containsExactlyInAnyOrder(mutedPost.toString(), storiesOnlyPost.toString());
+    }
+
+    @Test
     void putMute_missingScopeField_returns400() {
         Account viewer = account("mt_bad_v");
         Account target = account("mt_bad_t");
@@ -457,6 +478,32 @@ class MuteControllerIT {
             headers.setBearerAuth(token);
         }
         return rest.exchange(path, method, new HttpEntity<>(body, headers), String.class);
+    }
+
+    private void follow(UUID follower, UUID following) {
+        jdbc.update(
+                "INSERT INTO follows(follower_id, following_id, status)"
+                        + " VALUES (?, ?, 'accepted')",
+                follower,
+                following);
+    }
+
+    private UUID publishedPost(UUID userId) {
+        return jdbc.queryForObject(
+                "INSERT INTO posts(user_id, post_type, status) VALUES (?, 'image', 'published')"
+                        + " RETURNING id",
+                UUID.class,
+                userId);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> feedPostIds(String token) {
+        ResponseEntity<String> response = send(HttpMethod.GET, "/api/v1/posts/feed", token);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        Map<String, Object> data =
+                (Map<String, Object>) JSON.readValue(response.getBody(), Map.class).get("data");
+        return ((List<Map<String, Object>>) data.get("content"))
+                .stream().map(post -> post.get("id").toString()).toList();
     }
 
     private Map<?, ?> data(ResponseEntity<String> response) {

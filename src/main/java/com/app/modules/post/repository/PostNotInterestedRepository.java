@@ -1,5 +1,7 @@
 package com.app.modules.post.repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -33,6 +35,24 @@ public interface PostNotInterestedRepository
                             + " VALUES (:userId, :postId) ON CONFLICT DO NOTHING",
             nativeQuery = true)
     int insertIfAbsent(@Param("userId") UUID userId, @Param("postId") UUID postId);
+
+    /**
+     * The posts, among {@code postIds}, that the viewer marked not interested.
+     *
+     * <p>One probe per candidate on the {@code (user_id, post_id)} primary key, so a feed round
+     * pays a single indexed query however many candidates it holds.
+     *
+     * @param userId the viewer whose marks are read
+     * @param postIds candidate posts a feed is about to show
+     * @return the marked post ids; empty when none is marked
+     */
+    @Query(
+            value =
+                    "SELECT post_id FROM post_not_interested"
+                            + " WHERE user_id = :userId AND post_id IN (:postIds)",
+            nativeQuery = true)
+    List<UUID> findMarkedPostIds(
+            @Param("userId") UUID userId, @Param("postIds") Collection<UUID> postIds);
 
     /**
      * Removes a not-interested mark, returning the affected-row count so the caller can tell a real

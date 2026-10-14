@@ -11,6 +11,7 @@ import com.app.common.exception.AppException;
 import com.app.common.response.CursorPageResponse;
 import com.app.common.response.UserListItemResponse;
 import com.app.common.response.ViewerRelationshipResponse;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.social.dto.response.FollowRequestResponse;
 import com.app.modules.social.dto.response.FollowResponse;
 import com.app.modules.social.dto.response.PendingFollowRequestSummary;
@@ -256,4 +257,38 @@ public interface SocialService {
      * @return every id blocking or blocked by {@code viewerId}; empty when there are none
      */
     Set<UUID> findBlockedEitherDirection(UUID viewerId);
+
+    /**
+     * The authors, among {@code candidateAuthorIds}, whose posts the viewer's own preferences keep
+     * out of a feed.
+     *
+     * <p>Authors whose posts the viewer muted are returned for every surface. Authors the viewer
+     * asked to see fewer posts from are added for {@link FeedSurface#FOR_YOU} and {@link
+     * FeedSurface#FOR_YOU_FALLBACK} only, because show fewer shapes recommendations and the
+     * following feed is the viewer's own choice of accounts. One batched read over the viewer's
+     * preference rows serves the whole candidate set.
+     *
+     * <p>This only adds preferences. A block is decided by the callers' existing block checks,
+     * which this never replaces: a preference row written concurrently with a block can survive it
+     * for a moment, and the block exclusion still applies.
+     *
+     * @param viewerId the viewer whose preferences are read
+     * @param candidateAuthorIds authors of the posts a feed is about to show; may contain
+     *     duplicates
+     * @param surface the feed the result is for
+     * @return the candidates to drop; empty when there are no candidates or no matching preference
+     */
+    Set<UUID> findFeedSuppressedAuthors(
+            UUID viewerId, Collection<UUID> candidateAuthorIds, FeedSurface surface);
+
+    /**
+     * The accounts whose stories the viewer muted.
+     *
+     * <p>Read for the story tray, which subtracts them from the accounts it queries. Story
+     * discovery applies the same rule inside its own query.
+     *
+     * @param viewerId the viewer whose mutes are read
+     * @return the muted accounts; empty when the viewer muted no stories
+     */
+    Set<UUID> findStoryMutedAuthors(UUID viewerId);
 }

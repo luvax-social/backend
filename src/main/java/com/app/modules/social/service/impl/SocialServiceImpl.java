@@ -31,6 +31,7 @@ import com.app.common.response.UserListItemResponse;
 import com.app.common.response.UserSummaryResponse;
 import com.app.common.response.ViewerRelationshipResponse;
 import com.app.modules.message.service.DirectConversationProvisioner;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.report.enums.ReportType;
 import com.app.modules.report.service.ReportedTargetService;
 import com.app.modules.social.dto.response.FollowRequestResponse;
@@ -707,6 +708,30 @@ public class SocialServiceImpl implements SocialService {
     @Transactional(readOnly = true)
     public Set<UUID> findBlockedEitherDirection(UUID viewerId) {
         return new HashSet<>(blockRepository.findBlockedCounterpartyIds(viewerId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findFeedSuppressedAuthors(
+            UUID viewerId, Collection<UUID> candidateAuthorIds, FeedSurface surface) {
+        if (candidateAuthorIds == null || candidateAuthorIds.isEmpty()) {
+            return Set.of();
+        }
+        // The viewer's own preference rows are read whole and intersected with the candidates,
+        // not matched against them in SQL: the viewer's rows are few, while the candidate list of
+        // a following feed can hold thousands of ids.
+        Set<UUID> suppressed =
+                new HashSet<>(
+                        userMuteRepository.findFeedSuppressedAuthorIds(
+                                viewerId, surface.appliesShowFewer()));
+        suppressed.retainAll(new HashSet<>(candidateAuthorIds));
+        return suppressed;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findStoryMutedAuthors(UUID viewerId) {
+        return new HashSet<>(userMuteRepository.findStoryMutedAuthorIds(viewerId));
     }
 
     private void checkCanViewSocialGraph(UUID currentUserId, UUID targetUserId, User targetUser) {

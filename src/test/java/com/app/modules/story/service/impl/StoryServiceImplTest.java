@@ -291,6 +291,41 @@ class StoryServiceImplTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void getStoryFeed_mutedStoryAuthors_areSubtractedFromTheQueriedAuthorsAndTheViewerStays() {
+        UUID mutedAuthor = UUID.randomUUID();
+        UUID keptAuthor = UUID.randomUUID();
+        when(socialService.getAcceptedFollowingExcludingBlocks(viewerId))
+                .thenReturn(List.of(mutedAuthor, keptAuthor));
+        when(socialService.findStoryMutedAuthors(viewerId)).thenReturn(Set.of(mutedAuthor));
+        when(storyRepository.findActiveByAuthors(anyList(), any(OffsetDateTime.class)))
+                .thenReturn(List.of());
+
+        service.getStoryFeed(viewerId);
+
+        ArgumentCaptor<List<UUID>> authors = ArgumentCaptor.forClass(List.class);
+        verify(storyRepository).findActiveByAuthors(authors.capture(), any(OffsetDateTime.class));
+        assertThat(authors.getValue()).containsExactlyInAnyOrder(keptAuthor, viewerId);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void getStoryFeed_everyFollowedAuthorMuted_stillReadsTheViewersOwnEntry() {
+        UUID mutedAuthor = UUID.randomUUID();
+        when(socialService.getAcceptedFollowingExcludingBlocks(viewerId))
+                .thenReturn(List.of(mutedAuthor));
+        when(socialService.findStoryMutedAuthors(viewerId)).thenReturn(Set.of(mutedAuthor));
+        when(storyRepository.findActiveByAuthors(anyList(), any(OffsetDateTime.class)))
+                .thenReturn(List.of());
+
+        service.getStoryFeed(viewerId);
+
+        ArgumentCaptor<List<UUID>> authors = ArgumentCaptor.forClass(List.class);
+        verify(storyRepository).findActiveByAuthors(authors.capture(), any(OffsetDateTime.class));
+        assertThat(authors.getValue()).containsExactly(viewerId);
+    }
+
+    @Test
     void deleteStory_missing_throwsNotFound() {
         when(storyRepository.findById(storyId)).thenReturn(Optional.empty());
 

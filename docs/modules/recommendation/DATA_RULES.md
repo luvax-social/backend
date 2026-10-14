@@ -110,6 +110,24 @@ When both ranked sources are exhausted or unavailable on the first page, the per
 That fallback is, by definition, exactly the accounts an Explore-style caller asked to exclude, so entering it under `excludeFollowed` would show precisely the wrong content.
 An exhausted Explore result is therefore an honest empty page instead.
 
+### Interaction preferences in every candidate path
+
+The viewer's muted authors, show-fewer authors and not-interested posts are applied by the application, never by Gorse.
+The recommender's `IsHidden` flag is global to an item and would hide the post from every viewer, so it is never used for a personal preference.
+`RecommendationFeedServiceImpl.appendVisible` applies the preferences once per source round, beside the existing visibility filters.
+It reads `PostFeedbackService.findNotInterested` over the round's candidate posts and `SocialService.findFeedSuppressedAuthors` over the candidate owners, one batched query each.
+Every candidate source reaches that method: the personalized Gorse list, the trending top-up and the popularity fallback all arrive as one `SourceBatch`.
+`RecommendationSource` filters nothing for the viewer, and a test pins that the top-up and popularity candidates are filtered like the primary ones.
+A dropped candidate still counts as consumed, so the next page does not read it again.
+Explore (`excludeFollowed`) is the same path and uses the `FOR_YOU` surface.
+A muted author's posts are removed, a show-fewer author's posts are removed, and a post marked not interested is removed, on For You and on Explore.
+The chronological fallback is served by `PostService.getFeed` with `FeedSurface.FOR_YOU_FALLBACK`, for the first fallback page and for every continuation page.
+A continuation page arrives at this endpoint with a post-module cursor, which carries no surface, so the endpoint it arrives on is what names the surface.
+The Following tab calls the same method with `FeedSurface.FOLLOWING`, which keeps show-fewer authors.
+The filters add to the block and visibility checks and never replace them.
+A mute or show-fewer row written concurrently with a block can survive the block for a moment.
+That race is accepted, because the block exclusion still applies to the same candidate.
+
 ---
 
 ## Section 1: Canonical Data

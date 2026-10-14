@@ -1,6 +1,9 @@
 package com.app.modules.post.service.impl;
 
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -66,6 +69,15 @@ public class PostFeedbackServiceImpl implements PostFeedbackService {
                 postId,
                 userId,
                 Map.of("postId", postId.toString(), "authorId", post.getUserId().toString()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findNotInterested(UUID userId, Collection<UUID> postIds) {
+        if (postIds == null || postIds.isEmpty()) {
+            return Set.of();
+        }
+        return new HashSet<>(notInterestedRepository.findMarkedPostIds(userId, postIds));
     }
 
     @Override

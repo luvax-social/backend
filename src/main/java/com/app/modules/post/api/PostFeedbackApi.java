@@ -26,7 +26,8 @@ public interface PostFeedbackApi {
     @Operation(
             summary = "Mark a post as not interested",
             description =
-                    "Records that the viewer wants to see less like this post. Repeating the call"
+                    "Removes this post from the viewer's Following, For You and Explore feeds and"
+                            + " records that the viewer wants to see less like it. Repeating the call"
                             + " changes nothing. The author is not told.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(

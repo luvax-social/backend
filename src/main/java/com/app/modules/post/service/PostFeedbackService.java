@@ -1,5 +1,7 @@
 package com.app.modules.post.service;
 
+import java.util.Collection;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -35,4 +37,17 @@ public interface PostFeedbackService {
      * @param postId the post whose mark is removed
      */
     void undoNotInterested(UUID userId, UUID postId);
+
+    /**
+     * The posts, among {@code postIds}, that the viewer marked not interested.
+     *
+     * <p>One indexed read on the mark's primary key serves the whole candidate set, so a feed round
+     * pays one query however many candidates it holds. The mark removes a post from every feed the
+     * viewer reads, whichever surface it is on.
+     *
+     * @param userId the viewer whose marks are read
+     * @param postIds candidate posts a feed is about to show; may contain duplicates
+     * @return the marked subset; empty when there are no candidates or no mark
+     */
+    Set<UUID> findNotInterested(UUID userId, Collection<UUID> postIds);
 }

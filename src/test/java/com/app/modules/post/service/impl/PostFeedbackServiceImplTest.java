@@ -1,15 +1,19 @@
 package com.app.modules.post.service.impl;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -145,6 +149,27 @@ class PostFeedbackServiceImplTest {
                         eq(postId),
                         eq(userId),
                         eq(Map.of("postId", postId.toString())));
+    }
+
+    @Test
+    void findNotInterested_returnsTheMarkedSubsetFromOneRead() {
+        UUID marked = UUID.randomUUID();
+        UUID unmarked = UUID.randomUUID();
+        when(notInterestedRepository.findMarkedPostIds(userId, Set.of(marked, unmarked)))
+                .thenReturn(List.of(marked));
+
+        Set<UUID> result = service.findNotInterested(userId, Set.of(marked, unmarked));
+
+        assertThat(result).containsExactly(marked);
+        verify(notInterestedRepository).findMarkedPostIds(userId, Set.of(marked, unmarked));
+    }
+
+    @Test
+    void findNotInterested_noCandidates_readsNothing() {
+        assertThat(service.findNotInterested(userId, List.of())).isEmpty();
+        assertThat(service.findNotInterested(userId, null)).isEmpty();
+
+        verifyNoInteractions(notInterestedRepository);
     }
 
     @Test

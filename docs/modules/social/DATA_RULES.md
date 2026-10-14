@@ -91,7 +91,7 @@ These tables cannot be rebuilt from any other source if lost.
 | Neither a mute nor a show-fewer request is ever told to the other account: no notification is created, and none of the four events is bound to a notification queue. Their only consumer is the import consumer, which records `account_mute`, `account_unmute`, `account_show_fewer` and `account_show_fewer_undo` rows for the acting account | `MuteServiceImpl`, `FeedPreferenceServiceImpl`, `DomainSignalMappings`, pinned by `RabbitMqTopologyConfigTest` |
 | Blocking deletes the mutes and the show-fewer requests between the pair in both directions, without enqueuing an unmute or an undo event, because a block supersedes them | `SocialServiceImpl.blockUser`, `UserMuteRepository.deleteBetween`, `AccountShowFewerRepository.deleteBetween` |
 | The relationship block gains `isMutingPosts`, `isMutingStories` and `isShowingFewer`, read from the viewer's own outgoing rows only through one extra batched query per `loadRelationships` call, so the other account never sees them | `SocialServiceImpl.loadRelationships`, `UserMuteRepository.findViewerPreferences` |
-| Mutes and show-fewer requests are stored and reported but not yet applied: no feed, story tray or recommendation reads them | `[NOT YET IMPLEMENTED]` |
+| Mutes and show-fewer requests are applied by the application in every feed, the Explore feed, the story tray and story discovery, per surface; see section F | `SocialServiceImpl.findFeedSuppressedAuthors`, `SocialServiceImpl.findStoryMutedAuthors` and the discovery query |
 | Every `PUT`, and every `DELETE` that removes a row, enqueues `user.interaction-limit.changed.v1` in the same transaction, carrying both toggles and `expiresAt`, which is absent once the limit is off; the routing key is bound to `recommendation.user-event.import.queue`, where the import consumer records an `interaction_limit_change` row holding the two toggles and whether a limit is active, and never the end time | `InteractionLimitServiceImpl.enqueueChange`, `DomainSignalMappings` |
 
 **Block directionality**:
@@ -149,6 +149,20 @@ An actor acting on themselves is allowed with reason `SELF` after a block check 
 Every time comparison in one evaluation uses the same instant.
 The policy only reads; the comment and message modules act on its decision.
 
+### F. Feed and Story Suppression
+
+The stored mutes and show-fewer requests take effect through two reads on `SocialService`.
+`findFeedSuppressedAuthors(viewerId, candidateAuthorIds, surface)` returns the candidates a feed must drop.
+It always includes the authors whose posts the viewer muted.
+It adds the show-fewer authors for `FeedSurface.FOR_YOU` and `FeedSurface.FOR_YOU_FALLBACK` only.
+A show-fewer request therefore never removes an author from the Following tab, where the viewer chose the accounts.
+`findStoryMutedAuthors(viewerId)` returns the accounts whose stories the viewer muted.
+Both reads are one query over the viewer's own preference rows in `UserMuteRepository`, intersected with the candidates in memory, so the cost does not grow with the feed.
+A mute of stories alone never removes an author's posts, and a mute of posts alone never removes an author's stories.
+Profile pages, post search, hashtag pages, the saved list, comments and direct messages do not read these preferences and are unaffected.
+The filters only add exclusions.
+A block stays decided by the existing block checks, and a mute or show-fewer row written concurrently with a block can survive it, which is an accepted race.
+
 ---
 
 ## Section 4: Inter-Module Dependencies
@@ -163,4 +177,6 @@ The policy only reads; the comment and message modules act on its decision.
 | `message` | inbound | Messaging permissions depend on whether a block relationship exists |
 | `recommendation` | outbound | `user.muted.v1`, `user.unmuted.v1`, `user.show-fewer.v1`, `user.show-fewer-undone.v1` and `user.interaction-limit.changed.v1` are imported into the analytics tier as `user_events` rows by `UserEventImportConsumer`; see the recommendation module's interaction control signals section |
 | `post` | outbound | `PostVisibilityServiceImpl` and `PostLikeServiceImpl` call `SocialService.loadRelationships`, which carries the viewer's mute and show-fewer flags on every embedded relationship, and `PostFeedbackServiceImpl` owns the sibling not-interested mark |
-| `story` | outbound | No story class calls `loadRelationships`; the story module reads only block, follow and accepted-following state from `SocialService` |
+| `post` | inbound | `PostServiceImpl.getFeed` and `RecommendationFeedServiceImpl` call `SocialService.findFeedSuppressedAuthors` with a `FeedSurface`, which is why `social` imports that post enum |
+| `story` | inbound | `StoryServiceImpl.getStoryFeed` calls `SocialService.findStoryMutedAuthors`, and story discovery applies the mute inside `StoryRepository.findDiscoverableAuthors` |
+| `story` | outbound | No story class calls `loadRelationships`, so story responses embed no mute or show-fewer flags |

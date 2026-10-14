@@ -155,6 +155,35 @@ class ShowFewerControllerIT {
     }
 
     @Test
+    void followingFeed_showFewerAuthorStaysBecauseTheViewerChoseToFollowThem() {
+        Account viewer = account("sf_feed_v");
+        Account author = account("sf_feed_a");
+        jdbc.update(
+                "INSERT INTO follows(follower_id, following_id, status)"
+                        + " VALUES (?, ?, 'accepted')",
+                viewer.id(),
+                author.id());
+        UUID postId =
+                jdbc.queryForObject(
+                        "INSERT INTO posts(user_id, post_type, status)"
+                                + " VALUES (?, 'image', 'published') RETURNING id",
+                        UUID.class,
+                        author.id());
+
+        send(HttpMethod.POST, path(author.id()), viewer.token());
+        ResponseEntity<String> feed = send(HttpMethod.GET, "/api/v1/posts/feed", viewer.token());
+
+        assertThat(feed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        Map<?, ?> data = (Map<?, ?>) JSON.readValue(feed.getBody(), Map.class).get("data");
+        List<String> ids =
+                ((List<?>) data.get("content"))
+                        .stream()
+                                .map(post -> String.valueOf(((Map<?, ?>) post).get("id")))
+                                .toList();
+        assertThat(ids).containsExactly(postId.toString());
+    }
+
+    @Test
     void showFewer_softDeletedAuthor_answersTheIdenticalNotFoundBodyAsAMissingOne() {
         Account viewer = account("sf_gone_v");
         Account gone = account("sf_gone_a");

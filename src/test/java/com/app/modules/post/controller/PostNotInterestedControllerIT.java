@@ -230,6 +230,37 @@ class PostNotInterestedControllerIT {
         assertThat(rowCount(viewer.id(), postId)).isZero();
     }
 
+    @Test
+    void followingFeed_markedPostLeavesAndReturnsOnUndo_whileTheAuthorsOtherPostsStay() {
+        Account viewer = account("pni_feed_v");
+        Account author = account("pni_feed_a");
+        jdbc.update(
+                "INSERT INTO follows(follower_id, following_id, status)"
+                        + " VALUES (?, ?, 'accepted')",
+                viewer.id(),
+                author.id());
+        UUID marked = insertPublishedPost(author.id());
+        UUID other = insertPublishedPost(author.id());
+
+        send(HttpMethod.POST, path(marked), viewer.token());
+        List<String> whileMarked = feedPostIds(viewer.token());
+        send(HttpMethod.DELETE, path(marked), viewer.token());
+        List<String> afterUndo = feedPostIds(viewer.token());
+
+        assertThat(whileMarked).containsExactly(other.toString());
+        assertThat(afterUndo).containsExactlyInAnyOrder(marked.toString(), other.toString());
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> feedPostIds(String token) {
+        ResponseEntity<String> response = send(HttpMethod.GET, "/api/v1/posts/feed", token);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        Map<String, Object> data =
+                (Map<String, Object>) JSON.readValue(response.getBody(), Map.class).get("data");
+        return ((List<Map<String, Object>>) data.get("content"))
+                .stream().map(post -> post.get("id").toString()).toList();
+    }
+
     private static String path(UUID postId) {
         return "/api/v1/posts/" + postId + "/not-interested";
     }

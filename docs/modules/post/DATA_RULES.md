@@ -128,6 +128,21 @@ A change that made carousels type-homogeneous would break a client feature built
 | Every caption update appends one `post_edit_history` row recording the pre-edit caption and the editor | `PostServiceImpl` |
 | Edit history is readable by the post owner only | `PostServiceImpl` |
 
+#### Interaction preferences in the feeds
+
+`PostService.getFeed(viewerId, cursor, size, surface)` serves the chronological feed for a `FeedSurface`.
+The three-argument overload is the same method with `FeedSurface.FOLLOWING`.
+The Following tab passes `FOLLOWING`, and the ranked feed passes `FOR_YOU_FALLBACK` when it falls back, for the first page and for every continuation page.
+The cursor carries no surface, so the caller names it on each page.
+`PostServiceImpl.getFeed` subtracts the authors returned by `SocialService.findFeedSuppressedAuthors` from the followed author list before it queries posts.
+Muted authors are subtracted on every surface, and show-fewer authors are subtracted on `FOR_YOU_FALLBACK` only.
+`PostRepository.findFirstFeedPosts` and `findFeedPostsBefore` take the viewer and exclude posts with a `post_not_interested` row for that viewer, on every surface.
+The exclusion is an anti-join on the mark's primary key, so the `idx_posts_user_created_id` keyset index still drives the scan.
+A test reads the query plan to pin that.
+`PostFeedbackService.findNotInterested(viewerId, postIds)` returns the marked subset of a candidate set in one indexed query, for the ranked feed.
+Profile posts, post search, hashtag posts and the saved list do not read these preferences.
+A block exclusion is unchanged, and the preference filters never replace it.
+
 ### C. Scope Simplifications
 
 - `posts.view_count` is a denormalized counter updated by a **background job**, not a trigger. This diverges from the trigger pattern used for other counters and means `view_count` may lag behind real-time activity.
@@ -145,6 +160,7 @@ A change that made carousels type-homogeneous would break a client feature built
 | `hashtag` | outbound | Hashtags extracted from `caption` are written to `post_hashtags` + `hashtags`. Also read for the banned-name check on every write path and for the hashtag list on a post response |
 | `comment` | inbound | Comments reference `posts.id`; `comment_count` trigger fires on comment table |
 | `social` | inbound | Follow/block state governs post visibility; no direct FK dependency |
+| `social` | outbound | `SocialService.findFeedSuppressedAuthors` supplies the muted and show-fewer authors the feed drops, per `FeedSurface` |
 | `notification` | outbound | `post.liked.v1` and `post.unliked.v1` drive `like_post` notifications through `PostNotificationConsumer` on `post.notification.queue` (DLQ `post.notification.dlq`), enabled by `app.post.notification-consumer.enabled`; an unlike retracts the liker from the group. Caption mentions still produce nothing. |
 | `notification` | inbound | `PostPreviewService` gives the notification feed each post's availability to the viewer and its first media as a thumbnail, in one query per page |
 | `recommendation` | inbound | `post_categories` references `posts.id`; ClickHouse `user_events` rows carry post ids in `entity_id` with no foreign key |

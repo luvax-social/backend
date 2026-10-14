@@ -98,6 +98,7 @@ class PostKeysetRowLossIT {
 
     @Test
     void feed_tieGroupOnCreatedAt_pagesEveryRowExactlyOnce() {
+        UUID viewer = insertUser("feed_viewer");
         UUID author = insertUser("feed_author");
         List<UUID> authorIds = List.of(author);
         List<UUID> expected = new ArrayList<>();
@@ -105,18 +106,95 @@ class PostKeysetRowLossIT {
             expected.add(insertPost(author, SHARED_INSTANT));
         }
 
+        assertThat(pageFeed(authorIds, viewer)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void feed_notInterestedPostsInsideATieGroup_areSkippedWithoutLosingOrRepeatingTheRest() {
+        UUID viewer = insertUser("feed_ni_viewer");
+        UUID author = insertUser("feed_ni_author");
+        List<UUID> authorIds = List.of(author);
+        List<UUID> expected = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            UUID post = insertPost(author, SHARED_INSTANT);
+            if (i % 2 == 0) {
+                markNotInterested(viewer, post);
+            } else {
+                expected.add(post);
+            }
+        }
+
+        assertThat(pageFeed(authorIds, viewer)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void feed_notInterestedMarkOfAnotherViewer_doesNotHideThePost() {
+        UUID viewer = insertUser("feed_other_viewer");
+        UUID other = insertUser("feed_other_marker");
+        UUID author = insertUser("feed_other_author");
+        UUID post = insertPost(author, SHARED_INSTANT);
+        markNotInterested(other, post);
+
+        assertThat(pageFeed(List.of(author), viewer)).containsExactly(post);
+    }
+
+    // The plan is read with sequential scans disabled so a small test table cannot hide the access
+    // path the production table would take. The statement is the one findFirstFeedPosts runs; if
+    // that query changes, this one has to change with it.
+    @Test
+    void feed_keysetQuery_stillUsesTheKeysetIndexAndAntiJoinsTheMarks() {
+        UUID viewer = insertUser("feed_plan_viewer");
+        UUID author = insertUser("feed_plan_author");
+        for (int i = 0; i < 20; i++) {
+            insertPost(author, SHARED_INSTANT.minusMinutes(i));
+        }
+        jdbcClient.sql("SET LOCAL enable_seqscan = off").update();
+
+        String plan =
+                String.join(
+                        "\n",
+                        jdbcClient
+                                .sql(
+                                        "EXPLAIN SELECT p.* FROM posts p WHERE p.user_id IN"
+                                                + " (:author) AND p.status = 'published' AND"
+                                                + " p.deleted_at IS NULL AND NOT EXISTS (SELECT 1"
+                                                + " FROM post_not_interested n WHERE n.user_id ="
+                                                + " :viewer AND n.post_id = p.id) ORDER BY"
+                                                + " p.created_at DESC, p.id DESC LIMIT 21")
+                                .param("author", author)
+                                .param("viewer", viewer)
+                                .query(String.class)
+                                .list());
+
+        assertThat(plan)
+                .as("the keyset index must drive the scan")
+                .contains("idx_posts_user_created_id");
+        assertThat(plan).as("the marks are excluded by an anti-join").contains("Anti Join");
+        assertThat(plan)
+                .as("the marks are probed through their primary key")
+                .contains("post_not_interested_pkey");
+    }
+
+    private List<UUID> pageFeed(List<UUID> authorIds, UUID viewer) {
         List<UUID> seen = new ArrayList<>();
-        List<Post> page = postRepository.findFirstFeedPosts(authorIds, page());
+        List<Post> page = postRepository.findFirstFeedPosts(authorIds, viewer, page());
         int guard = 0;
         while (!page.isEmpty() && guard++ < 100) {
             page.forEach(p -> seen.add(p.getId()));
             Post last = page.get(page.size() - 1);
             page =
                     postRepository.findFeedPostsBefore(
-                            authorIds, last.getCreatedAt(), last.getId(), page());
+                            authorIds, viewer, last.getCreatedAt(), last.getId(), page());
         }
+        return seen;
+    }
 
-        assertThat(seen).containsExactlyInAnyOrderElementsOf(expected);
+    private void markNotInterested(UUID viewer, UUID post) {
+        jdbcClient
+                .sql("INSERT INTO post_not_interested(user_id, post_id) VALUES (:viewer, :post)")
+                .param("viewer", viewer)
+                .param("post", post)
+                .update();
     }
 
     @Test

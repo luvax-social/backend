@@ -26,9 +26,10 @@ public interface FeedPreferenceApi {
     @Operation(
             summary = "Show fewer posts from an account",
             description =
-                    "Records that the caller wants to see less of this author in recommendations."
-                            + " It hides nothing and the author is not told. Repeating the call"
-                            + " changes nothing.")
+                    "Keeps this author's posts out of the caller's For You and Explore feeds. The"
+                            + " Following feed, profile pages, search and every other surface are"
+                            + " unchanged, and the author is not told. Repeating the call changes"
+                            + " nothing.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "204",

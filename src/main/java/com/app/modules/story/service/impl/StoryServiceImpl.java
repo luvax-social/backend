@@ -167,7 +167,11 @@ public class StoryServiceImpl implements StoryService {
     public List<StoryFeedItemResponse> getStoryFeed(UUID viewerId) {
         List<UUID> authorIds =
                 new ArrayList<>(socialService.getAcceptedFollowingExcludingBlocks(viewerId));
-        // The viewer's own tray entry is served from the same query and pinned first below.
+        // Muted authors leave the tray before the query. The block exclusion above is not replaced
+        // by this: it only subtracts what the viewer chose to mute.
+        authorIds.removeAll(socialService.findStoryMutedAuthors(viewerId));
+        // The viewer's own tray entry is served from the same query and pinned first below, and is
+        // added after the subtraction so it can never be muted away.
         authorIds.add(viewerId);
         List<Story> stories =
                 storyRepository.findActiveByAuthors(authorIds, OffsetDateTime.now(ZoneOffset.UTC));

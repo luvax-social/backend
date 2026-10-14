@@ -145,6 +145,63 @@ class StoryDiscoveryIT {
     }
 
     @Test
+    void findDiscoverableAuthors_storiesMutedByTheViewer_isExcludedForFollowedAndSuggestedAlike() {
+        UUID viewer = insertUser("discmuteviewer", false);
+        UUID followedMuted = insertUser("discmutefollowed", false);
+        UUID suggestedMuted = insertUser("discmutesuggested", false);
+        UUID unmuted = insertUser("discmuteunmuted", false);
+        follow(viewer, followedMuted);
+        suggest(viewer, suggestedMuted);
+        suggest(viewer, unmuted);
+        insertStory(followedMuted, false, false, false);
+        insertStory(suggestedMuted, false, false, false);
+        insertStory(unmuted, false, false, false);
+        mute(viewer, followedMuted, false, true);
+        mute(viewer, suggestedMuted, true, true);
+
+        assertThat(discover(viewer)).containsExactly(unmuted);
+    }
+
+    @Test
+    void findDiscoverableAuthors_onlyPostsMuted_isStillDiscoverable() {
+        UUID viewer = insertUser("discpostmuteviewer", false);
+        UUID author = insertUser("discpostmuteauthor", false);
+        suggest(viewer, author);
+        insertStory(author, false, false, false);
+        mute(viewer, author, true, false);
+
+        assertThat(discover(viewer)).containsExactly(author);
+    }
+
+    @Test
+    void findDiscoverableAuthors_storiesMutedByAnotherAccount_isStillDiscoverable() {
+        UUID viewer = insertUser("discothermuteviewer", false);
+        UUID other = insertUser("discothermuteother", false);
+        UUID author = insertUser("discothermuteauthor", false);
+        suggest(viewer, author);
+        insertStory(author, false, false, false);
+        mute(other, author, false, true);
+
+        assertThat(discover(viewer)).containsExactly(author);
+    }
+
+    @Test
+    void findDiscoverableAuthors_aMuteNeverReadmitsABlockedAuthor() {
+        UUID viewer = insertUser("discmuteblockviewer", false);
+        UUID blocked = insertUser("discmuteblockblocked", false);
+        UUID mutedAndBlocked = insertUser("discmuteblockboth", false);
+        suggest(viewer, blocked);
+        suggest(viewer, mutedAndBlocked);
+        insertStory(blocked, false, false, false);
+        insertStory(mutedAndBlocked, false, false, false);
+        block(viewer, blocked);
+        block(viewer, mutedAndBlocked);
+        mute(viewer, mutedAndBlocked, false, true);
+
+        assertThat(discover(viewer)).isEmpty();
+    }
+
+    @Test
     void findDiscoverableAuthors_dismissedSuggestion_isExcluded() {
         UUID viewer = insertUser("discdismissviewer", false);
         UUID author = insertUser("discdismissauthor", false);
@@ -268,6 +325,18 @@ class StoryDiscoveryIT {
                 .param("viewer", viewer)
                 .param("suggested", suggested)
                 .param("rank", rank)
+                .update();
+    }
+
+    private void mute(UUID viewer, UUID muted, boolean mutePosts, boolean muteStories) {
+        jdbcClient
+                .sql(
+                        "INSERT INTO user_mutes (user_id, muted_user_id, mute_posts, mute_stories)"
+                                + " VALUES (:viewer, :muted, :mutePosts, :muteStories)")
+                .param("viewer", viewer)
+                .param("muted", muted)
+                .param("mutePosts", mutePosts)
+                .param("muteStories", muteStories)
                 .update();
     }
 

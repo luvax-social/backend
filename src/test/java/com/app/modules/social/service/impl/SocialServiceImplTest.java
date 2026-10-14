@@ -15,6 +15,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +32,7 @@ import com.app.common.response.UserListItemResponse;
 import com.app.common.response.UserSummaryResponse;
 import com.app.common.response.ViewerRelationshipResponse;
 import com.app.modules.message.service.DirectConversationProvisioner;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.report.service.ReportedTargetService;
 import com.app.modules.social.dto.response.FollowRequestResponse;
 import com.app.modules.social.dto.response.FollowResponse;
@@ -788,6 +790,75 @@ class SocialServiceImplTest {
                 .status(status)
                 .createdAt(OffsetDateTime.now())
                 .build();
+    }
+
+    @Test
+    void findFeedSuppressedAuthors_followingSurface_readsOnlyMutedPostAuthorsAmongTheCandidates() {
+        UUID viewer = UUID.randomUUID();
+        UUID muted = UUID.randomUUID();
+        UUID kept = UUID.randomUUID();
+        UUID mutedButNotACandidate = UUID.randomUUID();
+        when(userMuteRepository.findFeedSuppressedAuthorIds(viewer, false))
+                .thenReturn(List.of(muted, mutedButNotACandidate));
+
+        Set<UUID> suppressed =
+                service.findFeedSuppressedAuthors(
+                        viewer, List.of(muted, kept, muted), FeedSurface.FOLLOWING);
+
+        assertThat(suppressed).containsExactly(muted);
+        verify(userMuteRepository, times(1)).findFeedSuppressedAuthorIds(viewer, false);
+        verify(userMuteRepository, never()).findFeedSuppressedAuthorIds(viewer, true);
+    }
+
+    @Test
+    void findFeedSuppressedAuthors_forYouAndFallbackSurfaces_alsoReadShowFewerAuthors() {
+        UUID viewer = UUID.randomUUID();
+        UUID muted = UUID.randomUUID();
+        UUID showFewer = UUID.randomUUID();
+        UUID kept = UUID.randomUUID();
+        when(userMuteRepository.findFeedSuppressedAuthorIds(viewer, true))
+                .thenReturn(List.of(muted, showFewer));
+
+        for (FeedSurface surface : List.of(FeedSurface.FOR_YOU, FeedSurface.FOR_YOU_FALLBACK)) {
+            assertThat(
+                            service.findFeedSuppressedAuthors(
+                                    viewer, List.of(muted, showFewer, kept), surface))
+                    .as("surface %s", surface)
+                    .containsExactlyInAnyOrder(muted, showFewer);
+        }
+        verify(userMuteRepository, never()).findFeedSuppressedAuthorIds(viewer, false);
+    }
+
+    @Test
+    void findFeedSuppressedAuthors_noCandidates_readsNothing() {
+        UUID viewer = UUID.randomUUID();
+
+        assertThat(service.findFeedSuppressedAuthors(viewer, List.of(), FeedSurface.FOR_YOU))
+                .isEmpty();
+        assertThat(service.findFeedSuppressedAuthors(viewer, null, FeedSurface.FOR_YOU)).isEmpty();
+
+        verifyNoInteractions(userMuteRepository);
+    }
+
+    @Test
+    void findFeedSuppressedAuthors_viewerHoldsNoPreference_returnsNothing() {
+        UUID viewer = UUID.randomUUID();
+        when(userMuteRepository.findFeedSuppressedAuthorIds(viewer, true)).thenReturn(List.of());
+
+        assertThat(
+                        service.findFeedSuppressedAuthors(
+                                viewer, List.of(UUID.randomUUID()), FeedSurface.FOR_YOU))
+                .isEmpty();
+    }
+
+    @Test
+    void findStoryMutedAuthors_returnsTheAccountsWhoseStoriesAreMuted() {
+        UUID viewer = UUID.randomUUID();
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        when(userMuteRepository.findStoryMutedAuthorIds(viewer)).thenReturn(List.of(first, second));
+
+        assertThat(service.findStoryMutedAuthors(viewer)).containsExactlyInAnyOrder(first, second);
     }
 
     private static ViewerPreferenceProjection preference(

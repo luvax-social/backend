@@ -51,6 +51,7 @@ import com.app.modules.post.dto.request.UpdatePostCaptionRequest;
 import com.app.modules.post.dto.response.FeedPostResponse;
 import com.app.modules.post.entity.Post;
 import com.app.modules.post.entity.PostEditHistory;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.enums.PostType;
 import com.app.modules.post.mapper.PostMapper;
@@ -646,13 +647,86 @@ class PostServiceImplTest {
         Post post = ownedPost(PostStatus.PUBLISHED);
         FeedPostResponse feedResponse = feedResponse();
         when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
-        when(postRepository.findFirstFeedPosts(any(), any())).thenReturn(List.of(post));
+        when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(List.of(post));
         when(postResponseAssembler.assembleFeed(eq(viewer), any()))
                 .thenReturn(List.of(feedResponse));
 
         CursorPageResponse<FeedPostResponse> page = service.getFeed(viewer, null, 20);
 
         assertThat(page.getContent()).hasSize(1).containsExactly(feedResponse);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void getFeed_followingSurface_dropsMutedPostAuthorsAndKeepsShowFewerOnes() {
+        UUID viewer = UUID.randomUUID();
+        UUID mutedAuthor = UUID.randomUUID();
+        UUID showFewerAuthor = UUID.randomUUID();
+        when(socialService.getAcceptedFollowingExcludingBlocks(viewer))
+                .thenReturn(List.of(mutedAuthor, showFewerAuthor));
+        // The social service answers per surface: on the following feed only the mute applies.
+        when(socialService.findFeedSuppressedAuthors(eq(viewer), any(), eq(FeedSurface.FOLLOWING)))
+                .thenReturn(java.util.Set.of(mutedAuthor));
+        when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(List.of());
+
+        service.getFeed(viewer, null, 20, FeedSurface.FOLLOWING);
+
+        ArgumentCaptor<List<UUID>> authors = ArgumentCaptor.forClass(List.class);
+        verify(postRepository).findFirstFeedPosts(authors.capture(), eq(viewer), any());
+        assertThat(authors.getValue()).containsExactly(showFewerAuthor);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void getFeed_forYouFallbackSurface_asksForTheShowFewerAuthorsToo() {
+        UUID viewer = UUID.randomUUID();
+        UUID mutedAuthor = UUID.randomUUID();
+        UUID showFewerAuthor = UUID.randomUUID();
+        UUID keptAuthor = UUID.randomUUID();
+        when(socialService.getAcceptedFollowingExcludingBlocks(viewer))
+                .thenReturn(List.of(mutedAuthor, showFewerAuthor, keptAuthor));
+        when(socialService.findFeedSuppressedAuthors(
+                        eq(viewer), any(), eq(FeedSurface.FOR_YOU_FALLBACK)))
+                .thenReturn(java.util.Set.of(mutedAuthor, showFewerAuthor));
+        when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(List.of());
+
+        service.getFeed(viewer, null, 20, FeedSurface.FOR_YOU_FALLBACK);
+
+        ArgumentCaptor<List<UUID>> authors = ArgumentCaptor.forClass(List.class);
+        verify(postRepository).findFirstFeedPosts(authors.capture(), eq(viewer), any());
+        assertThat(authors.getValue()).containsExactly(keptAuthor);
+        verify(socialService, never())
+                .findFeedSuppressedAuthors(any(), any(), eq(FeedSurface.FOLLOWING));
+    }
+
+    @Test
+    void getFeed_threeArgumentOverload_usesTheFollowingSurface() {
+        UUID viewer = UUID.randomUUID();
+        UUID author = UUID.randomUUID();
+        when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
+        when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(List.of());
+
+        service.getFeed(viewer, null, 20);
+
+        verify(socialService)
+                .findFeedSuppressedAuthors(viewer, List.of(author), FeedSurface.FOLLOWING);
+    }
+
+    @Test
+    void getFeed_everyFollowedAuthorSuppressed_returnsEmptyPageWithoutQueryingPosts() {
+        UUID viewer = UUID.randomUUID();
+        UUID author = UUID.randomUUID();
+        when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
+        when(socialService.findFeedSuppressedAuthors(
+                        eq(viewer), any(), eq(FeedSurface.FOR_YOU_FALLBACK)))
+                .thenReturn(java.util.Set.of(author));
+
+        CursorPageResponse<FeedPostResponse> page =
+                service.getFeed(viewer, null, 20, FeedSurface.FOR_YOU_FALLBACK);
+
+        assertThat(page.getContent()).isEmpty();
+        assertThat(page.getPageInfo().isHasNextPage()).isFalse();
+        verifyNoInteractions(postRepository);
     }
 
     @Test
@@ -666,7 +740,7 @@ class PostServiceImplTest {
                         CursorScope.POST_FEED);
         FeedPostResponse feedResponse = feedResponse();
         when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
-        when(postRepository.findFeedPostsBefore(any(), any(), any(), any()))
+        when(postRepository.findFeedPostsBefore(any(), any(), any(), any(), any()))
                 .thenReturn(List.of(post));
         when(postResponseAssembler.assembleFeed(eq(viewer), any()))
                 .thenReturn(List.of(feedResponse));
@@ -674,7 +748,7 @@ class PostServiceImplTest {
         CursorPageResponse<FeedPostResponse> page = service.getFeed(viewer, cursor, 20);
 
         assertThat(page.getContent()).containsExactly(feedResponse);
-        verify(postRepository).findFeedPostsBefore(any(), any(), any(), any());
+        verify(postRepository).findFeedPostsBefore(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -696,11 +770,11 @@ class PostServiceImplTest {
         ArgumentCaptor<org.springframework.data.domain.Pageable> pageCaptor =
                 ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
         when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
-        when(postRepository.findFirstFeedPosts(any(), any())).thenReturn(List.of());
+        when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(List.of());
 
         service.getFeed(viewer, null, 9999);
 
-        verify(postRepository).findFirstFeedPosts(any(), pageCaptor.capture());
+        verify(postRepository).findFirstFeedPosts(any(), any(), pageCaptor.capture());
         // normalizeLimit caps at 100, then fetches pageSize+1 to detect next page
         assertThat(pageCaptor.getValue().getPageSize()).isEqualTo(101);
     }
@@ -712,11 +786,11 @@ class PostServiceImplTest {
         ArgumentCaptor<org.springframework.data.domain.Pageable> pageCaptor =
                 ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
         when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
-        when(postRepository.findFirstFeedPosts(any(), any())).thenReturn(List.of());
+        when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(List.of());
 
         service.getFeed(viewer, null, 0);
 
-        verify(postRepository).findFirstFeedPosts(any(), pageCaptor.capture());
+        verify(postRepository).findFirstFeedPosts(any(), any(), pageCaptor.capture());
         // normalizeLimit defaults to 20, then fetches pageSize+1 to detect next page
         assertThat(pageCaptor.getValue().getPageSize()).isEqualTo(21);
     }
@@ -729,7 +803,7 @@ class PostServiceImplTest {
         List<Post> posts = buildPosts(author, 21);
         FeedPostResponse feedResponse = feedResponse();
         when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
-        when(postRepository.findFirstFeedPosts(any(), any())).thenReturn(posts);
+        when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(posts);
         when(postResponseAssembler.assembleFeed(eq(viewer), any()))
                 .thenReturn(Collections.nCopies(20, feedResponse));
 
@@ -746,7 +820,7 @@ class PostServiceImplTest {
         List<Post> posts = buildPosts(author, 5);
         FeedPostResponse feedResponse = feedResponse();
         when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
-        when(postRepository.findFirstFeedPosts(any(), any())).thenReturn(posts);
+        when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(posts);
         when(postResponseAssembler.assembleFeed(eq(viewer), eq(posts)))
                 .thenReturn(Collections.nCopies(5, feedResponse));
 
