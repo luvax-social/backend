@@ -282,6 +282,106 @@ class ClickHouseMigrationRunnerIT {
     }
 
     @Test
+    void migrate_interactionControlEnumScript_extendsAPopulatedTableWithoutTouchingItsRows()
+            throws Exception {
+        dropUserEvents();
+        for (String name :
+                List.of(
+                        "V1__create_user_events.sql",
+                        "V2__create_admin_actions.sql",
+                        "V3__create_platform_stats.sql")) {
+            copyShipped(name);
+        }
+        runner().migrate();
+        try (Connection admin = ClickHouseTestSupport.adminConnection(clickhouse);
+                Statement statement = admin.createStatement()) {
+            statement.execute(
+                    "INSERT INTO luvax_analytics.user_events (user_id, event_type, created_at)"
+                            + " VALUES (generateUUIDv4(), 'post_view', now64(6)),"
+                            + " (generateUUIDv4(), 'app_open', now64(6))");
+        }
+        copyShipped("V4__add_interaction_control_event_types.sql");
+
+        List<ClickHouseMigrationScript> applied = runner().migrate();
+
+        assertThat(applied).extracting(ClickHouseMigrationScript::version).containsExactly(4);
+        assertThat(
+                        count(
+                                "SELECT count() FROM luvax_analytics.user_events WHERE event_type"
+                                        + " IN ('post_view', 'app_open')"))
+                .isEqualTo(2);
+        assertThat(
+                        count(
+                                "SELECT count() FROM system.columns WHERE database ="
+                                        + " 'luvax_analytics' AND table = 'user_events' AND name ="
+                                        + " 'event_type' AND type LIKE"
+                                        + " '%''interaction_limit_change'' = 33%'"))
+                .isEqualTo(1);
+        assertThat(
+                        count(
+                                "SELECT count() FROM luvax_analytics.user_events WHERE"
+                                        + " toUInt8(event_type) = 1 OR toUInt8(event_type) = 20"))
+                .isEqualTo(2);
+    }
+
+    @Test
+    void migrate_interactionControlEnumScript_isSafeToRunAgainAfterAnInterruptedRun()
+            throws Exception {
+        ClickHouseMigrationRunner shipped =
+                new ClickHouseMigrationRunner(
+                        migrator,
+                        primary,
+                        ClickHouseMigrationRunner.DEFAULT_LOCATION,
+                        Duration.ofSeconds(30));
+        shipped.migrate();
+        String checksum = historyChecksum(4);
+
+        // The history row is written after the last statement, so a crash in between leaves the
+        // statements applied and no row; deleting the row reproduces exactly that state.
+        try (Connection admin = ClickHouseTestSupport.adminConnection(clickhouse);
+                Statement statement = admin.createStatement()) {
+            statement.execute(
+                    "ALTER TABLE luvax_analytics.schema_migrations DELETE WHERE version = 4"
+                            + " SETTINGS mutations_sync = 2");
+        }
+        assertThat(count("SELECT count() FROM luvax_analytics.schema_migrations WHERE version = 4"))
+                .isZero();
+
+        List<ClickHouseMigrationScript> reapplied = shipped.migrate();
+
+        assertThat(reapplied).extracting(ClickHouseMigrationScript::version).containsExactly(4);
+        assertThat(historyChecksum(4)).isEqualTo(checksum);
+        assertThat(shipped.migrate()).isEmpty();
+    }
+
+    private void dropUserEvents() throws SQLException {
+        try (Connection admin = ClickHouseTestSupport.adminConnection(clickhouse);
+                Statement statement = admin.createStatement()) {
+            statement.execute("DROP TABLE IF EXISTS luvax_analytics.user_events");
+        }
+    }
+
+    private void copyShipped(String name) throws IOException {
+        try (var in = getClass().getResourceAsStream("/clickhouse/migration/" + name)) {
+            assertThat(in).as("shipped script %s", name).isNotNull();
+            Files.write(scripts.resolve(name), in.readAllBytes());
+        }
+    }
+
+    private String historyChecksum(int version) throws SQLException {
+        try (Connection admin = ClickHouseTestSupport.adminConnection(clickhouse);
+                Statement statement = admin.createStatement();
+                ResultSet rows =
+                        statement.executeQuery(
+                                "SELECT checksum FROM luvax_analytics.schema_migrations WHERE"
+                                        + " version = "
+                                        + version)) {
+            rows.next();
+            return rows.getString(1);
+        }
+    }
+
+    @Test
     void migrate_writerUser_cannotCreateTablesSoOnlyTheMigratorMayRunDdl() throws Exception {
         try (Connection writer =
                         ClickHouseTestSupport.connectAs(

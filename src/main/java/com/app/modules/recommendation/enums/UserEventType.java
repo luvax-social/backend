@@ -6,13 +6,20 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /**
- * Behavioural event types persisted in the PostgreSQL {@code event_type} enum.
+ * Behavioural event types stored in the ClickHouse {@code Enum8} {@code user_events.event_type}.
  *
- * <p>Every value the database declares is listed, because the activity log filters on this column
- * and a filter that cannot name a stored value would be a hole in the read surface. Only {@link
- * #SESSION_START}, {@link #SEARCH} and {@link #PROFILE_VIEW} have a writer; the rest exist in the
- * schema and are never produced. See {@code UserEventRecorder} for why the write set is
- * deliberately this small.
+ * <p>Every value the column declares is listed, because the activity log filters on this column and
+ * a filter that cannot name a stored value would be a hole in the read surface. Adding a value
+ * means adding it here and, in the same commit, extending the column with a new ClickHouse
+ * migration script; the declaration order is the column's ordinal order.
+ *
+ * <p>Sixteen values have a producer today. {@link #SESSION_START}, {@link #SEARCH} and {@link
+ * #PROFILE_VIEW} are written by {@code UserEventRecorder}; the six engagement values ({@link
+ * #POST_LIKE}, {@link #POST_SAVE}, {@link #POST_VIEW}, {@link #POST_COMMENT}, {@link #POST_SHARE}
+ * and {@link #COMMENT_LIKE}) by the feedback consumer; and the seven interaction control values
+ * that map a domain event by the import consumer. The remaining values exist in the column and are
+ * not produced yet. See {@code UserEventRecorder} for why the recorder's write set is deliberately
+ * small.
  */
 public enum UserEventType {
     POST_VIEW,
@@ -34,7 +41,20 @@ public enum UserEventType {
     MESSAGE_SEND,
     SESSION_START,
     SESSION_END,
-    APP_OPEN;
+    APP_OPEN,
+    POST_NOT_INTERESTED,
+    POST_NOT_INTERESTED_UNDO,
+    ACCOUNT_SHOW_FEWER,
+    ACCOUNT_SHOW_FEWER_UNDO,
+    ACCOUNT_MUTE,
+    ACCOUNT_UNMUTE,
+    MESSAGE_REACTION,
+    MESSAGE_REACTION_REMOVE,
+    MESSAGE_REQUEST_ACCEPT,
+    MESSAGE_REQUEST_DELETE,
+    COMMENT_HIDDEN,
+    COMMENT_UNHIDE,
+    INTERACTION_LIMIT_CHANGE;
 
     @JsonCreator
     public static UserEventType fromJson(String value) {

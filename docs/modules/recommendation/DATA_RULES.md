@@ -8,7 +8,7 @@ The activity-log read surface lives in the `admin` module; this module owns the 
 The writers exist because their durability contracts differ and cannot be met by one component.
 `UserEventRecorder` must never fail or slow the request that triggered it, so it drops rows under pressure.
 `RecommendationFeedbackConsumer` writes the canonical engagement record that Gorse is rebuilt from, so it must not drop anything and must be idempotent across redelivery.
-`UserEventImportConsumer` writes `recommendation.user-event.imported.v1` events, the durable path for a server-side behavioural event that must not reach Gorse; it has no production producer today, and the development seed is its user.
+`UserEventImportConsumer` writes `recommendation.user-event.imported.v1` events, which the development seed produces, and the interaction control signals of Section 3F, each mapped from its own domain event; both are the durable path for a server-side behavioural event that must not reach Gorse.
 
 `ImpressionService` is a producer for the second of those, not a fourth writer.
 It writes no `user_events` row itself; it enqueues one outbox row per impression and the consumer writes the row, so impressions inherit the durable path's guarantees rather than needing their own.
@@ -144,7 +144,7 @@ These tables cannot be rebuilt if lost - `user_events` is the raw behavioral rec
 | `user_interests` allows at most one row per (user, category) pair | Compound `PRIMARY KEY (user_id, category_id)` |
 | `post_categories` allows at most one row per (post, category) pair | Compound `PRIMARY KEY (post_id, category_id)` |
 | `post_categories.confidence` must be in [0, 1] | `DECIMAL(4,3)` precision; application must enforce range |
-| `user_events.event_type` must be one of the 20 values of the ClickHouse `Enum8` | `event_type Enum8(...)` in `luvax_analytics.user_events`: an unknown value is rejected with code 691, and adding a `UserEventType` value needs a `V{n}` ClickHouse migration in the same commit |
+| `user_events.event_type` must be one of the 33 values of the ClickHouse `Enum8` (V1 declared 20, V4 added 13) | `event_type Enum8(...)` in `luvax_analytics.user_events`: an unknown value is rejected with code 691, and adding a `UserEventType` value needs a `V{n}` ClickHouse migration in the same commit |
 | Deleting a user cascades to `user_interests`; `user_events` rows are not deleted with the user, because ClickHouse has no foreign keys, and they age out with the 12-month retention | `ON DELETE CASCADE` on the PostgreSQL references only |
 | Deleting a post cascades to `post_categories` | `ON DELETE CASCADE` on FK references |
 | `user_events` rows older than 12 months are removed, in whole monthly parts, so a month is gone between 12 and 13 months after it began | `TTL toDateTime(created_at) + INTERVAL 12 MONTH` with `ttl_only_drop_parts = 1` |
@@ -328,6 +328,57 @@ Recorder and import rows carry no `feedback_type` and are never sent, as they ne
 The application's PostgreSQL role must be allowed to `TRUNCATE` the seven tables of the `gorse` database, which it does not own by default.
 Without that grant the `PREFLIGHT` phase ends the run `FAILED` with `Gorse's store cannot be purged: role <role> lacks the TRUNCATE privilege on gorse.public.<table>` and changes nothing; grant the privilege and restart with the same token.
 The operational grant, verification and rollback statements are in the observability handoff, not here.
+
+---
+
+## Section 3F: Interaction control signals
+
+The interaction controls (show fewer, mute, the interaction limit, hidden comments and their release) are behavioural signals that the insights work must be able to measure.
+Each one is a domain event that the owning module enqueues through the outbox in the same transaction as the change, and `UserEventImportConsumer` stores it in `user_events`.
+None of them is sent to Gorse, so a row has no `feedback_type` and a Gorse rebuild never replays it.
+
+### Mapping
+
+`DomainSignalMappings.BY_EVENT_TYPE` is the single table.
+It is keyed by event type, which is also the routing key, and each entry says which `UserEventType` the event becomes, the `entity_type`, how `entity_id` is read from the event, and how `metadata` is built.
+For every entry the row's account is the envelope's actor, `created_at` is the envelope's `occurredAt` and never the delivery time, and the row id is the envelope's event id.
+A redelivery therefore writes an identical row that the engine folds away, on top of the inbox guard that normally skips it first.
+
+| Event | `event_type` | `entity_type` and `entity_id` | `metadata` |
+|-------|--------------|-------------------------------|------------|
+| `user.show-fewer.v1` | `account_show_fewer` | `user`, the author | none |
+| `user.show-fewer-undone.v1` | `account_show_fewer_undo` | `user`, the author | none |
+| `user.muted.v1` | `account_mute` | `user`, the muted account | `{"posts":bool,"stories":bool}` |
+| `user.unmuted.v1` | `account_unmute` | `user`, the formerly muted account | none |
+| `user.interaction-limit.changed.v1` | `interaction_limit_change` | `user`, the account itself | `{"nonFollowers":bool,"recentFollowers":bool,"active":bool}` |
+| `comment.hidden.v1` | `comment_hidden` | `comment`, the hidden comment | `{"reason":"hidden_words"\|"limited_interaction"\|"hidden_parent"}` |
+| `comment.unhidden.v1` | `comment_unhide` | `comment`, one row per released comment | none |
+
+`active` is true when either toggle is on.
+The account of a `comment_hidden` row is the commenter, and the account of a `comment_unhide` row is the post owner who released the comment.
+A payload that lacks the entity id, a boolean flag or a known reason, an envelope without an actor or an `occurredAt`, and an event type with no entry are all permanent failures that dead-letter at once.
+The reason is checked against the closed set of hidden reasons before it is written into the JSON, so a malformed event cannot add structure to a row.
+
+### Adding a signal
+
+A later event (the message reaction and message request events are the planned ones) is one entry in `DomainSignalMappings` and one binding in `RecommendationRabbitBindingConfig`.
+The enum value must already exist in `UserEventType` and in the ClickHouse `Enum8`; V4 added all thirteen values for this phase, ordinals 21 to 33, with ordinals 1 to 20 unchanged.
+`RabbitMqTopologyConfigTest` fails when a mapped key is not bound to the import queue or when any other queue would also receive it, and `DomainSignalMappingsTest` pins each entry.
+
+`post.not-interested.v1` and `post.not-interested-undone.v1` are not in this table: they feed Gorse as negative feedback and are written, with their `post_not_interested` and `post_not_interested_undo` values, by `RecommendationFeedbackConsumer`.
+
+### What is deliberately not recorded
+
+- The text of a personal hidden word, and which entry matched a hidden comment: only the reason `hidden_words` is stored.
+- The text of a comment.
+- Why an account muted, asked to see fewer posts or limited interactions: no event carries a reason, and none is invented.
+- The end time of an interaction limit: the row records the toggles and whether a limit is active, not when it was meant to lapse.
+- Anything about the other party that the actor did not choose: a muted account is never told, and a hidden comment's author is never told.
+
+### Retention and visibility
+
+The rows follow the table's 12-month retention in whole monthly parts.
+They are visible to the administrative activity log like every other `user_events` row, filtered by `event_type`, and are not shown to the account they are about.
 
 ---
 

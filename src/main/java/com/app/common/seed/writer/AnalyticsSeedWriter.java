@@ -6,9 +6,11 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.context.annotation.Profile;
@@ -66,10 +68,10 @@ import lombok.extern.slf4j.Slf4j;
  * 12-month retention. {@code entity_id} references a real {@code posts}/{@code users}/{@code
  * hashtags}/{@code stories} row read back from the database for every event type that carries one,
  * so a downstream reader resolving {@code entity_id} never dereferences a dangling id. Before
- * anything is enqueued, every event type except {@code post_view} is asserted to appear at least
- * {@value #MIN_EVENTS_PER_TYPE} times: that is the coverage {@code SeedRunner} used to check
- * against the PostgreSQL table, which no longer exists. {@code post_view} is produced by the
- * recommendation consumer draining {@code post.viewed.v1}, asynchronously after the run.
+ * anything is enqueued, every event type except those in {@link #UNSEEDED_TYPES} is asserted to
+ * appear at least {@value #MIN_EVENTS_PER_TYPE} times: that is the coverage {@code SeedRunner} used
+ * to check against the PostgreSQL table, which no longer exists. {@code post_view} is produced by
+ * the recommendation consumer draining {@code post.viewed.v1}, asynchronously after the run.
  */
 @Slf4j
 @Service
@@ -91,6 +93,30 @@ public class AnalyticsSeedWriter {
 
     /** Fewest events of each produced type a seed run must contain. */
     static final int MIN_EVENTS_PER_TYPE = 5;
+
+    /**
+     * Event types this writer never draws. {@code post_view} is written by the recommendation
+     * consumer from {@code post.viewed.v1}. The other thirteen record an interaction control or a
+     * message request that changes real rows (a mute, a hidden comment, a reaction), so a seeded
+     * event with no row behind it would describe something that never happened; they are produced
+     * only by the domain events that make those changes.
+     */
+    public static final Set<UserEventType> UNSEEDED_TYPES =
+            EnumSet.of(
+                    UserEventType.POST_VIEW,
+                    UserEventType.POST_NOT_INTERESTED,
+                    UserEventType.POST_NOT_INTERESTED_UNDO,
+                    UserEventType.ACCOUNT_SHOW_FEWER,
+                    UserEventType.ACCOUNT_SHOW_FEWER_UNDO,
+                    UserEventType.ACCOUNT_MUTE,
+                    UserEventType.ACCOUNT_UNMUTE,
+                    UserEventType.MESSAGE_REACTION,
+                    UserEventType.MESSAGE_REACTION_REMOVE,
+                    UserEventType.MESSAGE_REQUEST_ACCEPT,
+                    UserEventType.MESSAGE_REQUEST_DELETE,
+                    UserEventType.COMMENT_HIDDEN,
+                    UserEventType.COMMENT_UNHIDE,
+                    UserEventType.INTERACTION_LIMIT_CHANGE);
 
     // Every key below is a com.app.modules.admin.enums.PlatformMetric wire key, verbatim - the
     // seed writer and the real StatsCollectionJob/AdminStatsService must agree on these or the
@@ -394,8 +420,7 @@ public class AnalyticsSeedWriter {
 
     /**
      * Fails the run when any event type the seed produces has fewer than {@value
-     * #MIN_EVENTS_PER_TYPE} events. {@code post_view} is exempt: the recommendation consumer writes
-     * those, asynchronously, from {@code post.viewed.v1}.
+     * #MIN_EVENTS_PER_TYPE} events. The types in {@link #UNSEEDED_TYPES} are exempt.
      */
     static void assertEveryProducedTypeCovered(List<SeedOutboxBatchWriter.UserEventImport> events) {
         Map<UserEventType, Integer> counts = new EnumMap<>(UserEventType.class);
@@ -404,7 +429,7 @@ public class AnalyticsSeedWriter {
         }
         List<String> uncovered = new ArrayList<>();
         for (UserEventType type : UserEventType.values()) {
-            if (type == UserEventType.POST_VIEW) {
+            if (UNSEEDED_TYPES.contains(type)) {
                 continue;
             }
             int count = counts.getOrDefault(type, 0);

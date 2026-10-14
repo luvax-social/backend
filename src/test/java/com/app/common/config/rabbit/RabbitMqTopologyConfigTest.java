@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Binding;
@@ -21,6 +22,7 @@ import com.app.modules.hashtag.messaging.HashtagRabbitBindingConfig;
 import com.app.modules.notification.messaging.NotificationRabbitBindingConfig;
 import com.app.modules.post.messaging.PostEventTypes;
 import com.app.modules.post.messaging.PostRabbitBindingConfig;
+import com.app.modules.recommendation.messaging.DomainSignalMappings;
 import com.app.modules.recommendation.messaging.RecommendationRabbitBindingConfig;
 import com.app.modules.social.messaging.SocialEventTypes;
 import com.app.modules.story.messaging.StoryRabbitBindingConfig;
@@ -207,14 +209,25 @@ class RabbitMqTopologyConfigTest {
                                             RabbitMqTopologyConfig.COMMENT_NOTIFICATION_QUEUE,
                                             RabbitMqTopologyConfig.STORY_NOTIFICATION_QUEUE,
                                             RabbitMqTopologyConfig.ADMIN_NOTIFICATION_QUEUE);
+                            // Every key the import table maps is an analytics signal that no
+                            // notification may be built from, so a mapping added later is
+                            // covered without editing this list.
                             List<String> eventKeys =
-                                    List.of(
-                                            SocialEventTypes.USER_MUTED_V1,
-                                            SocialEventTypes.USER_UNMUTED_V1,
-                                            SocialEventTypes.USER_SHOW_FEWER_V1,
-                                            SocialEventTypes.USER_SHOW_FEWER_UNDONE_V1,
-                                            PostEventTypes.POST_NOT_INTERESTED_V1,
-                                            PostEventTypes.POST_NOT_INTERESTED_UNDONE_V1);
+                                    Stream.concat(
+                                                    Stream.of(
+                                                            SocialEventTypes.USER_MUTED_V1,
+                                                            SocialEventTypes.USER_UNMUTED_V1,
+                                                            SocialEventTypes.USER_SHOW_FEWER_V1,
+                                                            SocialEventTypes
+                                                                    .USER_SHOW_FEWER_UNDONE_V1,
+                                                            PostEventTypes.POST_NOT_INTERESTED_V1,
+                                                            PostEventTypes
+                                                                    .POST_NOT_INTERESTED_UNDONE_V1),
+                                                    DomainSignalMappings.BY_EVENT_TYPE
+                                                            .keySet()
+                                                            .stream())
+                                            .distinct()
+                                            .toList();
 
                             List<Binding> notificationBindings =
                                     context.getBeansOfType(Binding.class).values().stream()
@@ -237,6 +250,58 @@ class RabbitMqTopologyConfigTest {
                                                 binding ->
                                                         topicPatternMatches(
                                                                 binding.getRoutingKey(), eventKey));
+                            }
+                        });
+    }
+
+    @Test
+    void domainSignalEvents_areBoundToTheUserEventImportQueueAndToNoOtherQueue() {
+        // Each mapped event must reach the queue the import consumer reads; the broker would
+        // otherwise count it as unroutable. Matching every binding pattern against each key also
+        // proves no other queue receives it, which the import queue's sole ownership relies on.
+        new ApplicationContextRunner()
+                .withUserConfiguration(
+                        RabbitMqTopologyConfig.class,
+                        AuthMailRabbitBindingConfig.class,
+                        NotificationRabbitBindingConfig.class,
+                        PostRabbitBindingConfig.class,
+                        CommentRabbitBindingConfig.class,
+                        StoryRabbitBindingConfig.class,
+                        HashtagRabbitBindingConfig.class,
+                        RecommendationRabbitBindingConfig.class,
+                        AdminRabbitBindingConfig.class,
+                        AdminAnalyticsRabbitBindingConfig.class)
+                .run(
+                        context -> {
+                            List<Binding> queueBindings =
+                                    context.getBeansOfType(Binding.class).values().stream()
+                                            .filter(
+                                                    binding ->
+                                                            RabbitMqTopologyConfig
+                                                                    .SOCIAL_EVENTS_EXCHANGE
+                                                                    .equals(binding.getExchange()))
+                                            .filter(
+                                                    binding ->
+                                                            binding.getDestinationType()
+                                                                    == Binding.DestinationType
+                                                                            .QUEUE)
+                                            .toList();
+
+                            assertThat(DomainSignalMappings.BY_EVENT_TYPE).isNotEmpty();
+                            for (String eventKey : DomainSignalMappings.BY_EVENT_TYPE.keySet()) {
+                                Set<String> receivers =
+                                        queueBindings.stream()
+                                                .filter(
+                                                        binding ->
+                                                                topicPatternMatches(
+                                                                        binding.getRoutingKey(),
+                                                                        eventKey))
+                                                .map(Binding::getDestination)
+                                                .collect(Collectors.toSet());
+                                assertThat(receivers)
+                                        .as("queues that receive %s", eventKey)
+                                        .containsExactly(
+                                                RabbitMqTopologyConfig.USER_EVENT_IMPORT_QUEUE);
                             }
                         });
     }

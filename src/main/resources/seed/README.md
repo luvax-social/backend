@@ -115,7 +115,7 @@ What happens on that run:
    if any value falls short.
    Behavioural event types are asserted on the generated set before it is enqueued, because the
    PostgreSQL `user_events` table that used to be counted no longer exists.
-   Every event type except `post_view` must appear at least 5 times.
+   Every event type except the ones in `AnalyticsSeedWriter.UNSEEDED_TYPES` must appear at least 5 times: `post_view`, which arrives from `post.viewed.v1`, and the interaction control and message request types, which only the domain events that change real rows produce.
 
 ## Analytics after a seed run
 
@@ -128,7 +128,7 @@ Wait until `outbox_events` has no `PENDING` row and the four analytics queues ar
 SELECT count() FROM admin_actions FINAL;
 -- 4,320, plus any bucket the statistics job collected since
 SELECT uniqExact(bucket_start) FROM platform_stats;
--- at least 5 of every event type except post_view, which arrives from post.viewed.v1
+-- at least 5 of every seeded event type; post_view arrives from post.viewed.v1 and the interaction control and message request types are never seeded
 SELECT event_type, count() FROM user_events FINAL GROUP BY event_type;
 ```
 

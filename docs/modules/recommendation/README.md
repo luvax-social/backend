@@ -78,6 +78,7 @@ The consumer stores the exact Gorse feedback type and value it sent in `feedback
 
 The behavioral events that are not engagement (`session_start`, `search`, `profile_view`) are written by `UserEventRecorder` straight to ClickHouse and never reach Gorse.
 Server-side events that must not reach Gorse can travel through `recommendation.user-event.imported.v1` and `UserEventImportConsumer`.
+The same consumer stores the interaction control events, each mapped from its own domain event (DATA_RULES.md, Section 3F).
 
 ---
 

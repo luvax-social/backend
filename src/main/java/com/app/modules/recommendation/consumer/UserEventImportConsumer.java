@@ -17,16 +17,25 @@ import com.app.common.inbox.service.ProcessedMessageService;
 import com.app.common.messaging.DomainEventMessageParser;
 import com.app.common.messaging.exception.PermanentMessageException;
 import com.app.common.outbox.model.DomainEventEnvelope;
+import com.app.modules.recommendation.messaging.DomainSignalMappings;
 import com.app.modules.recommendation.messaging.RecommendationEventTypes;
+import com.app.modules.recommendation.messaging.ResolvedSignal;
+import com.app.modules.recommendation.messaging.SignalMapping;
 import com.app.modules.recommendation.messaging.UserEventImportedEvent;
 import com.app.modules.recommendation.repository.UserEventAnalyticsRepository;
 import com.rabbitmq.client.Channel;
 
 /**
- * Stores one imported behavioural event in ClickHouse per delivered message.
+ * Stores one behavioural event in ClickHouse per delivered message.
  *
- * <p>An imported event is never sent to Gorse: the row carries no feedback type, so a rebuild of
- * the recommender never replays it either. The message is acknowledged only after ClickHouse has
+ * <p>Two kinds of message arrive on its queue. {@code recommendation.user-event.imported.v1}
+ * carries every field of the row in its payload. Any other event type must have an entry in {@link
+ * DomainSignalMappings}, which says how that domain event becomes a row: the actor is the account,
+ * the envelope's {@code occurredAt} is the row's time, and its event id is the row id. A type with
+ * no entry is a permanent failure.
+ *
+ * <p>Neither kind is sent to Gorse: the row carries no feedback type, so a rebuild of the
+ * recommender never replays it either. The message is acknowledged only after ClickHouse has
  * written the part.
  *
  * <p>Failure handling follows the analytics rule. An unavailable ClickHouse requeues the message
@@ -87,9 +96,26 @@ public class UserEventImportConsumer {
     }
 
     private void apply(DomainEventEnvelope event) {
-        if (!RecommendationEventTypes.USER_EVENT_IMPORTED_V1.equals(event.eventType())) {
+        if (RecommendationEventTypes.USER_EVENT_IMPORTED_V1.equals(event.eventType())) {
+            applyImported(event);
+            return;
+        }
+        SignalMapping mapping = DomainSignalMappings.BY_EVENT_TYPE.get(event.eventType());
+        if (mapping == null) {
             throw new PermanentMessageException("unknown event type: " + event.eventType());
         }
+        ResolvedSignal signal = mapping.resolve(event);
+        analyticsRepository.insertImported(
+                event.eventId(),
+                signal.userId(),
+                signal.eventType(),
+                signal.entityType(),
+                signal.entityId(),
+                signal.metadata(),
+                signal.createdAt());
+    }
+
+    private void applyImported(DomainEventEnvelope event) {
         if (event.aggregateId() == null) {
             throw new PermanentMessageException(
                     "User event import has no account: " + event.eventId());

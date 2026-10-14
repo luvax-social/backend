@@ -34,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The deletion count a comment owner sees in the confirmation and in the delete response no longer includes hidden replies by other users, and the live update for a hidden comment no longer names its author or thread.
 
 ### Added
+- Show fewer, mute and unmute, interaction limit changes, and hidden and released comments are now recorded as behavioural events in ClickHouse through the outbox, and the event type list gains thirteen values for them and for the not-interested and message signals that follow.
 - A comment that is hidden when it is written, or newly hidden by an edit, now enqueues an internal `comment.hidden.v1` event naming the reason; live viewers and the author are never sent it.
 - An account can mute another account's posts, stories or both with `PUT /social/mutes/{targetUserId}`, remove the mute with `DELETE` or by sending both flags false, and list its mutes newest first with `GET /social/mutes`; the muted account is not told, and a mute emits `user.muted.v1` or `user.unmuted.v1` only when it changed, but it does not yet change any feed or story tray.
 - An account can ask to see fewer recommendations from an author with `POST /social/show-fewer/{authorId}` and take that back with `DELETE`; the author is not told, and a request for oneself, a missing account or a blocked account answers the same not-found response.

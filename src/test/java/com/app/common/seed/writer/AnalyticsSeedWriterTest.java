@@ -83,13 +83,13 @@ class AnalyticsSeedWriterTest {
     }
 
     @Test
-    void generateUserEvents_coversEveryTypeButPostViewAtLeastFiveTimes() {
+    void generateUserEvents_coversEverySeededTypeAtLeastFiveTimesAndNeverAnUnseededOne() {
         List<SeedOutboxBatchWriter.UserEventImport> events = generate();
 
         Map<UserEventType, Integer> counts = new EnumMap<>(UserEventType.class);
         events.forEach(event -> counts.merge(event.eventType(), 1, Integer::sum));
         for (UserEventType type : UserEventType.values()) {
-            if (type == UserEventType.POST_VIEW) {
+            if (AnalyticsSeedWriter.UNSEEDED_TYPES.contains(type)) {
                 assertThat(counts).doesNotContainKey(type);
             } else {
                 assertThat(counts.getOrDefault(type, 0))

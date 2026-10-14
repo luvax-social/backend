@@ -471,10 +471,10 @@ class DomainWritersSeedWriterIT {
     // Reproduces the coverage SeedRunner.assertEnumCoverage() used to require of the PostgreSQL
     // table: every event type must have at least 5 events once a full seed run completes.
     // AnalyticsSeedWriter is the only writer that produces them synchronously, so this is a direct
-    // proof that WEIGHTED_EVENT_TYPES and resolveEntityRef cover every value it owns. post_view is
-    // deliberately absent from that list and from this assertion: it is produced by the
-    // recommendation consumer draining post.viewed.v1, which happens asynchronously and does not
-    // run in this writers-only test.
+    // proof that WEIGHTED_EVENT_TYPES and resolveEntityRef cover every value it owns. The values in
+    // AnalyticsSeedWriter.UNSEEDED_TYPES are deliberately absent from that list and from this
+    // assertion: post_view is produced by the recommendation consumer draining post.viewed.v1,
+    // which happens asynchronously and does not run in this writers-only test.
     private void assertUserEventsCoverEveryEventTypeValue() {
         Map<String, Integer> countsByEventType =
                 jdbcTemplate
@@ -491,7 +491,7 @@ class DomainWritersSeedWriterIT {
                                         Map.Entry::getKey, Map.Entry::getValue));
 
         for (UserEventType type : UserEventType.values()) {
-            if (type == UserEventType.POST_VIEW) {
+            if (AnalyticsSeedWriter.UNSEEDED_TYPES.contains(type)) {
                 continue;
             }
             assertThat(countsByEventType.getOrDefault(type.toJson(), 0))
