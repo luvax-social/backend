@@ -155,6 +155,23 @@ class ShowFewerControllerIT {
     }
 
     @Test
+    void showFewer_softDeletedAuthor_answersTheIdenticalNotFoundBodyAsAMissingOne() {
+        Account viewer = account("sf_gone_v");
+        Account gone = account("sf_gone_a");
+        jdbc.update("UPDATE users SET deleted_at = NOW() WHERE id = ?", gone.id());
+
+        ResponseEntity<String> missing =
+                send(HttpMethod.POST, path(UUID.randomUUID()), viewer.token());
+        ResponseEntity<String> softDeleted = send(HttpMethod.POST, path(gone.id()), viewer.token());
+
+        assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(softDeleted.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(stableBody(softDeleted)).isEqualTo(stableBody(missing));
+        assertThat(rowCount(viewer.id(), gone.id())).isZero();
+        assertThat(events("user.show-fewer.v1")).isEmpty();
+    }
+
+    @Test
     void undoShowFewer_rowExisted_returns204DeletesAndEnqueuesUndoneEvent() {
         Account viewer = account("sf_undo_v");
         Account author = account("sf_undo_a");
@@ -233,13 +250,12 @@ class ShowFewerControllerIT {
     }
 
     // The envelope carries a timestamp that differs per response, so two answers are compared on
-    // everything the caller can observe except that.
+    // the whole body except that, which keeps a field added to the error later inside the check.
     private Map<?, ?> stableBody(ResponseEntity<String> response) {
-        Map<?, ?> body = JSON.readValue(response.getBody(), Map.class);
-        return Map.of(
-                "success", body.get("success"),
-                "code", body.get("code"),
-                "message", body.get("message"));
+        Map<?, ?> body =
+                new java.util.LinkedHashMap<>(JSON.readValue(response.getBody(), Map.class));
+        body.remove("timestamp");
+        return body;
     }
 
     @SuppressWarnings("unchecked")

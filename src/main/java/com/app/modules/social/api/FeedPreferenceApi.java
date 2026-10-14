@@ -41,13 +41,6 @@ public interface FeedPreferenceApi {
                 content =
                         @Content(
                                 mediaType = "application/json",
-                                schema = @Schema(implementation = ApiResponse.class))),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                responseCode = "429",
-                description = "Rate limit exceeded",
-                content =
-                        @Content(
-                                mediaType = "application/json",
                                 schema = @Schema(implementation = ApiResponse.class)))
     })
     @AuthenticationRequiredResponse
@@ -62,14 +55,7 @@ public interface FeedPreferenceApi {
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "204",
-                description = "Request removed, or none existed"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                responseCode = "429",
-                description = "Rate limit exceeded",
-                content =
-                        @Content(
-                                mediaType = "application/json",
-                                schema = @Schema(implementation = ApiResponse.class)))
+                description = "Request removed, or none existed")
     })
     @AuthenticationRequiredResponse
     @DeleteMapping(ApiConstants.Social.SHOW_FEWER)

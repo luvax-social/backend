@@ -61,13 +61,6 @@ public interface MuteApi {
                 content =
                         @Content(
                                 mediaType = "application/json",
-                                schema = @Schema(implementation = ApiResponse.class))),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                responseCode = "429",
-                description = "Rate limit exceeded",
-                content =
-                        @Content(
-                                mediaType = "application/json",
                                 schema = @Schema(implementation = ApiResponse.class)))
     })
     @MalformedBodyErrorResponses
@@ -85,14 +78,7 @@ public interface MuteApi {
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "204",
-                description = "Mute removed, or none existed"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                responseCode = "429",
-                description = "Rate limit exceeded",
-                content =
-                        @Content(
-                                mediaType = "application/json",
-                                schema = @Schema(implementation = ApiResponse.class)))
+                description = "Mute removed, or none existed")
     })
     @AuthenticationRequiredResponse
     @DeleteMapping(ApiConstants.Social.MUTE_BY_ID)

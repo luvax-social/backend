@@ -587,6 +587,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- The API document no longer declares a 429 response on setting or removing a mute or on the show-fewer endpoints, which have no rate limiter and could never return it.
 - Editing a reply that is hidden only because its parent is hidden now re-checks it against the post owner's Hidden Words and interaction limit, so releasing the parent no longer releases a reply whose new text the owner's rules filter.
 - A message permission is now stored and read with the root locale, so an account set to `following` no longer fails to load when the server runs under a Turkish default locale.
 - The deletion count a caller sees now leaves out comments a moderator removed, and a live edit frame from an event with no recorded previous visibility is sent as a removal of nothing instead of claiming a comment viewers may never have held.

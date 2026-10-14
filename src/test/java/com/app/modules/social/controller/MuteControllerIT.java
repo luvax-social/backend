@@ -203,7 +203,10 @@ class MuteControllerIT {
 
         ResponseEntity<String> missing = put(UUID.randomUUID(), body, viewer.token());
         ResponseEntity<String> blockedByTarget = put(blocker.id(), body, viewer.token());
-        jdbc.update("DELETE FROM blocks");
+        jdbc.update(
+                "DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?",
+                blocker.id(),
+                viewer.id());
         jdbc.update(
                 "INSERT INTO blocks(blocker_id, blocked_id) VALUES (?, ?)",
                 viewer.id(),
@@ -221,6 +224,22 @@ class MuteControllerIT {
                                 Integer.class,
                                 viewer.id()))
                 .isZero();
+    }
+
+    @Test
+    void putMute_softDeletedTarget_answersTheIdenticalNotFoundBodyAsAMissingOne() {
+        Account viewer = account("mt_gone_v");
+        Account gone = account("mt_gone_t");
+        jdbc.update("UPDATE users SET deleted_at = NOW() WHERE id = ?", gone.id());
+        Map<String, Object> body = Map.of("mutePosts", true, "muteStories", true);
+
+        ResponseEntity<String> missing = put(UUID.randomUUID(), body, viewer.token());
+        ResponseEntity<String> softDeleted = put(gone.id(), body, viewer.token());
+
+        assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(softDeleted.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(stableBody(softDeleted)).isEqualTo(stableBody(missing));
+        assertThat(muteRow(viewer.id(), gone.id())).isEmpty();
     }
 
     @Test
@@ -451,13 +470,12 @@ class MuteControllerIT {
     }
 
     // The envelope carries a timestamp that differs per response, so two answers are compared on
-    // everything the caller can observe except that.
+    // the whole body except that, which keeps a field added to the error later inside the check.
     private Map<?, ?> stableBody(ResponseEntity<String> response) {
-        Map<?, ?> body = JSON.readValue(response.getBody(), Map.class);
-        return Map.of(
-                "success", body.get("success"),
-                "code", body.get("code"),
-                "message", body.get("message"));
+        Map<?, ?> body =
+                new java.util.LinkedHashMap<>(JSON.readValue(response.getBody(), Map.class));
+        body.remove("timestamp");
+        return body;
     }
 
     private List<Boolean> muteRow(UUID userId, UUID mutedId) {
