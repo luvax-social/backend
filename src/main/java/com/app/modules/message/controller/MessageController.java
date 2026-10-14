@@ -226,4 +226,34 @@ public class MessageController extends BaseController implements MessageApi {
                 SecurityUtils.getCurrentUserId(), conversationId, request.nickname());
         return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK));
     }
+
+    /** Accepts a message request the authenticated caller received. */
+    @Override
+    @PostMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.ACCEPT)
+    @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<ConversationResponse>> acceptRequest(
+            @PathVariable("conversationId") UUID conversationId) {
+        ConversationResponse body =
+                conversationService.acceptRequest(SecurityUtils.getCurrentUserId(), conversationId);
+        return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
+    }
+
+    /** Declines and deletes a message request the authenticated caller received; returns 204. */
+    @Override
+    @DeleteMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.REQUEST)
+    @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<Void> deleteRequest(@PathVariable("conversationId") UUID conversationId) {
+        conversationService.deleteRequest(SecurityUtils.getCurrentUserId(), conversationId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Declines a message request and blocks its sender in one transaction; returns 204. */
+    @Override
+    @PostMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.BLOCK)
+    @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<Void> blockRequester(
+            @PathVariable("conversationId") UUID conversationId) {
+        conversationService.blockRequester(SecurityUtils.getCurrentUserId(), conversationId);
+        return ResponseEntity.noContent().build();
+    }
 }

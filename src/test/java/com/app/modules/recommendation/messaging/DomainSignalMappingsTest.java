@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import com.app.common.messaging.exception.PermanentMessageException;
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.modules.comment.messaging.CommentEventTypes;
+import com.app.modules.message.messaging.MessageEventTypes;
 import com.app.modules.recommendation.enums.UserEventType;
 import com.app.modules.social.messaging.SocialEventTypes;
 
@@ -33,7 +35,7 @@ class DomainSignalMappingsTest {
     private final UUID post = UUID.randomUUID();
 
     @Test
-    void table_names_exactlyTheSevenMappedEvents() {
+    void table_names_exactlyTheEightMappedEvents() {
         assertThat(DomainSignalMappings.BY_EVENT_TYPE.keySet())
                 .containsExactlyInAnyOrder(
                         SocialEventTypes.USER_SHOW_FEWER_V1,
@@ -42,7 +44,8 @@ class DomainSignalMappingsTest {
                         SocialEventTypes.USER_UNMUTED_V1,
                         SocialEventTypes.USER_INTERACTION_LIMIT_CHANGED_V1,
                         CommentEventTypes.COMMENT_UNHIDDEN_V1,
-                        CommentEventTypes.COMMENT_HIDDEN_V1);
+                        CommentEventTypes.COMMENT_HIDDEN_V1,
+                        MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1);
     }
 
     @Test
@@ -214,6 +217,56 @@ class DomainSignalMappingsTest {
                         "\"},{\"injected\":\"");
 
         assertThatThrownBy(() -> resolve(CommentEventTypes.COMMENT_HIDDEN_V1, data))
+                .isInstanceOf(PermanentMessageException.class);
+    }
+
+    @Test
+    void requestResolved_accepted_isAnAcceptRowAboutTheConversation() {
+        UUID conversationId = UUID.randomUUID();
+
+        ResolvedSignal signal =
+                resolve(
+                        MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
+                        Map.of(
+                                "conversationId",
+                                conversationId.toString(),
+                                "resolution",
+                                "accepted"));
+
+        assertThat(signal.userId()).isEqualTo(actor);
+        assertThat(signal.eventType()).isEqualTo(UserEventType.MESSAGE_REQUEST_ACCEPT);
+        assertThat(signal.entityType()).isEqualTo("conversation");
+        assertThat(signal.entityId()).isEqualTo(conversationId);
+        assertThat(signal.metadata()).isEmpty();
+    }
+
+    @Test
+    void requestResolved_deletedAndBlocked_areDeleteRowsThatSayWhetherTheSenderWasBlocked() {
+        UUID conversationId = UUID.randomUUID();
+
+        for (String resolution : List.of("deleted", "blocked")) {
+            ResolvedSignal signal =
+                    resolve(
+                            MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
+                            Map.of(
+                                    "conversationId",
+                                    conversationId.toString(),
+                                    "resolution",
+                                    resolution));
+
+            assertThat(signal.eventType()).isEqualTo(UserEventType.MESSAGE_REQUEST_DELETE);
+            assertThat(signal.entityId()).isEqualTo(conversationId);
+            assertThat(json(signal.metadata()).get("blocked").asBoolean())
+                    .isEqualTo(resolution.equals("blocked"));
+        }
+    }
+
+    @Test
+    void requestResolved_withAnUnknownResolution_isPermanentlyRejected() {
+        Map<String, Object> data =
+                Map.of("conversationId", UUID.randomUUID().toString(), "resolution", "archived");
+
+        assertThatThrownBy(() -> resolve(MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1, data))
                 .isInstanceOf(PermanentMessageException.class);
     }
 

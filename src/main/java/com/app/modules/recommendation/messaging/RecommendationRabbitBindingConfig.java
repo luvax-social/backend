@@ -151,6 +151,15 @@ public class RecommendationRabbitBindingConfig {
                 userEventImportQueue, socialEventsExchange, CommentEventTypes.COMMENT_HIDDEN_V1);
     }
 
+    @Bean
+    Binding messageRequestResolvedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue,
+                socialEventsExchange,
+                MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1);
+    }
+
     private static Binding signalBinding(Queue queue, TopicExchange exchange, String routingKey) {
         return BindingBuilder.bind(queue).to(exchange).with(routingKey);
     }

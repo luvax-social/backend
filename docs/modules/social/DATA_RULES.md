@@ -139,6 +139,7 @@ A requester's send into a pending conversation goes to the requests, and to the 
 The pending-request rule lets the requester send one text message while the request is pending, and refuses anything more with `AWAITING_ACCEPTANCE`.
 A declined request answers `AWAITING_ACCEPTANCE` as well, so the requester cannot tell a decline from a pending request.
 The recipient's own send is allowed, and the message module treats it as accepting the request.
+The recipient's explicit accept, delete and block of a request are not policy decisions: the message module applies them directly, and blocking reaches this module only through `SocialService.blockUser`.
 The Hidden Words rule hides a comment, or a requester's first message, whose text matches the target's matcher from `HiddenWordService.matcherFor`.
 A send into an accepted conversation is subject to the block rule alone.
 The five outcomes are `ALLOW`, `ALLOW_HIDDEN`, `ROUTE_TO_REQUESTS`, `ROUTE_TO_HIDDEN_REQUESTS` and `DENY`.
@@ -175,6 +176,7 @@ A block stays decided by the existing block checks, and a mute or show-fewer row
 | `post` | inbound | Post visibility (private account) is gated by `follows.status = 'accepted'` |
 | `users` | outbound | `HiddenWordServiceImpl` reads `hidden_words_system_enabled` and the interaction policy's message permission rule reads `message_permission`, both through `UserPrivacySettingsService`; the personal hidden words endpoints are served by the users module's `UserSafetyController` |
 | `message` | inbound | Messaging permissions depend on whether a block relationship exists |
+| `message` | inbound | `ConversationServiceImpl.blockRequester` calls `SocialService.blockUser` in the same transaction that declines a message request, so a failed block rolls the decline back |
 | `recommendation` | outbound | `user.muted.v1`, `user.unmuted.v1`, `user.show-fewer.v1`, `user.show-fewer-undone.v1` and `user.interaction-limit.changed.v1` are imported into the analytics tier as `user_events` rows by `UserEventImportConsumer`; see the recommendation module's interaction control signals section |
 | `post` | outbound | `PostVisibilityServiceImpl` and `PostLikeServiceImpl` call `SocialService.loadRelationships`, which carries the viewer's mute and show-fewer flags on every embedded relationship, and `PostFeedbackServiceImpl` owns the sibling not-interested mark |
 | `post` | inbound | `PostServiceImpl.getFeed` calls `SocialService.findFeedSuppressedAuthors` with a `FeedSurface`, which is why `social` imports that post enum |

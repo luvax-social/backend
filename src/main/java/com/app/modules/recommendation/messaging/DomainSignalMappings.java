@@ -13,6 +13,7 @@ import com.app.common.messaging.exception.PermanentMessageException;
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.modules.comment.enums.CommentHiddenReason;
 import com.app.modules.comment.messaging.CommentEventTypes;
+import com.app.modules.message.messaging.MessageEventTypes;
 import com.app.modules.recommendation.enums.UserEventType;
 import com.app.modules.social.messaging.SocialEventTypes;
 
@@ -27,8 +28,9 @@ import com.app.modules.social.messaging.SocialEventTypes;
  *
  * <p>Metadata is built only from fields the event already carries and that the actor chose for
  * themselves: the scope of a mute, the toggles of an interaction limit, the reason a comment was
- * hidden. Nothing the actor typed (a hidden word, a comment's text) and nothing the event leaves
- * out (the end time of a limit) reaches a row.
+ * hidden, whether a deleted message request also blocked its sender. Nothing the actor typed (a
+ * hidden word, a comment's text) and nothing the event leaves out (the end time of a limit) reaches
+ * a row.
  *
  * <p>The not-interested events are not mapped here: they feed Gorse and are written by the feedback
  * consumer.
@@ -37,6 +39,7 @@ public final class DomainSignalMappings {
 
     private static final String ENTITY_USER = "user";
     private static final String ENTITY_COMMENT = "comment";
+    private static final String ENTITY_CONVERSATION = "conversation";
 
     private static final Set<String> HIDDEN_REASONS =
             Stream.of(CommentHiddenReason.values())
@@ -94,7 +97,14 @@ public final class DomainSignalMappings {
                                     UserEventType.COMMENT_HIDDEN,
                                     ENTITY_COMMENT,
                                     dataId("commentId"),
-                                    DomainSignalMappings::hiddenCommentMetadata)));
+                                    DomainSignalMappings::hiddenCommentMetadata)),
+                    entry(
+                            MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
+                            new SignalMapping(
+                                    DomainSignalMappings::requestResolutionType,
+                                    ENTITY_CONVERSATION,
+                                    dataId("conversationId"),
+                                    DomainSignalMappings::requestResolutionMetadata)));
 
     private DomainSignalMappings() {}
 
@@ -149,6 +159,38 @@ public final class DomainSignalMappings {
                     "Signal " + event.eventType() + " has an unknown hidden reason");
         }
         return "{\"reason\":\"" + reason + "\"}";
+    }
+
+    // Accepting is one signal and deleting is another, whether or not the recipient also blocked
+    // the sender; the closed set is checked so a malformed event is rejected, not guessed at.
+    private static UserEventType requestResolutionType(DomainEventEnvelope event) {
+        return switch (resolution(event)) {
+            case "accepted" -> UserEventType.MESSAGE_REQUEST_ACCEPT;
+            case "deleted", "blocked" -> UserEventType.MESSAGE_REQUEST_DELETE;
+            default ->
+                    throw new PermanentMessageException(
+                            "Signal " + event.eventType() + " has an unknown resolution");
+        };
+    }
+
+    private static String requestResolutionMetadata(DomainEventEnvelope event) {
+        return switch (resolution(event)) {
+            case "accepted" -> "";
+            case "deleted" -> "{\"blocked\":false}";
+            case "blocked" -> "{\"blocked\":true}";
+            default ->
+                    throw new PermanentMessageException(
+                            "Signal " + event.eventType() + " has an unknown resolution");
+        };
+    }
+
+    private static String resolution(DomainEventEnvelope event) {
+        Object value = data(event).get("resolution");
+        if (value == null) {
+            throw new PermanentMessageException(
+                    "Signal " + event.eventType() + " has no resolution");
+        }
+        return value.toString();
     }
 
     private static boolean flag(DomainEventEnvelope event, String key) {

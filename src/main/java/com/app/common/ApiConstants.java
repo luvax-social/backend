@@ -126,6 +126,9 @@ public final class ApiConstants {
         public static final String PIN = "/{conversationId}/pin";
         public static final String MUTE = "/{conversationId}/mute";
         public static final String NICKNAME = "/{conversationId}/nickname";
+        public static final String ACCEPT = "/{conversationId}/accept";
+        public static final String REQUEST = "/{conversationId}/request";
+        public static final String BLOCK = "/{conversationId}/block";
     }
 
     public static final class Notifications {

@@ -433,4 +433,72 @@ public interface MessageApi {
     ResponseEntity<ApiResponse<Void>> setNickname(
             @PathVariable("conversationId") UUID conversationId,
             @Valid @RequestBody SetNicknameRequest request);
+
+    @Operation(
+            summary = "Accept a message request",
+            description =
+                    "Accepts a message request the caller received, which moves the conversation"
+                            + " into their primary folder. Requires authentication as the"
+                            + " recipient of a pending request that carries a message.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "The accepted conversation"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "CONVERSATION_NOT_FOUND: no such request for the caller",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @PostMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.ACCEPT)
+    ResponseEntity<ApiResponse<ConversationResponse>> acceptRequest(
+            @PathVariable("conversationId") UUID conversationId);
+
+    @Operation(
+            summary = "Delete a message request",
+            description =
+                    "Declines a message request the caller received and removes it from their"
+                            + " inbox. The sender keeps seeing a request that was never answered."
+                            + " Requires authentication as the recipient of a pending request that"
+                            + " carries a message.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "204",
+                description = "Request deleted"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "CONVERSATION_NOT_FOUND: no such request for the caller",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @DeleteMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.REQUEST)
+    ResponseEntity<Void> deleteRequest(@PathVariable("conversationId") UUID conversationId);
+
+    @Operation(
+            summary = "Delete a message request and block its sender",
+            description =
+                    "Declines a message request the caller received and blocks its sender in one"
+                            + " transaction. Requires authentication as the recipient of a"
+                            + " pending request that carries a message.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "204",
+                description = "Request deleted and sender blocked"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "CONVERSATION_NOT_FOUND: no such request for the caller",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @PostMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.BLOCK)
+    ResponseEntity<Void> blockRequester(@PathVariable("conversationId") UUID conversationId);
 }

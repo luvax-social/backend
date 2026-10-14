@@ -27,6 +27,7 @@ import org.springframework.data.domain.Pageable;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
+import com.app.common.outbox.service.OutboxService;
 import com.app.common.pagination.Cursor;
 import com.app.common.pagination.CursorCodec;
 import com.app.common.pagination.CursorScope;
@@ -53,6 +54,7 @@ import com.app.modules.social.policy.InteractionOutcome;
 import com.app.modules.social.policy.InteractionPolicyService;
 import com.app.modules.social.policy.InteractionReason;
 import com.app.modules.social.policy.InteractionType;
+import com.app.modules.social.service.SocialService;
 import com.app.modules.users.entity.User;
 
 @ExtendWith(MockitoExtension.class)
@@ -65,6 +67,8 @@ class ConversationServiceImplTest {
     @Mock private InteractionPolicyService interactionPolicy;
     @Mock private MessageMapper mapper;
     @Mock private MessageMediaAssetRepository mediaAssetRepository;
+    @Mock private SocialService socialService;
+    @Mock private OutboxService outboxService;
 
     private ConversationServiceImpl service;
 
@@ -78,7 +82,9 @@ class ConversationServiceImplTest {
                         userRepository,
                         interactionPolicy,
                         mapper,
-                        mediaAssetRepository);
+                        mediaAssetRepository,
+                        socialService,
+                        outboxService);
 
         lenient()
                 .when(interactionPolicy.evaluate(any()))

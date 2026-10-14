@@ -276,6 +276,19 @@ public class MessageServiceImpl implements MessageService {
             conversation.setRequestHidden(false);
             conversation.setRequestResolvedAt(OffsetDateTime.now(ZoneOffset.UTC));
             conversationRepository.save(conversation);
+            // The recipient answering is a decision like an explicit accept, so analytics hears it
+            // the same way.
+            outboxService.enqueue(
+                    MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
+                    MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
+                    AGGREGATE_TYPE,
+                    conversation.getId(),
+                    actorId,
+                    Map.of(
+                            "conversationId",
+                            conversation.getId().toString(),
+                            "resolution",
+                            "accepted"));
         } else if (decision.outcome() == InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS
                 && !conversation.isRequestHidden()) {
             conversation.setRequestHidden(true);

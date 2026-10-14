@@ -14,16 +14,26 @@ import com.app.modules.recommendation.enums.UserEventType;
  * neither is configurable here. The row id is the envelope's event id, which the consumer supplies
  * and which makes a redelivery write an identical row.
  *
- * @param eventType the stored type
+ * @param eventType reads the stored type from the envelope, because one domain event may stand for
+ *     more than one type
  * @param entityType kind of thing the row is about
  * @param entityId reads the thing from the envelope
  * @param metadata builds the row's JSON text from fields the event carries
  */
 public record SignalMapping(
-        UserEventType eventType,
+        Function<DomainEventEnvelope, UserEventType> eventType,
         String entityType,
         Function<DomainEventEnvelope, UUID> entityId,
         Function<DomainEventEnvelope, String> metadata) {
+
+    /** A mapping whose stored type does not depend on the event's payload. */
+    public SignalMapping(
+            UserEventType eventType,
+            String entityType,
+            Function<DomainEventEnvelope, UUID> entityId,
+            Function<DomainEventEnvelope, String> metadata) {
+        this(event -> eventType, entityType, entityId, metadata);
+    }
 
     /**
      * Reads a delivered event into the row it stands for.
@@ -43,7 +53,7 @@ public record SignalMapping(
         }
         return new ResolvedSignal(
                 event.actorId(),
-                eventType,
+                eventType.apply(event),
                 entityType,
                 entityId.apply(event),
                 metadata.apply(event),

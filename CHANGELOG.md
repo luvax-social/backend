@@ -38,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The deletion count a comment owner sees in the confirmation and in the delete response no longer includes hidden replies by other users, and the live update for a hidden comment no longer names its author or thread.
 
 ### Added
+- The recipient of a message request can accept it, delete it, or delete it and block the sender (`POST /conversations/{id}/accept`, `DELETE /conversations/{id}/request`, `POST /conversations/{id}/block`); the sender sees a deleted request exactly as a pending one that was never answered, and a request with no message yet cannot be acted on.
 - Sending into a message request now follows the request rules: the sender may send one text message until the recipient answers, the recipient's reply accepts the request, and a refused send answers `MESSAGE_REQUEST_AWAITING_ACCEPTANCE` (409) for a pending and a declined request alike.
 - Conversations carry a request status (V145), the conversation list takes a `folder` parameter (`primary`, `requests`, `hidden_requests`), and the unread count reports `requestCount` for incoming requests that carry a message.
 - A post a viewer marks as not interested is now sent to the Gorse recommender as `not_interested` negative feedback and taken back when the mark is undone, Gorse is configured to leave such posts out of that viewer's personalized list, and a Gorse rebuild sends only the marks that still stand.

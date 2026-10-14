@@ -126,4 +126,45 @@ public interface ConversationService {
      *     CONVERSATION_FORBIDDEN when the caller is not an active participant
      */
     void setNickname(UUID actorId, UUID conversationId, String nickname);
+
+    /**
+     * Accepts a message request the caller received, which moves the conversation into their
+     * primary folder and lets its sender write freely.
+     *
+     * <p>Records a {@code message.request.resolved.v1} event so the decision reaches analytics. The
+     * sender is told nothing.
+     *
+     * @param actorId the authenticated caller, who must be the recipient of a pending request
+     * @param conversationId the conversation holding the request
+     * @return the accepted conversation
+     * @throws com.app.common.exception.AppException CONVERSATION_NOT_FOUND unless the caller is the
+     *     recipient of a pending request that already carries a message, so a caller who is not
+     *     entitled to see the request cannot tell it from a missing one
+     */
+    ConversationResponse acceptRequest(UUID actorId, UUID conversationId);
+
+    /**
+     * Deletes a message request the caller received, which declines it and removes it from their
+     * inbox.
+     *
+     * <p>The sender keeps seeing a pending request that is simply never answered, so a decline
+     * cannot be told from silence. Nothing is delivered to the sender, live or otherwise.
+     *
+     * @param actorId the authenticated caller, who must be the recipient of a pending request
+     * @param conversationId the conversation holding the request
+     * @throws com.app.common.exception.AppException CONVERSATION_NOT_FOUND under the same
+     *     conditions as {@link #acceptRequest}
+     */
+    void deleteRequest(UUID actorId, UUID conversationId);
+
+    /**
+     * Declines a message request the caller received and blocks its sender, in one transaction:
+     * when the block fails the request stays pending.
+     *
+     * @param actorId the authenticated caller, who must be the recipient of a pending request
+     * @param conversationId the conversation holding the request
+     * @throws com.app.common.exception.AppException CONVERSATION_NOT_FOUND under the same
+     *     conditions as {@link #acceptRequest}; the block's own errors when it cannot be created
+     */
+    void blockRequester(UUID actorId, UUID conversationId);
 }

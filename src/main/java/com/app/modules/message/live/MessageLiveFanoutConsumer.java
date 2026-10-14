@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import com.app.common.messaging.DomainEventMessageParser;
 import com.app.common.outbox.model.DomainEventEnvelope;
+import com.app.modules.message.messaging.MessageEventTypes;
 
 /**
  * Pushes live message events received on this instance's fanout queue to local STOMP subscribers.
@@ -45,6 +46,11 @@ public class MessageLiveFanoutConsumer {
     public void consume(Message message) {
         try {
             DomainEventEnvelope event = parser.parse(message);
+            // A decision about a request is analytics only. The requester is subscribed to this
+            // thread, so pushing it would tell them the request was declined.
+            if (MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1.equals(event.eventType())) {
+                return;
+            }
             Object conversationId = event.data().get("conversationId");
             if (conversationId == null) {
                 return;
