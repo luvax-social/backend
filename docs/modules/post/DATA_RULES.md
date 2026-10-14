@@ -164,6 +164,6 @@ A block exclusion is unchanged, and the preference filters never replace it.
 | `notification` | outbound | `post.liked.v1` and `post.unliked.v1` drive `like_post` notifications through `PostNotificationConsumer` on `post.notification.queue` (DLQ `post.notification.dlq`), enabled by `app.post.notification-consumer.enabled`; an unlike retracts the liker from the group. Caption mentions still produce nothing. |
 | `notification` | inbound | `PostPreviewService` gives the notification feed each post's availability to the viewer and its first media as a thumbnail, in one query per page |
 | `recommendation` | inbound | `post_categories` references `posts.id`; ClickHouse `user_events` rows carry post ids in `entity_id` with no foreign key |
-| `recommendation` | outbound | `post.not-interested.v1` and `post.not-interested-undone.v1` are the stored signal that a later change sends to Gorse as negative feedback |
+| `recommendation` | outbound | `post.not-interested.v1` and `post.not-interested-undone.v1` are consumed by `RecommendationFeedbackConsumer`, which sends the mark to Gorse as `not_interested` negative feedback and takes it back on the undo; it reads `post_not_interested` through `PostFeedbackService.findNotInterested` to keep Gorse in step when the two events arrive out of order |
 | `report` | inbound | Reports can target a post via polymorphic `entity_id` |
 | `message` | inbound | Messages can share a post via `shared_post_id` (SET NULL on post delete) |

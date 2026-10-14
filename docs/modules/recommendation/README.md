@@ -141,7 +141,7 @@ A cursor that does not match this shape is treated as a chronological-feed curso
 ## 5. Feedback mapping
 
 Gorse classifies feedback by **type**, not by numeric weight.
-`like`, `save`, and `comment` are configured as positive types; `read` is configured as the read type, in `gorse/config/config.toml`.
+`like`, `save`, `comment` and `share` are configured as positive types, `read` as the read type and `not_interested` as the negative type, in `gorse/config/config.toml`.
 
 | App event | Gorse `FeedbackType` | Value | `user_events.event_type` |
 |---|---|---|---|
@@ -151,7 +151,10 @@ Gorse classifies feedback by **type**, not by numeric weight.
 | `post.shared.v1` | `share` | 1.0 | `post_share` |
 | `comment.liked.v1` | `like` | 0.5, attributed to the parent post | `comment_like` |
 | `post.viewed.v1` | `read` | dwell seconds, or 1.0 | `post_view` |
+| `post.not-interested.v1` | `not_interested` (negative) | 1.0 | `post_not_interested` |
 
+`post.not-interested-undone.v1` is not a feedback row: it writes a `post_not_interested_undo` row without feedback columns and deletes the tuple with `DELETE /api/feedback/not_interested/{user}/{item}`.
+Neither event ever hides the item in Gorse, because the hidden flag is global to the item and the preference belongs to one viewer.
 `post.viewed.v1` is published by `POST /api/v1/posts/{postId}/view` (post module) and is the only read-class signal; a view by the post's own owner is accepted but not recorded, so it never reaches this pipeline.
 
 Deliberately excluded:
@@ -287,7 +290,7 @@ These are accepted trade-offs, not defects.
 - **Deduplication is per-request only.** Items already shown on an earlier page can reappear later.
 - **A mid-pagination fallback reuses the offset.** If Gorse fails while the reader is deep in the list, the same numeric offset is applied to the popularity list, skipping its head. Only reachable when the recommender fails mid-scroll.
 - **Recommendations can lag behind an out-of-band data reset.** Gorse's item, user and feedback store is derived state kept in sync by `PostIndexSyncConsumer` (`post.index.upsert.v1` / `post.index.delete.v1`, the same events that drive the Elasticsearch sync) as posts are created, updated, hidden on removal and restored. That consumer relies on the outbox, so it only sees writes that go through the application. If PostgreSQL's `posts` table is reset by a path that does not replay through the outbox, Gorse keeps whatever items it already had, which can drift entirely out of overlap with the current `posts` table without any error, because every Gorse call still succeeds and the candidates just fail to resolve to a live post. The Gorse rebuild tool (section 7) is the repair, and it verifies the catalogue against PostgreSQL in both directions before it reports `DONE`.
-- **Negative feedback is stored but not yet sent.** A "not interested" mark is stored in PostgreSQL and announced by an event, and a later change sends it to Gorse as negative feedback.
+- **A not-interested mark reaches the ranking only after the next fit.** The mark is sent to Gorse as `not_interested` feedback as soon as the event is consumed, and Gorse excludes the item from that viewer's personalized list from the next ranking pass. The application filter hides the post immediately in every feed path, so the lag is only in what Gorse learns.
 - **Unlike and unsave do not retract prior positive feedback.**
 
 ---

@@ -306,6 +306,62 @@ class RabbitMqTopologyConfigTest {
                         });
     }
 
+    @Test
+    void notInterestedEvents_reachTheFeedbackQueueExactlyOnceAndNoOtherQueue() {
+        // These two are not in DomainSignalMappings because RecommendationFeedbackConsumer writes
+        // them. An unbound key would be unroutable and a key bound twice, or also bound to another
+        // queue, would apply the preference more than once, so the destinations are counted rather
+        // than collected into a set.
+        new ApplicationContextRunner()
+                .withUserConfiguration(
+                        RabbitMqTopologyConfig.class,
+                        AuthMailRabbitBindingConfig.class,
+                        NotificationRabbitBindingConfig.class,
+                        PostRabbitBindingConfig.class,
+                        CommentRabbitBindingConfig.class,
+                        StoryRabbitBindingConfig.class,
+                        HashtagRabbitBindingConfig.class,
+                        RecommendationRabbitBindingConfig.class,
+                        AdminRabbitBindingConfig.class,
+                        AdminAnalyticsRabbitBindingConfig.class)
+                .run(
+                        context -> {
+                            List<Binding> queueBindings =
+                                    context.getBeansOfType(Binding.class).values().stream()
+                                            .filter(
+                                                    binding ->
+                                                            RabbitMqTopologyConfig
+                                                                    .SOCIAL_EVENTS_EXCHANGE
+                                                                    .equals(binding.getExchange()))
+                                            .filter(
+                                                    binding ->
+                                                            binding.getDestinationType()
+                                                                    == Binding.DestinationType
+                                                                            .QUEUE)
+                                            .toList();
+
+                            for (String eventKey :
+                                    List.of(
+                                            PostEventTypes.POST_NOT_INTERESTED_V1,
+                                            PostEventTypes.POST_NOT_INTERESTED_UNDONE_V1)) {
+                                List<String> receivers =
+                                        queueBindings.stream()
+                                                .filter(
+                                                        binding ->
+                                                                topicPatternMatches(
+                                                                        binding.getRoutingKey(),
+                                                                        eventKey))
+                                                .map(Binding::getDestination)
+                                                .toList();
+                                assertThat(receivers)
+                                        .as("bindings that deliver %s", eventKey)
+                                        .containsExactly(
+                                                RabbitMqTopologyConfig
+                                                        .RECOMMENDATION_FEEDBACK_QUEUE);
+                            }
+                        });
+    }
+
     // AMQP topic semantics: words are dot separated, "*" stands for exactly one word and "#" for
     // zero or more.
     private static boolean topicPatternMatches(String pattern, String routingKey) {

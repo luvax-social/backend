@@ -22,6 +22,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -50,6 +51,7 @@ import com.app.common.outbox.model.DomainEventEnvelopeJson;
 import com.app.modules.comment.messaging.CommentEventTypes;
 import com.app.modules.message.messaging.MessageEventTypes;
 import com.app.modules.post.messaging.PostEventTypes;
+import com.app.modules.post.service.PostFeedbackService;
 import com.app.modules.recommendation.client.GorseClient;
 import com.app.modules.recommendation.client.dto.GorseFeedback;
 import com.app.modules.recommendation.enums.UserEventType;
@@ -68,6 +70,7 @@ class RecommendationFeedbackConsumerTest {
     @Mock private ProcessedMessageService processedMessageService;
     @Mock private UserEventAnalyticsRepository userEventAnalyticsRepository;
     @Mock private UserSummaryService userSummaryService;
+    @Mock private PostFeedbackService postFeedbackService;
     @Mock private GorseClient gorseClient;
     @Mock private Channel channel;
 
@@ -89,6 +92,7 @@ class RecommendationFeedbackConsumerTest {
                         retryProperties,
                         userEventAnalyticsRepository,
                         userSummaryService,
+                        postFeedbackService,
                         gorseClient,
                         sleptMillis::add);
     }
@@ -532,6 +536,181 @@ class RecommendationFeedbackConsumerTest {
         assertThat(feedback.get(0).userId()).isEqualTo(USER_ID.toString());
         assertThat(feedback.get(0).itemId()).isEqualTo(POST_ID.toString());
         assertThat(feedback.get(0).timestamp()).isEqualTo(OCCURRED_AT);
+    }
+
+    private DomainEventEnvelope notInterestedEnvelope() {
+        return new DomainEventEnvelope(
+                EVENT_ID,
+                PostEventTypes.POST_NOT_INTERESTED_V1,
+                OCCURRED_AT,
+                USER_ID,
+                "post",
+                POST_ID,
+                Map.of("postId", POST_ID.toString(), "authorId", UUID.randomUUID().toString()));
+    }
+
+    private DomainEventEnvelope notInterestedUndoneEnvelope() {
+        return new DomainEventEnvelope(
+                EVENT_ID,
+                PostEventTypes.POST_NOT_INTERESTED_UNDONE_V1,
+                OCCURRED_AT,
+                USER_ID,
+                "post",
+                POST_ID,
+                Map.of("postId", POST_ID.toString()));
+    }
+
+    private void markStored(boolean stored) {
+        when(postFeedbackService.findNotInterested(USER_ID, Set.of(POST_ID)))
+                .thenReturn(stored ? Set.of(POST_ID) : Set.of());
+    }
+
+    @Test
+    void consume_notInterested_recordsTheNegativeFeedbackRowThenSendsItToGorse() throws Exception {
+        stubProcessOnce();
+        markStored(true);
+
+        consumer.consume(message(notInterestedEnvelope()), channel);
+
+        InOrder order = inOrder(userEventAnalyticsRepository, gorseClient);
+        order.verify(userEventAnalyticsRepository)
+                .insertEngagement(
+                        EVENT_ID,
+                        USER_ID,
+                        UserEventType.POST_NOT_INTERESTED,
+                        "post",
+                        POST_ID,
+                        OCCURRED_AT,
+                        "not_interested",
+                        1.0);
+        ArgumentCaptor<List<GorseFeedback>> captor = ArgumentCaptor.forClass(List.class);
+        order.verify(gorseClient).insertFeedback(captor.capture());
+        assertThat(captor.getValue()).hasSize(1);
+        GorseFeedback sent = captor.getValue().get(0);
+        assertThat(sent.feedbackType()).isEqualTo("not_interested");
+        assertThat(sent.userId()).isEqualTo(USER_ID.toString());
+        assertThat(sent.itemId()).isEqualTo(POST_ID.toString());
+        assertThat(sent.timestamp()).isEqualTo(OCCURRED_AT);
+        assertThat(sent.value()).isEqualTo(1.0);
+        verify(gorseClient, never()).hideItem(any());
+        verify(channel).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_notInterestedAlreadyUndone_keepsTheRowButSendsNothingToGorse() throws Exception {
+        stubProcessOnce();
+        markStored(false);
+
+        consumer.consume(message(notInterestedEnvelope()), channel);
+
+        verify(userEventAnalyticsRepository)
+                .insertEngagement(
+                        EVENT_ID,
+                        USER_ID,
+                        UserEventType.POST_NOT_INTERESTED,
+                        "post",
+                        POST_ID,
+                        OCCURRED_AT,
+                        "not_interested",
+                        1.0);
+        verify(gorseClient, never()).insertFeedback(anyList());
+        verify(gorseClient, never()).hideItem(any());
+        verify(channel).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_notInterestedUndone_recordsTheUndoRowWithoutFeedbackColumnsThenDeletesFeedback()
+            throws Exception {
+        stubProcessOnce();
+        markStored(false);
+
+        consumer.consume(message(notInterestedUndoneEnvelope()), channel);
+
+        InOrder order = inOrder(userEventAnalyticsRepository, gorseClient);
+        order.verify(userEventAnalyticsRepository)
+                .insertImported(
+                        EVENT_ID,
+                        USER_ID,
+                        UserEventType.POST_NOT_INTERESTED_UNDO,
+                        "post",
+                        POST_ID,
+                        "",
+                        OCCURRED_AT);
+        order.verify(gorseClient)
+                .deleteFeedback("not_interested", USER_ID.toString(), POST_ID.toString());
+        verify(userEventAnalyticsRepository, never())
+                .insertEngagement(any(), any(), any(), any(), any(), any(), any(), anyDouble());
+        verify(gorseClient, never()).insertFeedback(anyList());
+        verify(gorseClient, never()).hideItem(any());
+        verify(channel).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_undoDeliveredAfterALaterReapply_keepsTheRowButLeavesGorseUntouched()
+            throws Exception {
+        stubProcessOnce();
+        markStored(true);
+
+        consumer.consume(message(notInterestedUndoneEnvelope()), channel);
+
+        verify(userEventAnalyticsRepository)
+                .insertImported(
+                        EVENT_ID,
+                        USER_ID,
+                        UserEventType.POST_NOT_INTERESTED_UNDO,
+                        "post",
+                        POST_ID,
+                        "",
+                        OCCURRED_AT);
+        verify(gorseClient, never()).deleteFeedback(any(), any(), any());
+        verify(gorseClient, never()).hideItem(any());
+        verify(channel).basicAck(1L, false);
+    }
+
+    @Test
+    void consume_notInterestedWhenClickHouseIsUnavailable_requeuesWithoutTouchingGorse()
+            throws Exception {
+        stubProcessOnce();
+        doThrow(new ClickHouseUnavailableException(Reason.CIRCUIT_OPEN, "circuit open"))
+                .when(userEventAnalyticsRepository)
+                .insertEngagement(any(), any(), any(), any(), any(), any(), any(), anyDouble());
+
+        consumer.consume(message(notInterestedEnvelope()), channel);
+
+        verify(channel).basicNack(1L, false, true);
+        verify(gorseClient, never()).insertFeedback(anyList());
+    }
+
+    @Test
+    void consume_undoWhenClickHouseIsUnavailable_requeuesWithoutTouchingGorse() throws Exception {
+        stubProcessOnce();
+        doThrow(new ClickHouseUnavailableException(Reason.CIRCUIT_OPEN, "circuit open"))
+                .when(userEventAnalyticsRepository)
+                .insertImported(any(), any(), any(), any(), any(), any(), any());
+
+        consumer.consume(message(notInterestedUndoneEnvelope()), channel);
+
+        verify(channel).basicNack(1L, false, true);
+        verify(gorseClient, never()).deleteFeedback(any(), any(), any());
+    }
+
+    @Test
+    void consume_undoWithoutPostId_nacksWithoutRequeue() throws Exception {
+        stubProcessOnce();
+        DomainEventEnvelope envelope =
+                new DomainEventEnvelope(
+                        EVENT_ID,
+                        PostEventTypes.POST_NOT_INTERESTED_UNDONE_V1,
+                        OCCURRED_AT,
+                        USER_ID,
+                        "post",
+                        POST_ID,
+                        Map.of());
+
+        consumer.consume(message(envelope), channel);
+
+        verify(channel).basicNack(1L, false, false);
+        verify(gorseClient, never()).deleteFeedback(any(), any(), any());
     }
 
     @Test

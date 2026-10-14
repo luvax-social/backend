@@ -42,6 +42,12 @@ cache_expire = "5m"
 # here - it is mapped onto the like type at reduced weight rather than given its own type.
 positive_feedback_types = ["like", "save", "comment", "share"]
 read_feedback_types = ["read"]
+# Declared negative feedback: an item a user marked "not interested" is left out of that user's
+# personalized recommendations by Gorse itself. The application filter
+# (RecommendationFeedServiceImpl) stays the authority, because the trending top-up and the
+# popularity and chronological fallbacks never pass through Gorse's exclusion. See gorse/README.md
+# for what was verified.
+negative_feedback_types = ["not_interested"]
 positive_feedback_ttl = 0
 item_ttl = 0
 

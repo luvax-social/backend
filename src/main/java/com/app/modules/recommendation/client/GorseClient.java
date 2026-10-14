@@ -128,6 +128,21 @@ public interface GorseClient {
     void upsertFeedback(List<GorseFeedback> feedback);
 
     /**
+     * Deletes one feedback tuple, for an undone preference.
+     *
+     * <p>Idempotent: a tuple Gorse does not hold, answered as not found, is a success, so a
+     * replayed or reordered undo is not an error. Gorse takes the deleted item back into that
+     * user's recommendations on its next ranking pass, not immediately. Verified against v0.5.11:
+     * {@code DELETE /api/feedback/{type}/{user}/{item}} answers {@code 200} with {@code
+     * RowAffected: 1} for a held tuple.
+     *
+     * @param feedbackType the Gorse feedback type
+     * @param userId the user
+     * @param itemId the item
+     */
+    void deleteFeedback(String feedbackType, String userId, String itemId);
+
+    /**
      * Reads one page of the item catalogue Gorse holds, hidden items included.
      *
      * @param cursor position returned by the previous page, or null or empty for the first

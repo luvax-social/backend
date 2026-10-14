@@ -3,6 +3,7 @@ package com.app.modules.recommendation.consumer;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -28,6 +29,7 @@ import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.modules.comment.messaging.CommentEventTypes;
 import com.app.modules.message.messaging.MessageEventTypes;
 import com.app.modules.post.messaging.PostEventTypes;
+import com.app.modules.post.service.PostFeedbackService;
 import com.app.modules.recommendation.client.GorseClient;
 import com.app.modules.recommendation.client.dto.GorseFeedback;
 import com.app.modules.recommendation.enums.UserEventType;
@@ -44,6 +46,12 @@ import com.rabbitmq.client.Channel;
  * the recommender reproduces exactly what this pipeline accumulated. Both writes are idempotent
  * (deterministic event id folded by the table engine, Gorse feedback upsert), so redeliveries and
  * retries after a partial failure are safe.
+ *
+ * <p>A viewer's "not interested" mark is the one declared negative signal: {@code
+ * post.not-interested.v1} is sent as {@code not_interested} feedback and {@code
+ * post.not-interested-undone.v1} deletes the tuple. The two can arrive out of order, so each reads
+ * {@code post_not_interested} before it touches Gorse and skips the call when the row says the
+ * other event has won. Neither ever hides the item, because the hidden flag is global to the item.
  *
  * <p>Uses manual acknowledgement: ack after idempotent duplicate detection or successful side
  * effect. A permanently failing message is nacked without requeue; {@code
@@ -87,6 +95,7 @@ public class RecommendationFeedbackConsumer {
     private final ConsumerRetryProperties retryProperties;
     private final UserEventAnalyticsRepository userEventAnalyticsRepository;
     private final UserSummaryService userSummaryService;
+    private final PostFeedbackService postFeedbackService;
     private final GorseClient gorseClient;
     private final Sleeper sleeper;
 
@@ -97,6 +106,7 @@ public class RecommendationFeedbackConsumer {
             ConsumerRetryProperties retryProperties,
             UserEventAnalyticsRepository userEventAnalyticsRepository,
             UserSummaryService userSummaryService,
+            PostFeedbackService postFeedbackService,
             GorseClient gorseClient) {
         this(
                 parser,
@@ -104,6 +114,7 @@ public class RecommendationFeedbackConsumer {
                 retryProperties,
                 userEventAnalyticsRepository,
                 userSummaryService,
+                postFeedbackService,
                 gorseClient,
                 Thread::sleep);
     }
@@ -114,6 +125,7 @@ public class RecommendationFeedbackConsumer {
             ConsumerRetryProperties retryProperties,
             UserEventAnalyticsRepository userEventAnalyticsRepository,
             UserSummaryService userSummaryService,
+            PostFeedbackService postFeedbackService,
             GorseClient gorseClient,
             Sleeper sleeper) {
         this.parser = parser;
@@ -121,6 +133,7 @@ public class RecommendationFeedbackConsumer {
         this.retryProperties = retryProperties;
         this.userEventAnalyticsRepository = userEventAnalyticsRepository;
         this.userSummaryService = userSummaryService;
+        this.postFeedbackService = postFeedbackService;
         this.gorseClient = gorseClient;
         this.sleeper = sleeper;
     }
@@ -187,8 +200,71 @@ public class RecommendationFeedbackConsumer {
     }
 
     private void apply(DomainEventEnvelope event) {
+        if (PostEventTypes.POST_NOT_INTERESTED_UNDONE_V1.equals(event.eventType())) {
+            applyNotInterestedUndone(event);
+            return;
+        }
         FeedbackMapping mapping = mapEventType(event.eventType());
         UUID postId = extractPostId(event);
+        UUID actorId = requireExistingActor(event);
+        double value = feedbackValue(event);
+        userEventAnalyticsRepository.insertEngagement(
+                event.eventId(),
+                actorId,
+                mapping.userEventType(),
+                "post",
+                postId,
+                event.occurredAt(),
+                mapping.gorseFeedbackType(),
+                value);
+        // Events can be delivered out of order. If the viewer has taken the preference back since
+        // this event was written, and the undo event was handled first, sending it now would leave
+        // Gorse holding a preference PostgreSQL no longer has. The ClickHouse row stays: it records
+        // that the mark happened.
+        if (PostEventTypes.POST_NOT_INTERESTED_V1.equals(event.eventType())
+                && !preferenceStands(actorId, postId)) {
+            log.info(
+                    "Not-interested event {} skipped for Gorse: the preference was undone since",
+                    event.eventId());
+            return;
+        }
+        gorseClient.insertFeedback(
+                List.of(
+                        new GorseFeedback(
+                                mapping.gorseFeedbackType(),
+                                actorId.toString(),
+                                postId.toString(),
+                                event.occurredAt(),
+                                value)));
+    }
+
+    // The undo row has no feedback columns: it was never sent to Gorse as feedback, so a rebuild
+    // must not replay it. The recommender is only told to forget the tuple, never to hide the post,
+    // because an item's hidden flag is global and this preference belongs to one viewer.
+    private void applyNotInterestedUndone(DomainEventEnvelope event) {
+        UUID postId = extractPostId(event);
+        UUID actorId = requireExistingActor(event);
+        userEventAnalyticsRepository.insertImported(
+                event.eventId(),
+                actorId,
+                UserEventType.POST_NOT_INTERESTED_UNDO,
+                "post",
+                postId,
+                "",
+                event.occurredAt());
+        // The mirror of the guard on the apply path: an undo that arrives after the viewer marked
+        // the post again must not erase the newer mark from Gorse.
+        if (preferenceStands(actorId, postId)) {
+            log.info(
+                    "Not-interested undo {} skipped for Gorse: the preference was applied again",
+                    event.eventId());
+            return;
+        }
+        gorseClient.deleteFeedback(
+                GorseFeedback.NOT_INTERESTED_TYPE, actorId.toString(), postId.toString());
+    }
+
+    private UUID requireExistingActor(DomainEventEnvelope event) {
         UUID actorId = event.actorId();
         if (actorId == null) {
             throw new PermanentMessageException(
@@ -202,24 +278,13 @@ public class RecommendationFeedbackConsumer {
             throw new PermanentMessageException(
                     "Engagement event references a user that no longer exists: " + event.eventId());
         }
-        double value = feedbackValue(event);
-        userEventAnalyticsRepository.insertEngagement(
-                event.eventId(),
-                actorId,
-                mapping.userEventType(),
-                "post",
-                postId,
-                event.occurredAt(),
-                mapping.gorseFeedbackType(),
-                value);
-        gorseClient.insertFeedback(
-                List.of(
-                        new GorseFeedback(
-                                mapping.gorseFeedbackType(),
-                                actorId.toString(),
-                                postId.toString(),
-                                event.occurredAt(),
-                                value)));
+        return actorId;
+    }
+
+    // PostgreSQL is the system of record for the preference; the event only announces a change to
+    // it.
+    private boolean preferenceStands(UUID actorId, UUID postId) {
+        return postFeedbackService.findNotInterested(actorId, Set.of(postId)).contains(postId);
     }
 
     // An impression carries its dwell so a future positive_feedback_types threshold can promote a
@@ -251,6 +316,9 @@ public class RecommendationFeedbackConsumer {
                     new FeedbackMapping(UserEventType.COMMENT_LIKE, "like");
             case MessageEventTypes.POST_SHARED_V1 ->
                     new FeedbackMapping(UserEventType.POST_SHARE, "share");
+            case PostEventTypes.POST_NOT_INTERESTED_V1 ->
+                    new FeedbackMapping(
+                            UserEventType.POST_NOT_INTERESTED, GorseFeedback.NOT_INTERESTED_TYPE);
             default -> throw new PermanentMessageException("unknown event type: " + eventType);
         };
     }

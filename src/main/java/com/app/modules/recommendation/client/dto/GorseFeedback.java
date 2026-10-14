@@ -18,4 +18,11 @@ public record GorseFeedback(
         // Carried so a future positive_feedback_types threshold can promote long dwells to
         // positive feedback without a code change. No threshold is configured today, so v0.5.11
         // reads this field and ignores it.
-        @JsonProperty("Value") double value) {}
+        @JsonProperty("Value") double value) {
+
+    /**
+     * The feedback type of a viewer's "not interested" mark. It is the only negative type declared
+     * in {@code negative_feedback_types} of the Gorse configuration.
+     */
+    public static final String NOT_INTERESTED_TYPE = "not_interested";
+}

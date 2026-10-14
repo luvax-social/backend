@@ -217,7 +217,7 @@ Extra sub-packages (e.g. `oauth2/`, `validation/`, `storage/`) follow the same p
 - **`recommendation`**: Owns `user_events` and the personalized ranked feed.
 `user_events` lives in ClickHouse (`luvax_analytics.user_events`), not PostgreSQL.
 The feed is backed by the external Gorse recommender, reached over REST through `GorseClient`; `RecommendationFeedServiceImpl` runs a Source → Hydrator → Filter → Scorer → Selector pipeline with a `gorse` circuit breaker and degrades to the popularity ranking then the chronological feed.
-`user_events` has three writers: `UserEventRecorder` produces `session_start`, `search`, and `profile_view` off the request thread with `wait_for_async_insert=0`, dropping rows rather than failing or extending the caller's request; `RecommendationFeedbackConsumer` turns `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1` and `comment.liked.v1` into idempotent append-only rows and then Gorse feedback, ClickHouse first, and stores the exact Gorse type and value it sent; `UserEventImportConsumer` writes `recommendation.user-event.imported.v1` events (the seed's path) and never sends them to Gorse.
+`user_events` has three writers: `UserEventRecorder` produces `session_start`, `search`, and `profile_view` off the request thread with `wait_for_async_insert=0`, dropping rows rather than failing or extending the caller's request; `RecommendationFeedbackConsumer` turns `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1` and `comment.liked.v1` into idempotent append-only rows and then Gorse feedback, ClickHouse first, and stores the exact Gorse type and value it sent, and also handles `post.not-interested.v1` (sent as `not_interested` negative feedback) and `post.not-interested-undone.v1` (the Gorse tuple is deleted), each guarded by a read of `post_not_interested` so the two converge when delivered out of order; `UserEventImportConsumer` writes `recommendation.user-event.imported.v1` events (the seed's path) and never sends them to Gorse.
 The For You read-set and the hashtag affinity recompute both read ClickHouse.
 `rebuild/` holds the operator-triggered Gorse rebuild (`GorseRebuildRunner`, `GorseRebuildServiceImpl`), and `GorsePurger` is the shared Gorse store truncation used by it and by the seed reset.
 See `docs/modules/recommendation/README.md`.
@@ -668,7 +668,7 @@ never sees them.
 | `comment.notification.queue` | `comment.unliked.v1` | `CommentRabbitBindingConfig` |
 | `post.notification.queue` | `post.liked.v1`, `post.unliked.v1` | `PostRabbitBindingConfig` |
 | `story.notification.queue` | `story.viewed.v1` | `StoryRabbitBindingConfig` |
-| `recommendation.feedback.queue` | `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1`, `comment.liked.v1` | `RecommendationRabbitBindingConfig` |
+| `recommendation.feedback.queue` | `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1`, `comment.liked.v1`, `post.not-interested.v1`, `post.not-interested-undone.v1` | `RecommendationRabbitBindingConfig` |
 | `admin.notification.queue` | `user.warned.v1` | `AdminRabbitBindingConfig` |
 | `admin.action.replication.queue` | `admin.action.recorded.v1`, `admin.action.changed.v1` | `AdminAnalyticsRabbitBindingConfig` |
 | `admin.platform-stats.queue` | `admin.platform-stats.collected.v1` | `AdminAnalyticsRabbitBindingConfig` |
@@ -746,7 +746,7 @@ Each application user runs under a settings profile with a per-user memory cap m
 | `admin.action.recorded.v1`, `admin.action.changed.v1` | `AdminActionRecorder`, the V127 trigger, the seed emitter | `AdminActionReplicationConsumer` (`adminActionReplication`, 1) |
 | `admin.platform-stats.collected.v1` | `PlatformStatsCollectionServiceImpl`, the seed | `PlatformStatsIngestConsumer` (`platformStatsIngest`, 2) |
 | `recommendation.user-event.imported.v1` | the seed | `UserEventImportConsumer` (`userEventImport`, 2) |
-| `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1`, `comment.liked.v1` | the owning modules | `RecommendationFeedbackConsumer` (`recommendationFeedback`, `app.recommendation.consumer.concurrency`, default 4) |
+| `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1`, `comment.liked.v1`, `post.not-interested.v1`, `post.not-interested-undone.v1` | the owning modules | `RecommendationFeedbackConsumer` (`recommendationFeedback`, `app.recommendation.consumer.concurrency`, default 4) |
 
 - Consumers insert with `async_insert = 1, wait_for_async_insert = 1`, so the acknowledgement follows the part write; the busy timeout (5 to 20 ms) comes from the writer profile.
 - `UserEventRecorder` inserts with `wait_for_async_insert = 0`, at most 8 writes in flight, and drops a row rather than fail the request; drops are counted by reason and ClickHouse's own `FailedAsyncInsertQuery` counter covers the silent failures.

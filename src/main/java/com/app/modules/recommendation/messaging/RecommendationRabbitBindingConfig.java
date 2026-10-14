@@ -60,6 +60,25 @@ public class RecommendationRabbitBindingConfig {
                 .with(CommentEventTypes.COMMENT_LIKED_V1);
     }
 
+    // These two keys are not in DomainSignalMappings: RecommendationFeedbackConsumer writes their
+    // ClickHouse rows itself because it also sends them to Gorse. RabbitMqTopologyConfigTest fails
+    // when either is unbound or reaches any other queue.
+    @Bean
+    Binding recommendationPostNotInterestedBinding(
+            Queue recommendationFeedbackQueue, TopicExchange socialEventsExchange) {
+        return BindingBuilder.bind(recommendationFeedbackQueue)
+                .to(socialEventsExchange)
+                .with(PostEventTypes.POST_NOT_INTERESTED_V1);
+    }
+
+    @Bean
+    Binding recommendationPostNotInterestedUndoneBinding(
+            Queue recommendationFeedbackQueue, TopicExchange socialEventsExchange) {
+        return BindingBuilder.bind(recommendationFeedbackQueue)
+                .to(socialEventsExchange)
+                .with(PostEventTypes.POST_NOT_INTERESTED_UNDONE_V1);
+    }
+
     @Bean
     Binding userEventImportedBinding(
             Queue userEventImportQueue, TopicExchange socialEventsExchange) {

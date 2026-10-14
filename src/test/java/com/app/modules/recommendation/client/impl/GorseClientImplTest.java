@@ -1,10 +1,14 @@
 package com.app.modules.recommendation.client.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.time.OffsetDateTime;
@@ -15,8 +19,11 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 
 import com.app.modules.recommendation.client.dto.GorseFeedback;
@@ -139,6 +146,60 @@ class GorseClientImplTest {
         client.upsertFeedback(List.of(new GorseFeedback("like", "u1", "i1", at, 2.5)));
 
         server.verify();
+    }
+
+    @Test
+    void deleteFeedback_sendsDeleteForTheTupleWithAuthHeader() {
+        server.expect(requestTo("http://gorse.test/api/feedback/not_interested/user-1/item-1"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andExpect(header("X-API-Key", API_KEY))
+                .andRespond(withSuccess("{\"RowAffected\":1}", MediaType.APPLICATION_JSON));
+
+        client.deleteFeedback("not_interested", "user-1", "item-1");
+
+        server.verify();
+    }
+
+    @Test
+    void deleteFeedback_gorseAnswersNotFound_isSuccessBecauseUndoIsIdempotent() {
+        server.expect(requestTo("http://gorse.test/api/feedback/not_interested/user-1/item-1"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThatCode(() -> client.deleteFeedback("not_interested", "user-1", "item-1"))
+                .doesNotThrowAnyException();
+        server.verify();
+    }
+
+    @Test
+    void deleteFeedback_gorseReportsTheTupleNotFoundInAServerError_isSuccess() {
+        server.expect(requestTo("http://gorse.test/api/feedback/not_interested/user-1/item-1"))
+                .andRespond(
+                        withServerError()
+                                .body("feedback not found")
+                                .contentType(MediaType.TEXT_PLAIN));
+
+        assertThatCode(() -> client.deleteFeedback("not_interested", "user-1", "item-1"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void deleteFeedback_otherServerError_propagatesSoTheConsumerRetries() {
+        server.expect(requestTo("http://gorse.test/api/feedback/not_interested/user-1/item-1"))
+                .andRespond(
+                        withServerError().body("database down").contentType(MediaType.TEXT_PLAIN));
+
+        assertThatThrownBy(() -> client.deleteFeedback("not_interested", "user-1", "item-1"))
+                .isInstanceOf(HttpServerErrorException.class);
+    }
+
+    @Test
+    void deleteFeedback_clientError_propagatesBecauseTheRequestIsWrong() {
+        server.expect(requestTo("http://gorse.test/api/feedback/not_interested/user-1/item-1"))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST));
+
+        assertThatThrownBy(() -> client.deleteFeedback("not_interested", "user-1", "item-1"))
+                .isInstanceOf(HttpClientErrorException.BadRequest.class);
     }
 
     @Test
