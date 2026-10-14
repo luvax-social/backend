@@ -67,11 +67,12 @@ public class SeedResetService {
 
     private final GorsePurger gorsePurger;
 
-    // Verified against a live `\dt` on 2026-08-25: every name below matches the running schema
-    // exactly, no renames since database/schema.sql was last regenerated.
+    // Every name below is a table the Flyway migrations create (through V146) and none has been
+    // renamed since; a table a later migration adds belongs in this list too.
     private static final String[] TRUNCATE_ORDER = {
         // FK-leaf tables first; CASCADE covers the rest, but explicit order keeps intent readable.
         "comment_likes",
+        "post_not_interested",
         "post_likes",
         "post_saves",
         "story_likes",
@@ -84,6 +85,11 @@ public class SeedResetService {
         "post_user_tags",
         "post_edit_history",
         "comments",
+        "user_hidden_words",
+        "hidden_words",
+        "user_mutes",
+        "account_show_fewer",
+        "interaction_limits",
         "messages",
         "conversation_participants",
         "conversations",

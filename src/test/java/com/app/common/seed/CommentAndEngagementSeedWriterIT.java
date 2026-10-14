@@ -201,7 +201,9 @@ class CommentAndEngagementSeedWriterIT {
                                 + " post_likes pl WHERE pl.post_id = p.id) OR p.save_count <>"
                                 + " (SELECT COUNT(*) FROM post_saves ps WHERE ps.post_id = p.id)"
                                 + " OR p.comment_count <> (SELECT COUNT(*) FROM comments c WHERE"
-                                + " c.post_id = p.id AND c.deleted_at IS NULL)",
+                                + " c.post_id = p.id AND c.deleted_at IS NULL AND"
+                                + " c.admin_removed_at IS NULL AND c.moderation_status ="
+                                + " 'approved')",
                         Integer.class);
         assertThat(postCounterMismatches).isZero();
 
@@ -212,9 +214,92 @@ class CommentAndEngagementSeedWriterIT {
                         "SELECT COUNT(*) FROM comments c WHERE c.like_count <> (SELECT COUNT(*)"
                                 + " FROM comment_likes cl WHERE cl.comment_id = c.id) OR"
                                 + " c.reply_count <> (SELECT COUNT(*) FROM comments r WHERE"
-                                + " r.parent_id = c.id AND r.deleted_at IS NULL)",
+                                + " r.parent_id = c.id AND r.deleted_at IS NULL AND"
+                                + " r.admin_removed_at IS NULL AND r.moderation_status ="
+                                + " 'approved')",
                         Integer.class);
         assertThat(commentCounterMismatches).isZero();
+    }
+
+    @Test
+    void write_seedsFilteredCommentsAndNotInterestedRowsWithoutTouchingCounters() {
+        seedResetService.reset();
+        SeedContent content = new SeedDataLoader().load();
+        SeedTimeline timeline = new SeedTimeline(20260825L, Instant.parse("2026-08-25T00:00:00Z"));
+
+        Map<String, UUID> usersByUsername = userSeedWriter.write(content, timeline);
+        Map<String, UUID> mediaByCompositeKey = mediaSeedWriter.write(content, usersByUsername);
+        Map<String, UUID> postIdBySeedId =
+                postSeedWriter.write(content, usersByUsername, mediaByCompositeKey, timeline);
+        List<UUID> commentIds =
+                commentSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
+        engagementSeedWriter.write(content, usersByUsername, postIdBySeedId, commentIds, timeline);
+
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM comments WHERE moderation_status = 'hidden'"
+                                        + " AND hidden_reason = 'hidden_words'"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM comments WHERE moderation_status = 'hidden'"
+                                        + " AND hidden_reason = 'limited_interaction'"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM comments WHERE moderation_status = 'hidden'"
+                                        + " AND hidden_reason = 'hidden_parent'"))
+                .isGreaterThanOrEqualTo(2);
+        // A reply is hidden only because its parent is, and its author is the parent's author.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM comments r JOIN comments p ON p.id ="
+                                        + " r.parent_id WHERE r.hidden_reason = 'hidden_parent'"
+                                        + " AND (p.moderation_status <> 'hidden' OR p.user_id <>"
+                                        + " r.user_id)"))
+                .isZero();
+        // An unhidden comment is stored approved, so it counts like any other comment.
+        long unhidden =
+                content.interactionControl().hiddenComments().stream()
+                        .filter(c -> c.unhidden())
+                        .count();
+        assertThat(unhidden).isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM comments WHERE moderation_status = 'approved'"
+                                        + " AND content IN ('My cat photobombed the giveaway"
+                                        + " shelf', 'Miracle pill? No, just miles')"))
+                .isEqualTo(2);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM posts p WHERE p.comment_count <> (SELECT"
+                                        + " COUNT(*) FROM comments c WHERE c.post_id = p.id AND"
+                                        + " c.deleted_at IS NULL AND c.admin_removed_at IS NULL"
+                                        + " AND c.moderation_status = 'approved')"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM comment_likes cl JOIN comments c ON c.id ="
+                                        + " cl.comment_id WHERE c.moderation_status = 'hidden'"))
+                .isZero();
+
+        long liveNotInterested =
+                content.interactionControl().notInterested().stream()
+                        .filter(n -> !n.undone())
+                        .count();
+        assertThat(countRows("post_not_interested")).isEqualTo((int) liveNotInterested);
+        assertThat(liveNotInterested).isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM post_not_interested n JOIN posts p ON p.id ="
+                                        + " n.post_id WHERE p.user_id = n.user_id OR p.status <>"
+                                        + " 'published'"))
+                .isZero();
+    }
+
+    private int count(String sql) {
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class);
+        return value == null ? 0 : value;
     }
 
     private int countRows(String table) {

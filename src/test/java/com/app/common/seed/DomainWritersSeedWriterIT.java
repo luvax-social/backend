@@ -147,6 +147,22 @@ class DomainWritersSeedWriterIT {
         assertAnalyticsBucketsClosedBeforeReferenceNow();
         assertUserEventsEnqueuedForImport();
         assertUserEventsCoverEveryEventTypeValue();
+        assertHiddenCommentsMatchTheOwnersWordLists();
+    }
+
+    // Hidden Words filter at write time, so each comment hidden for that reason really contains an
+    // entry of the post owner's list or of the platform list.
+    private void assertHiddenCommentsMatchTheOwnersWordLists() {
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM comments c JOIN posts p ON p.id = c.post_id"
+                                        + " WHERE c.hidden_reason = 'hidden_words' AND NOT EXISTS"
+                                        + " (SELECT 1 FROM user_hidden_words w WHERE w.user_id ="
+                                        + " p.user_id AND lower(c.content) LIKE '%' ||"
+                                        + " w.normalized_phrase || '%') AND NOT EXISTS (SELECT 1"
+                                        + " FROM hidden_words h WHERE lower(c.content) LIKE '%' ||"
+                                        + " h.normalized_phrase || '%')"))
+                .isZero();
     }
 
     // Step 1's hardest invariant: every live story's created_at is within 24h of referenceNow,

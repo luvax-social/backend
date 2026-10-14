@@ -22,6 +22,7 @@ import com.app.common.seed.loader.SeedContent;
 import com.app.common.seed.model.CommentChainSeed;
 import com.app.common.seed.model.CommentChainTurn;
 import com.app.common.seed.model.CommentPoolEntry;
+import com.app.common.seed.model.HiddenCommentSeed;
 import com.app.common.seed.model.PostSeed;
 import com.app.common.seed.model.UserSeed;
 import com.app.common.seed.time.SeedTimeline;
@@ -53,6 +54,14 @@ import lombok.extern.slf4j.Slf4j;
  * CommentRepository.softDeleteSubtree}'s tombstone shape - the root and every reply beneath it
  * carry the same {@code deleted_at}, computed via {@link SeedTimeline#commentDeletedAt(Instant)} so
  * it can never predate the subtree's own newest activity.
+ *
+ * <p><b>Filtered comments</b>: the entries of {@code safety/interaction_control.json}'s {@code
+ * hidden_comments} are written last, as the comments a post owner's Hidden Words or interaction
+ * limit filtered at write time ({@code moderation_status = 'hidden'} with the matching {@code
+ * hidden_reason}) and the ones the owner has since released (stored approved). A reply to a hidden
+ * comment is hidden with {@code hidden_parent}. The triggers leave a hidden row out of {@code
+ * posts.comment_count} and its parent's {@code reply_count}, exactly as they do for one written
+ * through the service.
  *
  * <p>Never writes {@code like_count} or {@code reply_count} - both are trigger-maintained (see
  * {@code comment/DATA_RULES.md} Section 2), so this writer's {@code INSERT} statement omits them
@@ -89,6 +98,10 @@ public class CommentSeedWriter {
                     + " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     private static final String SOFT_DELETE_SUBTREE_SQL =
             "UPDATE comments SET deleted_at = ? WHERE id = ?";
+    private static final String INSERT_FILTERED_COMMENT_SQL =
+            "INSERT INTO comments (id, post_id, user_id, parent_id, root_id, depth, content,"
+                    + " moderation_status, hidden_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?,"
+                    + " ?, ?)";
 
     private final JdbcTemplate jdbc;
 
@@ -100,7 +113,7 @@ public class CommentSeedWriter {
      *
      * @param usersByUsername username-to-id map produced by {@link UserSeedWriter#write}
      * @param postIdBySeedId seed-id-to-generated-id map produced by {@link PostSeedWriter#write}
-     * @return every generated {@code comments.id}, in insertion order
+     * @return every generated {@code comments.id}, in insertion order, the filtered comments last
      */
     public List<UUID> write(
             SeedContent content,
@@ -152,6 +165,10 @@ public class CommentSeedWriter {
 
         int softDeletedSubtrees = softDeleteSubtrees(generated, random, timeline);
         log.info("[seed] comments: {} subtrees soft-deleted", softDeletedSubtrees);
+
+        generated.addAll(
+                writeFilteredComments(
+                        content, usersByUsername, postIdBySeedId, postCreatedAtById, timeline));
 
         return generated.stream().map(CommentRow::id).collect(Collectors.toList());
     }
@@ -364,6 +381,88 @@ public class CommentSeedWriter {
         jdbc.batchUpdate(
                 SOFT_DELETE_SUBTREE_SQL, updateRows, updateRows.size(), this::bindSoftDeleteRow);
         return softDeletedCount;
+    }
+
+    // Written after the soft-deletes so no filtered comment can fall inside a deleted subtree, and
+    // in file order so a hidden_parent reply always finds its parent already inserted.
+    private List<CommentRow> writeFilteredComments(
+            SeedContent content,
+            Map<String, UUID> usersByUsername,
+            Map<String, UUID> postIdBySeedId,
+            Map<UUID, Instant> postCreatedAtById,
+            SeedTimeline timeline) {
+        Map<String, List<PostSeed>> publishedByAuthor = new HashMap<>();
+        for (PostSeed post : content.posts()) {
+            if (PUBLISHED_STATUS.equals(post.status())) {
+                publishedByAuthor
+                        .computeIfAbsent(post.authorUsername(), key -> new ArrayList<>())
+                        .add(post);
+            }
+        }
+        Map<String, CommentRow> writtenBySeedId = new HashMap<>();
+        Map<String, Integer> depthBySeedId = new HashMap<>();
+        List<Object[]> rows = new ArrayList<>();
+        List<CommentRow> written = new ArrayList<>();
+        for (HiddenCommentSeed seed : content.interactionControl().hiddenComments()) {
+            PostSeed post = publishedByAuthor.get(seed.postOwner()).get(seed.postIndex());
+            UUID postId = postIdBySeedId.get(post.id());
+            UUID authorId = usersByUsername.get(seed.commenter());
+            if (postId == null || authorId == null) {
+                throw new IllegalStateException(
+                        "CommentSeedWriter: hidden_comments entry '"
+                                + seed.id()
+                                + "' names a post or commenter that was not written");
+            }
+            CommentRow parent = seed.replyTo() == null ? null : writtenBySeedId.get(seed.replyTo());
+            Instant createdAt =
+                    timeline.commentCreatedAt(
+                            parent == null ? postCreatedAtById.get(postId) : parent.createdAt());
+            UUID id = UUID.randomUUID();
+            CommentRow row =
+                    new CommentRow(id, parent == null ? id : parent.subtreeRootId(), createdAt);
+            int depth = parent == null ? 0 : depthBySeedId.get(seed.replyTo()) + 1;
+            writtenBySeedId.put(seed.id(), row);
+            depthBySeedId.put(seed.id(), depth);
+            written.add(row);
+            rows.add(
+                    new Object[] {
+                        id,
+                        postId,
+                        authorId,
+                        parent == null ? null : parent.id(),
+                        row.subtreeRootId(),
+                        (short) depth,
+                        seed.text(),
+                        seed.unhidden() ? "approved" : "hidden",
+                        seed.unhidden() ? null : seed.reason(),
+                        Timestamp.from(createdAt)
+                    });
+        }
+        jdbc.batchUpdate(
+                INSERT_FILTERED_COMMENT_SQL, rows, rows.size(), this::bindFilteredCommentRow);
+        log.info("[seed] comments: {} filtered comments written", rows.size());
+        return written;
+    }
+
+    private void bindFilteredCommentRow(PreparedStatement ps, Object[] row) throws SQLException {
+        ps.setObject(1, row[0]);
+        ps.setObject(2, row[1]);
+        ps.setObject(3, row[2]);
+        if (row[3] == null) {
+            ps.setNull(4, Types.OTHER);
+        } else {
+            ps.setObject(4, row[3]);
+        }
+        ps.setObject(5, row[4]);
+        ps.setShort(6, (Short) row[5]);
+        ps.setString(7, (String) row[6]);
+        ps.setString(8, (String) row[7]);
+        if (row[8] == null) {
+            ps.setNull(9, Types.VARCHAR);
+        } else {
+            ps.setString(9, (String) row[8]);
+        }
+        ps.setTimestamp(10, (Timestamp) row[9]);
     }
 
     private Map<UUID, Instant> fetchPostCreatedAtById() {

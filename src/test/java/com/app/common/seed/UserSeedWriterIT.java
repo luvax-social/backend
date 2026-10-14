@@ -114,6 +114,40 @@ class UserSeedWriterIT {
         assertThat(nonZeroCounters).isZero();
     }
 
+    @Test
+    void write_seedsEveryMessagePermissionAndTheSystemWordToggle() {
+        seedResetService.reset();
+        SeedContent content = new SeedDataLoader().load();
+        SeedTimeline timeline = new SeedTimeline(20260825L, Instant.parse("2026-08-25T00:00:00Z"));
+
+        userSeedWriter.write(content, timeline);
+
+        for (String permission : new String[] {"everyone", "following", "nobody"}) {
+            Integer rows =
+                    jdbcTemplate.queryForObject(
+                            "SELECT COUNT(*) FROM user_settings WHERE message_permission ="
+                                    + " ?::message_permission",
+                            Integer.class,
+                            permission);
+            assertThat(rows)
+                    .as("accounts with message_permission %s", permission)
+                    .isGreaterThanOrEqualTo(5);
+        }
+        Integer systemListOff =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM user_settings WHERE hidden_words_system_enabled ="
+                                + " FALSE",
+                        Integer.class);
+        assertThat(systemListOff).isGreaterThanOrEqualTo(5);
+        Integer settingsMatchingUsersJson =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM user_settings s JOIN users u ON u.id = s.user_id"
+                                + " WHERE u.username IN ('james.carter.dev', 'lily.uxui')"
+                                + " AND s.message_permission = 'following'",
+                        Integer.class);
+        assertThat(settingsMatchingUsersJson).isEqualTo(2);
+    }
+
     private int countRows(String table) {
         Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
         return count == null ? 0 : count;

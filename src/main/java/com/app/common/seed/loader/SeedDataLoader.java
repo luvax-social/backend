@@ -21,6 +21,7 @@ import com.app.common.seed.model.BadgeSeed;
 import com.app.common.seed.model.CommentPoolSeed;
 import com.app.common.seed.model.ConversationSeed;
 import com.app.common.seed.model.HashtagSeed;
+import com.app.common.seed.model.InteractionControlSeed;
 import com.app.common.seed.model.LegacyGrantSeed;
 import com.app.common.seed.model.MediaManifestEntry;
 import com.app.common.seed.model.MessageSeed;
@@ -66,7 +67,7 @@ public class SeedDataLoader {
     }
 
     /**
-     * Loads all eight seed JSON files and validates every cross-file reference they carry.
+     * Loads every seed JSON file and validates every cross-file reference they carry.
      *
      * @throws IllegalStateException if a file is malformed JSON, or if a post's author, a media
      *     reference, a comment-pool topic, or a conversation participant does not resolve against
@@ -96,6 +97,8 @@ public class SeedDataLoader {
         SupportTicketPoolSeed supportTicketPools =
                 readFile("support/support_ticket_pools.json", SupportTicketPoolSeed.class);
         BadgeSeed badges = readFile("verification/badges.json", BadgeSeed.class);
+        InteractionControlSeed interactionControl =
+                readFile("safety/interaction_control.json", InteractionControlSeed.class);
 
         Set<String> usernames = users.stream().map(UserSeed::username).collect(Collectors.toSet());
         Set<String> mediaIds =
@@ -118,6 +121,7 @@ public class SeedDataLoader {
         validateConversationParticipantScopedFieldsResolve(conversations);
         validateSupplementaryReportsAreUnique(supplementaryReports);
         validateBadgeSubjectsExist(badges, users);
+        InteractionControlValidator.validate(interactionControl, users, posts);
 
         return new SeedContent(
                 personas,
@@ -131,7 +135,8 @@ public class SeedDataLoader {
                 supplementaryReports,
                 mediaManifest,
                 supportTicketPools,
-                badges);
+                badges,
+                interactionControl);
     }
 
     // Mirrors validatePostAuthorsExist: a badge names its subject as a bare username, and a

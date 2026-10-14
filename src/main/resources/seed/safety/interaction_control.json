@@ -1,0 +1,857 @@
+{
+  "_note": "Interaction control seed content. Every username resolves against users.json. Mutes, show fewer and not interested entries marked undone write no row and only produce the history signals, because an undone preference leaves no row behind.",
+  "mutes": [
+    {
+      "viewer": "user_public",
+      "target": "shop.mimidress",
+      "mute_posts": true,
+      "mute_stories": false,
+      "days_ago": 3,
+      "undone": false
+    },
+    {
+      "viewer": "hunter.finance",
+      "target": "yasmin.brandmarketing",
+      "mute_posts": true,
+      "mute_stories": false,
+      "days_ago": 7,
+      "undone": false
+    },
+    {
+      "viewer": "james.carter.dev",
+      "target": "streetwear.atx1",
+      "mute_posts": true,
+      "mute_stories": false,
+      "days_ago": 11,
+      "undone": false
+    },
+    {
+      "viewer": "lily.uxui",
+      "target": "kane.runs",
+      "mute_posts": true,
+      "mute_stories": false,
+      "days_ago": 15,
+      "undone": false
+    },
+    {
+      "viewer": "kellan.newgrad25",
+      "target": "tucker.trailrunner",
+      "mute_posts": true,
+      "mute_stories": false,
+      "days_ago": 19,
+      "undone": false
+    },
+    {
+      "viewer": "yuna.study",
+      "target": "nora.investsafe",
+      "mute_posts": true,
+      "mute_stories": false,
+      "days_ago": 23,
+      "undone": false
+    },
+    {
+      "viewer": "user_public",
+      "target": "victor.marathon",
+      "mute_posts": false,
+      "mute_stories": true,
+      "days_ago": 5,
+      "undone": false
+    },
+    {
+      "viewer": "hunter.finance",
+      "target": "corner.sandwich3",
+      "mute_posts": false,
+      "mute_stories": true,
+      "days_ago": 8,
+      "undone": false
+    },
+    {
+      "viewer": "james.carter.dev",
+      "target": "cafe.gochoc",
+      "mute_posts": false,
+      "mute_stories": true,
+      "days_ago": 11,
+      "undone": false
+    },
+    {
+      "viewer": "lily.uxui",
+      "target": "dean.lensman",
+      "mute_posts": false,
+      "mute_stories": true,
+      "days_ago": 14,
+      "undone": false
+    },
+    {
+      "viewer": "kellan.newgrad25",
+      "target": "derekshoots",
+      "mute_posts": false,
+      "mute_stories": true,
+      "days_ago": 17,
+      "undone": false
+    },
+    {
+      "viewer": "yuna.study",
+      "target": "kimberly.captures",
+      "mute_posts": false,
+      "mute_stories": true,
+      "days_ago": 20,
+      "undone": false
+    },
+    {
+      "viewer": "user_public",
+      "target": "grandma.roses",
+      "mute_posts": true,
+      "mute_stories": true,
+      "days_ago": 2,
+      "undone": false
+    },
+    {
+      "viewer": "hunter.finance",
+      "target": "tyson.videographer",
+      "mute_posts": true,
+      "mute_stories": true,
+      "days_ago": 7,
+      "undone": false
+    },
+    {
+      "viewer": "james.carter.dev",
+      "target": "aaron.codes",
+      "mute_posts": true,
+      "mute_stories": true,
+      "days_ago": 12,
+      "undone": false
+    },
+    {
+      "viewer": "lily.uxui",
+      "target": "maya.visualdesign",
+      "mute_posts": true,
+      "mute_stories": true,
+      "days_ago": 17,
+      "undone": false
+    },
+    {
+      "viewer": "kellan.newgrad25",
+      "target": "harper.uxresearch",
+      "mute_posts": true,
+      "mute_stories": true,
+      "days_ago": 22,
+      "undone": false
+    },
+    {
+      "viewer": "yuna.study",
+      "target": "blake.design",
+      "mute_posts": true,
+      "mute_stories": true,
+      "days_ago": 27,
+      "undone": false
+    },
+    {
+      "viewer": "nadia.gymlife",
+      "target": "user_power",
+      "mute_posts": true,
+      "mute_stories": false,
+      "days_ago": 20,
+      "undone": true
+    },
+    {
+      "viewer": "sam.dataeng",
+      "target": "closet.by.hana",
+      "mute_posts": false,
+      "mute_stories": true,
+      "days_ago": 24,
+      "undone": true
+    },
+    {
+      "viewer": "leo.embedded",
+      "target": "shop.mimidress",
+      "mute_posts": true,
+      "mute_stories": true,
+      "days_ago": 28,
+      "undone": true
+    },
+    {
+      "viewer": "peter.qa",
+      "target": "sophieg.design",
+      "mute_posts": true,
+      "mute_stories": false,
+      "days_ago": 32,
+      "undone": true
+    },
+    {
+      "viewer": "tyler.sysadmin",
+      "target": "victor.marathon",
+      "mute_posts": false,
+      "mute_stories": true,
+      "days_ago": 36,
+      "undone": true
+    }
+  ],
+  "show_fewer": [
+    {
+      "viewer": "user_public",
+      "author": "kane.runs",
+      "days_ago": 4,
+      "undone": false
+    },
+    {
+      "viewer": "user_public",
+      "author": "user_power",
+      "days_ago": 7,
+      "undone": false
+    },
+    {
+      "viewer": "hunter.finance",
+      "author": "sophieg.design",
+      "days_ago": 10,
+      "undone": false
+    },
+    {
+      "viewer": "james.carter.dev",
+      "author": "derekshoots",
+      "days_ago": 13,
+      "undone": false
+    },
+    {
+      "viewer": "lily.uxui",
+      "author": "victor.marathon",
+      "days_ago": 16,
+      "undone": false
+    },
+    {
+      "viewer": "kellan.newgrad25",
+      "author": "closet.by.hana",
+      "days_ago": 19,
+      "undone": false
+    },
+    {
+      "viewer": "yuna.study",
+      "author": "shop.mimidress",
+      "days_ago": 22,
+      "undone": false
+    },
+    {
+      "viewer": "nadia.gymlife",
+      "author": "hunter.finance",
+      "days_ago": 25,
+      "undone": false
+    },
+    {
+      "viewer": "sam.dataeng",
+      "author": "kane.runs",
+      "days_ago": 15,
+      "undone": true
+    },
+    {
+      "viewer": "leo.embedded",
+      "author": "derekshoots",
+      "days_ago": 18,
+      "undone": true
+    },
+    {
+      "viewer": "peter.qa",
+      "author": "kevin.backend",
+      "days_ago": 21,
+      "undone": true
+    },
+    {
+      "viewer": "tyler.sysadmin",
+      "author": "sophieg.design",
+      "days_ago": 24,
+      "undone": true
+    },
+    {
+      "viewer": "aaron.codes",
+      "author": "james.carter.dev",
+      "days_ago": 27,
+      "undone": true
+    }
+  ],
+  "not_interested": [
+    {
+      "viewer": "user_public",
+      "post_seed_id": "post_0337",
+      "days_ago": 2,
+      "undone": false
+    },
+    {
+      "viewer": "user_public",
+      "post_seed_id": "post_0063",
+      "days_ago": 4,
+      "undone": false
+    },
+    {
+      "viewer": "user_public",
+      "post_seed_id": "post_0017",
+      "days_ago": 6,
+      "undone": false
+    },
+    {
+      "viewer": "user_public",
+      "post_seed_id": "post_0153",
+      "days_ago": 8,
+      "undone": false
+    },
+    {
+      "viewer": "hunter.finance",
+      "post_seed_id": "post_0029",
+      "days_ago": 10,
+      "undone": false
+    },
+    {
+      "viewer": "hunter.finance",
+      "post_seed_id": "post_0011",
+      "days_ago": 12,
+      "undone": false
+    },
+    {
+      "viewer": "james.carter.dev",
+      "post_seed_id": "post_0374",
+      "days_ago": 14,
+      "undone": false
+    },
+    {
+      "viewer": "lily.uxui",
+      "post_seed_id": "post_0008",
+      "days_ago": 16,
+      "undone": false
+    },
+    {
+      "viewer": "kellan.newgrad25",
+      "post_seed_id": "post_0324",
+      "days_ago": 18,
+      "undone": false
+    },
+    {
+      "viewer": "yuna.study",
+      "post_seed_id": "post_0064",
+      "days_ago": 20,
+      "undone": false
+    },
+    {
+      "viewer": "nadia.gymlife",
+      "post_seed_id": "post_0055",
+      "days_ago": 10,
+      "undone": true
+    },
+    {
+      "viewer": "sam.dataeng",
+      "post_seed_id": "post_0337",
+      "days_ago": 12,
+      "undone": true
+    },
+    {
+      "viewer": "leo.embedded",
+      "post_seed_id": "post_0017",
+      "days_ago": 14,
+      "undone": true
+    },
+    {
+      "viewer": "peter.qa",
+      "post_seed_id": "post_0153",
+      "days_ago": 16,
+      "undone": true
+    },
+    {
+      "viewer": "tyler.sysadmin",
+      "post_seed_id": "post_0008",
+      "days_ago": 18,
+      "undone": true
+    }
+  ],
+  "interaction_limits": [
+    {
+      "owner": "closet.by.hana",
+      "limit_non_followers": true,
+      "limit_recent_followers": false,
+      "duration_days": 7,
+      "started_days_ago": 2,
+      "recent_followers": []
+    },
+    {
+      "owner": "shop.mimidress",
+      "limit_non_followers": true,
+      "limit_recent_followers": true,
+      "duration_days": 14,
+      "started_days_ago": 3,
+      "recent_followers": [
+        "phil.senior4",
+        "lauren.t02"
+      ]
+    },
+    {
+      "owner": "tucker.trailrunner",
+      "limit_non_followers": true,
+      "limit_recent_followers": false,
+      "duration_days": 3,
+      "started_days_ago": 1,
+      "recent_followers": []
+    },
+    {
+      "owner": "streetwear.atx1",
+      "limit_non_followers": false,
+      "limit_recent_followers": true,
+      "duration_days": 7,
+      "started_days_ago": 2,
+      "recent_followers": [
+        "tamara.nyu",
+        "kyle.uni21"
+      ]
+    },
+    {
+      "owner": "quinn.familyonly",
+      "limit_non_followers": false,
+      "limit_recent_followers": true,
+      "duration_days": 28,
+      "started_days_ago": 5,
+      "recent_followers": [
+        "lauren.t02",
+        "yuna.study"
+      ]
+    },
+    {
+      "owner": "sean.privateacc",
+      "limit_non_followers": false,
+      "limit_recent_followers": true,
+      "duration_days": 14,
+      "started_days_ago": 4,
+      "recent_followers": [
+        "kyle.uni21",
+        "tamara.nyu"
+      ]
+    },
+    {
+      "owner": "tyler.sysadmin",
+      "limit_non_followers": true,
+      "limit_recent_followers": false,
+      "duration_days": 7,
+      "started_days_ago": 30,
+      "recent_followers": []
+    },
+    {
+      "owner": "yolanda.filmphoto",
+      "limit_non_followers": false,
+      "limit_recent_followers": true,
+      "duration_days": 3,
+      "started_days_ago": 20,
+      "recent_followers": []
+    },
+    {
+      "owner": "nadia.gymlife",
+      "limit_non_followers": true,
+      "limit_recent_followers": true,
+      "duration_days": 14,
+      "started_days_ago": 40,
+      "recent_followers": []
+    },
+    {
+      "owner": "hunter.finance",
+      "limit_non_followers": true,
+      "limit_recent_followers": false,
+      "duration_days": 1,
+      "started_days_ago": 12,
+      "recent_followers": []
+    },
+    {
+      "owner": "lauren.t02",
+      "limit_non_followers": false,
+      "limit_recent_followers": true,
+      "duration_days": 7,
+      "started_days_ago": 25,
+      "recent_followers": []
+    },
+    {
+      "owner": "kimberly.captures",
+      "limit_non_followers": true,
+      "limit_recent_followers": false,
+      "duration_days": 28,
+      "started_days_ago": 60,
+      "recent_followers": []
+    }
+  ],
+  "hidden_words": [
+    {
+      "owner": "user_power",
+      "phrase": "crypto",
+      "days_ago": 40
+    },
+    {
+      "owner": "user_power",
+      "phrase": "giveaway",
+      "days_ago": 37
+    },
+    {
+      "owner": "user_power",
+      "phrase": "follow for follow",
+      "days_ago": 34
+    },
+    {
+      "owner": "user_public",
+      "phrase": "promo code",
+      "days_ago": 31
+    },
+    {
+      "owner": "user_public",
+      "phrase": "free followers",
+      "days_ago": 28
+    },
+    {
+      "owner": "derekshoots",
+      "phrase": "cheap prints",
+      "days_ago": 25
+    },
+    {
+      "owner": "derekshoots",
+      "phrase": "dm me",
+      "days_ago": 22
+    },
+    {
+      "owner": "sophieg.design",
+      "phrase": "free logo",
+      "days_ago": 19
+    },
+    {
+      "owner": "sophieg.design",
+      "phrase": "work for exposure",
+      "days_ago": 16
+    },
+    {
+      "owner": "kane.runs",
+      "phrase": "miracle pill",
+      "days_ago": 13
+    },
+    {
+      "owner": "kane.runs",
+      "phrase": "get rich",
+      "days_ago": 10
+    },
+    {
+      "owner": "closet.by.hana",
+      "phrase": "replica",
+      "days_ago": 40
+    },
+    {
+      "owner": "closet.by.hana",
+      "phrase": "wholesale link",
+      "days_ago": 37
+    },
+    {
+      "owner": null,
+      "phrase": "click this link",
+      "previous_phrase": null,
+      "deleted": false,
+      "admin": "admin",
+      "days_ago": 70,
+      "reason": "Link-bait spam seen across comment threads"
+    },
+    {
+      "owner": null,
+      "phrase": "make money fast",
+      "previous_phrase": null,
+      "deleted": false,
+      "admin": "rachel.admin",
+      "days_ago": 66,
+      "reason": "Scam pitch repeated by several accounts"
+    },
+    {
+      "owner": null,
+      "phrase": "buy followers",
+      "previous_phrase": null,
+      "deleted": false,
+      "admin": "admin",
+      "days_ago": 62,
+      "reason": "Follower-selling spam"
+    },
+    {
+      "owner": null,
+      "phrase": "dm to earn",
+      "previous_phrase": "dm for earn",
+      "deleted": false,
+      "admin": "rachel.admin",
+      "days_ago": 58,
+      "reason": "Typo caught after the first reports"
+    },
+    {
+      "owner": null,
+      "phrase": "free gift card",
+      "previous_phrase": "free giftcard",
+      "deleted": false,
+      "admin": "admin",
+      "days_ago": 54,
+      "reason": "Variant spelling used to dodge the list"
+    },
+    {
+      "owner": null,
+      "phrase": "send me money",
+      "previous_phrase": "send money",
+      "deleted": false,
+      "admin": "rachel.admin",
+      "days_ago": 50,
+      "reason": "Scam wording widened to the common phrasing"
+    },
+    {
+      "owner": null,
+      "phrase": "investment guarantee",
+      "previous_phrase": "guaranteed investment",
+      "deleted": false,
+      "admin": "admin",
+      "days_ago": 46,
+      "reason": "Reordered to match the newest spam template"
+    },
+    {
+      "owner": null,
+      "phrase": "crypto airdrop",
+      "previous_phrase": "airdrop",
+      "deleted": false,
+      "admin": "rachel.admin",
+      "days_ago": 42,
+      "reason": "Single word matched ordinary conversation"
+    },
+    {
+      "owner": null,
+      "phrase": "casino bonus",
+      "previous_phrase": null,
+      "deleted": true,
+      "admin": "admin",
+      "days_ago": 68,
+      "reason": "Gambling spam wave"
+    },
+    {
+      "owner": null,
+      "phrase": "adult content",
+      "previous_phrase": null,
+      "deleted": true,
+      "admin": "rachel.admin",
+      "days_ago": 64,
+      "reason": "Explicit-content spam wave"
+    },
+    {
+      "owner": null,
+      "phrase": "weight loss secret",
+      "previous_phrase": null,
+      "deleted": true,
+      "admin": "admin",
+      "days_ago": 60,
+      "reason": "Supplement spam wave"
+    },
+    {
+      "owner": null,
+      "phrase": "double your money",
+      "previous_phrase": null,
+      "deleted": true,
+      "admin": "rachel.admin",
+      "days_ago": 56,
+      "reason": "Investment spam wave"
+    },
+    {
+      "owner": null,
+      "phrase": "lottery winner",
+      "previous_phrase": null,
+      "deleted": true,
+      "admin": "admin",
+      "days_ago": 52,
+      "reason": "Lottery scam wave"
+    }
+  ],
+  "hidden_comments": [
+    {
+      "id": "hc_01",
+      "post_owner": "user_power",
+      "post_index": 0,
+      "commenter": "juno.comments",
+      "text": "Free crypto giveaway this weekend, join before it ends",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_02",
+      "post_owner": "user_power",
+      "post_index": 0,
+      "commenter": "juno.comments",
+      "text": "Reply here for the entry rules",
+      "reason": "hidden_parent",
+      "reply_to": "hc_01",
+      "unhidden": false
+    },
+    {
+      "id": "hc_03",
+      "post_owner": "user_public",
+      "post_index": 1,
+      "commenter": "silas.replies",
+      "text": "Use promo code FIRST10 for free followers",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_04",
+      "post_owner": "derekshoots",
+      "post_index": 2,
+      "commenter": "nadia.chimesin",
+      "text": "Cheap prints at my shop, dm me for details",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_05",
+      "post_owner": "sophieg.design",
+      "post_index": 1,
+      "commenter": "garrett.rarely",
+      "text": "I offer a free logo if you work for exposure",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_06",
+      "post_owner": "kane.runs",
+      "post_index": 0,
+      "commenter": "priya.commentsonly",
+      "text": "A miracle pill made me faster, get rich while training",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_07",
+      "post_owner": "closet.by.hana",
+      "post_index": 1,
+      "commenter": "emil.shortreplies",
+      "text": "Wholesale link in my bio, replica bags too",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_08",
+      "post_owner": "victor.marathon",
+      "post_index": 0,
+      "commenter": "tamsin.readsmostly",
+      "text": "You can buy followers cheap from me",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_09",
+      "post_owner": "victor.marathon",
+      "post_index": 0,
+      "commenter": "tamsin.readsmostly",
+      "text": "Message me for details",
+      "reason": "hidden_parent",
+      "reply_to": "hc_08",
+      "unhidden": false
+    },
+    {
+      "id": "hc_10",
+      "post_owner": "closet.by.hana",
+      "post_index": 2,
+      "commenter": "dario.onlycomments",
+      "text": "Do you restock this one?",
+      "reason": "limited_interaction",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_11",
+      "post_owner": "shop.mimidress",
+      "post_index": 0,
+      "commenter": "halima.quietreply",
+      "text": "What size does this run?",
+      "reason": "limited_interaction",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_12",
+      "post_owner": "tucker.trailrunner",
+      "post_index": 1,
+      "commenter": "viktor.rarelyposts",
+      "text": "Which trail is this?",
+      "reason": "limited_interaction",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_13",
+      "post_owner": "streetwear.atx1",
+      "post_index": 0,
+      "commenter": "tamara.nyu",
+      "text": "Love this drop",
+      "reason": "limited_interaction",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_14",
+      "post_owner": "quinn.familyonly",
+      "post_index": 0,
+      "commenter": "lauren.t02",
+      "text": "Congrats, looks great!",
+      "reason": "limited_interaction",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_15",
+      "post_owner": "sean.privateacc",
+      "post_index": 1,
+      "commenter": "kyle.uni21",
+      "text": "Beautiful shot",
+      "reason": "limited_interaction",
+      "reply_to": null,
+      "unhidden": false
+    },
+    {
+      "id": "hc_16",
+      "post_owner": "user_power",
+      "post_index": 3,
+      "commenter": "zola.readsandreplies",
+      "text": "My cat photobombed the giveaway shelf",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": true
+    },
+    {
+      "id": "hc_17",
+      "post_owner": "user_public",
+      "post_index": 2,
+      "commenter": "henrik.quietreply2",
+      "text": "No promo code needed, this is just lovely",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": true
+    },
+    {
+      "id": "hc_18",
+      "post_owner": "derekshoots",
+      "post_index": 3,
+      "commenter": "noor.commentsonly3",
+      "text": "Cheap prints? No, priceless frames",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": true
+    },
+    {
+      "id": "hc_19",
+      "post_owner": "sophieg.design",
+      "post_index": 2,
+      "commenter": "cormac.replies3",
+      "text": "Is there a free logo ideas thread?",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": true
+    },
+    {
+      "id": "hc_20",
+      "post_owner": "kane.runs",
+      "post_index": 1,
+      "commenter": "ilse.readsmostly2",
+      "text": "Miracle pill? No, just miles",
+      "reason": "hidden_words",
+      "reply_to": null,
+      "unhidden": true
+    }
+  ]
+}

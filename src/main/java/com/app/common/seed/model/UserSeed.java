@@ -15,4 +15,15 @@ public record UserSeed(
         String bannerMediaRef,
         int postCountTarget,
         boolean isQaAccount,
-        String qaNote) {}
+        String qaNote,
+        String messagePermission,
+        Boolean hiddenWordsSystemEnabled) {
+
+    // An account that names neither setting keeps the schema defaults, so users.json only lists
+    // the accounts that deviate from them.
+    public UserSeed {
+        messagePermission = messagePermission == null ? "everyone" : messagePermission;
+        hiddenWordsSystemEnabled =
+                hiddenWordsSystemEnabled == null ? Boolean.TRUE : hiddenWordsSystemEnabled;
+    }
+}

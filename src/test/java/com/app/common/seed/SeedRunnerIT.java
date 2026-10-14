@@ -117,6 +117,36 @@ class SeedRunnerIT {
                 .hasMessageContaining("needs >= 5");
     }
 
+    @Test
+    void assertEnumCoverage_emptyDatabase_namesEveryValueOfTheMessagePermissionColumn() {
+        SeedRunner seedRunner =
+                new SeedRunner(
+                        jdbcTemplate,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        assertThatThrownBy(seedRunner::assertEnumCoverage)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("user_settings.message_permission='everyone'")
+                .hasMessageContaining("user_settings.message_permission='following'")
+                .hasMessageContaining("user_settings.message_permission='nobody'");
+    }
+
     private void insertHashtags(String status, int count) {
         for (int i = 0; i < count; i++) {
             jdbcTemplate.update(
