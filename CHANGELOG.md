@@ -38,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The deletion count a comment owner sees in the confirmation and in the delete response no longer includes hidden replies by other users, and the live update for a hidden comment no longer names its author or thread.
 
 ### Added
+- Sending into a message request now follows the request rules: the sender may send one text message until the recipient answers, the recipient's reply accepts the request, and a refused send answers `MESSAGE_REQUEST_AWAITING_ACCEPTANCE` (409) for a pending and a declined request alike.
 - Conversations carry a request status (V145), the conversation list takes a `folder` parameter (`primary`, `requests`, `hidden_requests`), and the unread count reports `requestCount` for incoming requests that carry a message.
 - A post a viewer marks as not interested is now sent to the Gorse recommender as `not_interested` negative feedback and taken back when the mark is undone, Gorse is configured to leave such posts out of that viewer's personalized list, and a Gorse rebuild sends only the marks that still stand.
 - Show fewer, mute and unmute, interaction limit changes, and hidden and released comments are now recorded as behavioural events in ClickHouse through the outbox, and the event type list gains thirteen values for them and for the not-interested and message signals that follow.
@@ -593,6 +594,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Two first messages sent at the same moment into one message request no longer both get stored, and a retried first message replays instead of being refused.
 - The API document no longer declares a 429 response on setting or removing a mute or on the show-fewer endpoints, which have no rate limiter and could never return it.
 - Editing a reply that is hidden only because its parent is hidden now re-checks it against the post owner's Hidden Words and interaction limit, so releasing the parent no longer releases a reply whose new text the owner's rules filter.
 - A message permission is now stored and read with the root locale, so an account set to `following` no longer fails to load when the server runs under a Turkish default locale.

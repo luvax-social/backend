@@ -371,7 +371,7 @@ class MessageControllerIT {
     void sendMessage_image_success_referencesMediaAsset() {
         TestUser alice = registerUser("send_image_alice");
         TestUser bob = registerUser("send_image_bob");
-        UUID conversationId = conversationIdOf(createDirect(alice, bob.id()));
+        UUID conversationId = conversationIdOf(createAcceptedDirect(alice, bob));
         UUID mediaAssetId = insertMediaAsset(alice.id(), "image");
 
         ResponseEntity<Map> response =
@@ -392,7 +392,7 @@ class MessageControllerIT {
         // media module publishes upload, upload-complete, and constraints, and no lookup by id.
         TestUser alice = registerUser("media_embed_alice");
         TestUser bob = registerUser("media_embed_bob");
-        UUID conversationId = conversationIdOf(createDirect(alice, bob.id()));
+        UUID conversationId = conversationIdOf(createAcceptedDirect(alice, bob));
         UUID mediaAssetId = insertMediaAsset(alice.id(), "image");
 
         ResponseEntity<Map> response =
@@ -414,7 +414,7 @@ class MessageControllerIT {
     void listHistory_imageMessage_carriesMediaAndTextMessageDoesNot() {
         TestUser alice = registerUser("media_hist_alice");
         TestUser bob = registerUser("media_hist_bob");
-        UUID conversationId = conversationIdOf(createDirect(alice, bob.id()));
+        UUID conversationId = conversationIdOf(createAcceptedDirect(alice, bob));
         UUID mediaAssetId = insertMediaAsset(alice.id(), "image");
         sendMessage(alice, conversationId, Map.of("messageType", "text", "content", "plain"), null);
         sendMessage(
@@ -447,7 +447,7 @@ class MessageControllerIT {
     void sendMessage_postShare_success_referencesPost() {
         TestUser alice = registerUser("send_post_alice");
         TestUser bob = registerUser("send_post_bob");
-        UUID conversationId = conversationIdOf(createDirect(alice, bob.id()));
+        UUID conversationId = conversationIdOf(createAcceptedDirect(alice, bob));
         UUID postId = insertPost(alice.id());
 
         ResponseEntity<Map> response =
@@ -466,7 +466,7 @@ class MessageControllerIT {
     void sendMessage_storyShare_success_referencesStory() {
         TestUser alice = registerUser("send_story_alice");
         TestUser bob = registerUser("send_story_bob");
-        UUID conversationId = conversationIdOf(createDirect(alice, bob.id()));
+        UUID conversationId = conversationIdOf(createAcceptedDirect(alice, bob));
         UUID mediaAssetId = insertMediaAsset(alice.id(), "image");
         UUID storyId = insertStory(alice.id(), mediaAssetId);
 
@@ -508,7 +508,7 @@ class MessageControllerIT {
     void sendMessage_postShare_withDraftPost_returnsBadRequest() {
         TestUser alice = registerUser("send_draft_post_alice");
         TestUser bob = registerUser("send_draft_post_bob");
-        UUID conversationId = conversationIdOf(createDirect(alice, bob.id()));
+        UUID conversationId = conversationIdOf(createAcceptedDirect(alice, bob));
         UUID postId = insertPostWithStatus(alice.id(), "draft");
 
         ResponseEntity<Map> response =
@@ -526,7 +526,7 @@ class MessageControllerIT {
     void sendMessage_storyShare_withExpiredStory_returnsBadRequest() {
         TestUser alice = registerUser("send_expired_story_alice");
         TestUser bob = registerUser("send_expired_story_bob");
-        UUID conversationId = conversationIdOf(createDirect(alice, bob.id()));
+        UUID conversationId = conversationIdOf(createAcceptedDirect(alice, bob));
         UUID mediaAssetId = insertMediaAsset(alice.id(), "image");
         UUID storyId = insertStory(alice.id(), mediaAssetId);
         jdbcTemplate.update(
@@ -747,6 +747,16 @@ class MessageControllerIT {
                 mediaAssetId,
                 "image");
         return id;
+    }
+
+    // A stranger's first message must be one text, so media and share tests start from an accepted
+    // conversation, which a follow by the recipient gives.
+    private ResponseEntity<Map> createAcceptedDirect(TestUser actor, TestUser recipient) {
+        jdbcTemplate.update(
+                "INSERT INTO follows(follower_id, following_id, status) VALUES (?, ?, 'accepted')",
+                recipient.id(),
+                actor.id());
+        return createDirect(actor, recipient.id());
     }
 
     private ResponseEntity<Map> createDirect(TestUser actor, UUID targetId) {

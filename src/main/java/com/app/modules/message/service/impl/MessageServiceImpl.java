@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -30,6 +31,7 @@ import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.Message;
 import com.app.modules.message.entity.MessageWriteIdempotency;
+import com.app.modules.message.enums.ConversationRequestStatus;
 import com.app.modules.message.enums.MessageType;
 import com.app.modules.message.mapper.MessageMapper;
 import com.app.modules.message.messaging.MessageEventTypes;
@@ -42,7 +44,14 @@ import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.message.repository.MessageStoryRepository;
 import com.app.modules.message.service.MessageService;
 import com.app.modules.post.enums.PostStatus;
-import com.app.modules.social.service.SocialService;
+import com.app.modules.social.policy.ConversationContext;
+import com.app.modules.social.policy.ConversationRequestState;
+import com.app.modules.social.policy.InteractionDecision;
+import com.app.modules.social.policy.InteractionOutcome;
+import com.app.modules.social.policy.InteractionPolicyService;
+import com.app.modules.social.policy.InteractionReason;
+import com.app.modules.social.policy.InteractionRequest;
+import com.app.modules.social.policy.InteractionType;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -60,7 +69,7 @@ public class MessageServiceImpl implements MessageService {
     private final MessageMediaAssetRepository mediaAssetRepository;
     private final MessagePostRepository postRepository;
     private final MessageStoryRepository storyRepository;
-    private final SocialService socialService;
+    private final InteractionPolicyService interactionPolicy;
     private final MessageMapper mapper;
     private final OutboxService outboxService;
     private final ObjectMapper objectMapper;
@@ -73,7 +82,7 @@ public class MessageServiceImpl implements MessageService {
             MessageMediaAssetRepository mediaAssetRepository,
             MessagePostRepository postRepository,
             MessageStoryRepository storyRepository,
-            SocialService socialService,
+            InteractionPolicyService interactionPolicy,
             MessageMapper mapper,
             OutboxService outboxService,
             ObjectMapper objectMapper) {
@@ -84,7 +93,7 @@ public class MessageServiceImpl implements MessageService {
         this.mediaAssetRepository = mediaAssetRepository;
         this.postRepository = postRepository;
         this.storyRepository = storyRepository;
-        this.socialService = socialService;
+        this.interactionPolicy = interactionPolicy;
         this.mapper = mapper;
         this.outboxService = outboxService;
         this.objectMapper = objectMapper;
@@ -94,14 +103,15 @@ public class MessageServiceImpl implements MessageService {
     @Transactional
     public MessageResponse sendMessage(
             UUID actorId, UUID conversationId, SendMessageRequest request, String idempotencyKey) {
-        Conversation conversation = fetchConversation(conversationId);
+        // The row lock serialises every send into one conversation. Without it two first messages
+        // of a pending request would each count zero prior messages and both be stored, and a
+        // send could race a decline or an acceptance of the same request.
+        Conversation conversation =
+                conversationRepository
+                        .lockById(conversationId)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
         requireActiveParticipant(conversationId, actorId);
-        assertNotBlockedForDirectMessage(conversation, actorId);
-        validatePayload(actorId, conversationId, request);
 
-        // Reserve the idempotency key in the same transaction via ON CONFLICT DO NOTHING. A
-        // duplicate key returns a clean replay/conflict instead of poisoning the transaction with a
-        // constraint violation, and a rolled-back send frees the key.
         String requestHash =
                 sha256(
                         conversationId
@@ -117,6 +127,22 @@ public class MessageServiceImpl implements MessageService {
                                 + request.mediaAssetId()
                                 + "|"
                                 + request.replyToId());
+        // A retry of a send that already committed replays its response. This runs before the
+        // policy because the retry of a requester's one allowed message would otherwise be
+        // refused for having already sent it.
+        if (idempotencyKey != null) {
+            Optional<MessageWriteIdempotency> recorded =
+                    idempotencyRepository.findByUserIdAndIdempotencyKey(actorId, idempotencyKey);
+            if (recorded.isPresent()) {
+                return replayOrConflict(recorded.get(), requestHash);
+            }
+        }
+        InteractionDecision decision = evaluatePolicy(conversation, actorId, request);
+        validatePayload(actorId, conversationId, request);
+
+        // Reserve the idempotency key in the same transaction via ON CONFLICT DO NOTHING. A
+        // duplicate key returns a clean replay/conflict instead of poisoning the transaction with a
+        // constraint violation, and a rolled-back send frees the key.
         if (idempotencyKey != null
                 && idempotencyRepository.insertIfAbsent(actorId, idempotencyKey, requestHash)
                         == 0) {
@@ -145,7 +171,8 @@ public class MessageServiceImpl implements MessageService {
                     actorId, idempotencyKey, objectMapper.writeValueAsString(response));
         }
 
-        reactivateOtherParticipants(conversationId, actorId);
+        applyRequestOutcome(conversation, actorId, decision);
+        reactivateOtherParticipants(conversation, actorId);
         enqueueSent(conversationId, saved, actorId, response);
         return response;
     }
@@ -156,16 +183,103 @@ public class MessageServiceImpl implements MessageService {
      * <p>Deleting a conversation only sets {@code left_at} for the deleting user's own row - it
      * never touches the conversation or the other participant's state, matching the DATA_RULES note
      * that hiding is per-user. A new message is the signal that revives it for them, the same
-     * behaviour the reference chat apps this feature was modelled on use.
+     * behaviour the reference chat apps this feature was modelled on use. The one exception is the
+     * recipient of a declined request, who chose to end the conversation and is never brought back
+     * into it.
      */
-    private void reactivateOtherParticipants(UUID conversationId, UUID actorId) {
+    private void reactivateOtherParticipants(Conversation conversation, UUID actorId) {
+        boolean declined = conversation.getRequestStatus() == ConversationRequestStatus.DECLINED;
         for (ConversationParticipant participant :
-                participantRepository.findByIdConversationIdOrderByJoinedAtAsc(conversationId)) {
-            if (participant.getLeftAt() != null
-                    && !participant.getId().getUserId().equals(actorId)) {
-                participant.setLeftAt(null);
-                participantRepository.save(participant);
+                participantRepository.findByIdConversationIdOrderByJoinedAtAsc(
+                        conversation.getId())) {
+            UUID participantId = participant.getId().getUserId();
+            if (participant.getLeftAt() == null || participantId.equals(actorId)) {
+                continue;
             }
+            if (declined && participantId.equals(conversation.getRequestRecipientId())) {
+                continue;
+            }
+            participant.setLeftAt(null);
+            participantRepository.save(participant);
+        }
+    }
+
+    // The block rule runs first inside the policy and its refusal is the same not-found a missing
+    // conversation gives. Every other refusal is the single awaiting-acceptance answer, which a
+    // pending and a declined request share so the requester cannot tell them apart.
+    private InteractionDecision evaluatePolicy(
+            Conversation conversation, UUID actorId, SendMessageRequest request) {
+        // The other participant is read whatever either left_at says, so a peer who deleted the
+        // conversation and then blocked the sender is still found
+        UUID otherId =
+                participantRepository
+                        .findByIdConversationIdOrderByJoinedAtAsc(conversation.getId())
+                        .stream()
+                        .map(p -> p.getId().getUserId())
+                        .filter(userId -> !userId.equals(actorId))
+                        .findFirst()
+                        .orElse(null);
+        if (otherId == null) {
+            return new InteractionDecision(InteractionOutcome.ALLOW, InteractionReason.NONE);
+        }
+        ConversationRequestStatus status = conversation.getRequestStatus();
+        boolean actorIsRequester =
+                status != ConversationRequestStatus.ACCEPTED
+                        && !actorId.equals(conversation.getRequestRecipientId());
+        long actorMessagesSoFar =
+                actorIsRequester
+                        ? messageRepository.countByConversationIdAndSenderId(
+                                conversation.getId(), actorId)
+                        : 0;
+        InteractionDecision decision =
+                interactionPolicy.evaluate(
+                        new InteractionRequest(
+                                actorId,
+                                otherId,
+                                InteractionType.MESSAGE_SEND,
+                                request.content(),
+                                null,
+                                new ConversationContext(
+                                        policyState(conversation),
+                                        actorIsRequester,
+                                        actorMessagesSoFar,
+                                        request.messageType().toJson())));
+        if (decision.denied()) {
+            throw decision.reason() == InteractionReason.BLOCKED
+                    ? new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND)
+                    : new AppException(ApiErrorCode.MESSAGE_REQUEST_AWAITING_ACCEPTANCE);
+        }
+        return decision;
+    }
+
+    private static ConversationRequestState policyState(Conversation conversation) {
+        return switch (conversation.getRequestStatus()) {
+            case ACCEPTED -> ConversationRequestState.ACCEPTED;
+            case PENDING ->
+                    conversation.isRequestHidden()
+                            ? ConversationRequestState.PENDING_HIDDEN
+                            : ConversationRequestState.PENDING;
+            case DECLINED -> ConversationRequestState.DECLINED;
+        };
+    }
+
+    // The recipient answering a request accepts it, and the requester's message that the policy
+    // routed to hidden requests files the request there. Both ride the transaction that stores the
+    // message, so a refused or failed send leaves the request exactly as it was.
+    private void applyRequestOutcome(
+            Conversation conversation, UUID actorId, InteractionDecision decision) {
+        if (conversation.getRequestStatus() == ConversationRequestStatus.ACCEPTED) {
+            return;
+        }
+        if (actorId.equals(conversation.getRequestRecipientId())) {
+            conversation.setRequestStatus(ConversationRequestStatus.ACCEPTED);
+            conversation.setRequestHidden(false);
+            conversation.setRequestResolvedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            conversationRepository.save(conversation);
+        } else if (decision.outcome() == InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS
+                && !conversation.isRequestHidden()) {
+            conversation.setRequestHidden(true);
+            conversationRepository.save(conversation);
         }
     }
 
@@ -317,22 +431,6 @@ public class MessageServiceImpl implements MessageService {
         return new AppException(ApiErrorCode.MESSAGE_INVALID_PAYLOAD, message);
     }
 
-    private void assertNotBlockedForDirectMessage(Conversation conversation, UUID actorId) {
-        UUID otherId =
-                participantRepository
-                        .findByIdConversationIdOrderByJoinedAtAsc(conversation.getId())
-                        .stream()
-                        .filter(p -> !p.getId().getUserId().equals(actorId))
-                        .map(p -> p.getId().getUserId())
-                        .findFirst()
-                        .orElse(null);
-        if (otherId != null && socialService.isBlockedBetween(actorId, otherId)) {
-            // Stealth block model: matches ConversationServiceImpl.assertNotBlocked - a block in
-            // either direction must not be distinguishable from the conversation itself vanishing.
-            throw new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND);
-        }
-    }
-
     private Conversation fetchConversation(UUID conversationId) {
         return conversationRepository
                 .findById(conversationId)
@@ -356,6 +454,10 @@ public class MessageServiceImpl implements MessageService {
                         .findByUserIdAndIdempotencyKey(actorId, idempotencyKey)
                         .orElseThrow(
                                 () -> new AppException(ApiErrorCode.MESSAGE_IDEMPOTENCY_CONFLICT));
+        return replayOrConflict(row, requestHash);
+    }
+
+    private MessageResponse replayOrConflict(MessageWriteIdempotency row, String requestHash) {
         if (!requestHash.equals(row.getRequestHash()) || row.getResponseBody() == null) {
             throw new AppException(ApiErrorCode.MESSAGE_IDEMPOTENCY_CONFLICT);
         }

@@ -26,7 +26,9 @@ public interface MessageService {
      *     CONVERSATION_FORBIDDEN when the caller is not an active participant;
      *     MESSAGE_INVALID_PAYLOAD when the payload does not match {@code messageType} or a
      *     referenced media/post/story/reply does not exist; MESSAGE_IDEMPOTENCY_CONFLICT when the
-     *     key is reused with a different payload
+     *     key is reused with a different payload; MESSAGE_REQUEST_AWAITING_ACCEPTANCE when the
+     *     caller started a request the recipient has not accepted and has used the one text message
+     *     it allows, which a declined request answers identically
      */
     MessageResponse sendMessage(
             UUID actorId, UUID conversationId, SendMessageRequest request, String idempotencyKey);

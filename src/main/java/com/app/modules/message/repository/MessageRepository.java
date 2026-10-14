@@ -21,6 +21,14 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     Optional<Message> findByIdAndConversationId(UUID id, UUID conversationId);
 
     /**
+     * Counts every message a user has sent into a conversation, tombstoned ones included.
+     *
+     * <p>Deleted messages count on purpose: a requester who deletes the one message a pending
+     * request allows must not be handed a second.
+     */
+    long countByConversationIdAndSenderId(UUID conversationId, UUID senderId);
+
+    /**
      * First page of a conversation's history, newest first. Deleted (tombstoned) messages are
      * included so clients can render a "message deleted" placeholder in place.
      */

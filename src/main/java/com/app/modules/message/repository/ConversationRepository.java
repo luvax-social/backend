@@ -5,10 +5,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import jakarta.persistence.LockModeType;
+
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import com.app.modules.message.entity.Conversation;
@@ -60,6 +64,19 @@ public interface ConversationRepository
 					""",
             nativeQuery = true)
     Optional<Conversation> findDirectConversationBetween(UUID userA, UUID userB);
+
+    /**
+     * Loads a conversation and takes a row lock on it until the transaction ends.
+     *
+     * <p>Every send takes it, so sends into one conversation run one after another and each reads
+     * the request state and the sender's message count as the previous one left them.
+     *
+     * @param id the conversation to lock
+     * @return the conversation with its current state, or empty when it does not exist
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM Conversation c WHERE c.id = :id")
+    Optional<Conversation> lockById(@Param("id") UUID id);
 
     /**
      * Releases a declined conversation's {@code direct_pair_key} so the pair can start a new one.

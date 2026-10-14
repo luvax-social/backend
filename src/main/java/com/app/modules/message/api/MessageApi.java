@@ -181,7 +181,9 @@ public interface MessageApi {
                                 schema = @Schema(implementation = ApiResponse.class))),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "409",
-                description = "Idempotency key reused with a different payload",
+                description =
+                        "Idempotency key reused with a different payload, or the sender of an"
+                                + " unaccepted message request has already used the one message it allows",
                 content =
                         @Content(
                                 mediaType = "application/json",
