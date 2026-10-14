@@ -128,10 +128,15 @@ public interface UserEventAnalyticsRepository {
      * uses, so every cursor in the application means the same thing. The read is {@code FINAL}, so
      * an event whose duplicate has not merged yet is shown once.
      *
+     * <p>The private preference signals ({@link UserEventType#privatePreferenceSignals()}) are
+     * never returned, and a filter naming one yields an empty list. This is the administrator
+     * activity log's read, so the exclusion lives here; the other readers of the table are
+     * unchanged.
+     *
      * @param userId restrict to one account, or null for every account in the window
      * @param from inclusive lower bound
      * @param to exclusive upper bound
-     * @param eventType restrict to one type, or null for all
+     * @param eventType restrict to one type, or null for all that may be shown
      * @param cursorCreatedAt keyset position timestamp, null for the first page
      * @param cursorId keyset position tiebreaker, null for the first page
      * @param limit maximum rows, normally the page size plus one

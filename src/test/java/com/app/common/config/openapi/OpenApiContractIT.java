@@ -665,6 +665,40 @@ class OpenApiContractIT {
     }
 
     @Test
+    void activityLogEventTypeFilterOffersNoPrivatePreferenceSignal() {
+        JsonNode parameters =
+                document()
+                        .path("paths")
+                        .path("/api/v1/admin/user-events")
+                        .path("get")
+                        .path("parameters");
+        JsonNode eventTypeSchema = null;
+        for (JsonNode parameter : parameters) {
+            if ("eventType".equals(parameter.path("name").asString(""))) {
+                eventTypeSchema = parameter.path("schema");
+            }
+        }
+        assertThat(eventTypeSchema).as("the eventType parameter must be declared").isNotNull();
+
+        List<String> values = new ArrayList<>();
+        eventTypeSchema.path("enum").forEach(node -> values.add(node.asString("")));
+
+        assertThat(values)
+                .as("the activity log filter must still offer the types it can return")
+                .contains("session_start", "search", "profile_view", "message_reaction");
+        assertThat(values)
+                .as("private preference signals must not be offered as a filter")
+                .doesNotContain(
+                        "account_mute",
+                        "account_unmute",
+                        "account_show_fewer",
+                        "account_show_fewer_undo",
+                        "post_not_interested",
+                        "post_not_interested_undo",
+                        "interaction_limit_change");
+    }
+
+    @Test
     void theDocumentPointsAtTheRealTimeSurfaceItCannotDescribe() {
         JsonNode doc = document();
         // OpenAPI has no vocabulary for a STOMP destination, so a consumer reading this document

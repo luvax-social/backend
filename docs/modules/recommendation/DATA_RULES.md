@@ -378,7 +378,11 @@ The enum value must already exist in `UserEventType` and in the ClickHouse `Enum
 ### Retention and visibility
 
 The rows follow the table's 12-month retention in whole monthly parts.
-They are visible to the administrative activity log like every other `user_events` row, filtered by `event_type`, and are not shown to the account they are about.
+Seven of them are an account's private preferences: `account_mute`, `account_unmute`, `account_show_fewer`, `account_show_fewer_undo`, `post_not_interested`, `post_not_interested_undo` and `interaction_limit_change`.
+These seven stay in ClickHouse for insights and are never returned by the administrative activity log.
+`UserEventAnalyticsRepositoryImpl.findPage` excludes them in its statement, and the activity log refuses a filter that names one.
+The affinity, entity id and Gorse rebuild reads are unchanged.
+The other rows are visible to the administrative activity log like every other `user_events` row, filtered by `event_type`, and no row is shown to the account it is about.
 
 ---
 

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Repository;
 
@@ -53,12 +54,16 @@ public class UserEventAnalyticsRepositoryImpl implements UserEventAnalyticsRepos
                     "VALUES (:id, :userId, :eventType, :entityType, :entityId, :metadata,",
                     ":createdAt)");
 
+    // The activity log is the administrator-facing read, so the private preference signals are
+    // excluded in the statement itself and not only by its callers: no filter or cursor can bring
+    // one back. The literals come from the enum, never from input.
     private static final String PAGE_SQL =
             String.join(
                     " ",
                     "SELECT id, user_id, event_type, entity_type, entity_id, metadata, created_at",
                     "FROM user_events FINAL",
-                    "WHERE created_at >= :from AND created_at < :to");
+                    "WHERE created_at >= :from AND created_at < :to",
+                    "AND event_type NOT IN (" + privateSignalLiterals() + ")");
 
     // The window is the leading predicate on every read because it is what lets the monthly
     // partitions outside it be skipped; the sorting key leads with the user, so a read that names
@@ -204,6 +209,11 @@ public class UserEventAnalyticsRepositoryImpl implements UserEventAnalyticsRepos
             OffsetDateTime cursorCreatedAt,
             UUID cursorId,
             int limit) {
+        if (eventType != null && eventType.isPrivatePreferenceSignal()) {
+            // Answered without a query: the statement excludes these anyway, and a read that
+            // cannot match need not reach the store.
+            return List.of();
+        }
         StringBuilder sql = new StringBuilder(PAGE_SQL);
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("from", from);
@@ -316,6 +326,12 @@ public class UserEventAnalyticsRepositoryImpl implements UserEventAnalyticsRepos
         } catch (RuntimeException e) {
             throw new SinkFailure(e);
         }
+    }
+
+    private static String privateSignalLiterals() {
+        return UserEventType.privatePreferenceSignals().stream()
+                .map(type -> "'" + type.toJson() + "'")
+                .collect(Collectors.joining(", "));
     }
 
     private static UserEventRow toRow(ResultSet rows, int rowNumber) throws SQLException {

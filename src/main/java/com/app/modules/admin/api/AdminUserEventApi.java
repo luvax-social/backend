@@ -64,7 +64,8 @@ public interface AdminUserEventApi {
                 responseCode = "400",
                 description =
                         "A bound is absent, 'to' is not after 'from', the window exceeds 30 days,"
-                                + " or the cursor is malformed",
+                                + " the cursor is malformed, or eventType names a private preference"
+                                + " signal",
                 content =
                         @Content(
                                 mediaType = "application/json",
@@ -118,7 +119,13 @@ public interface AdminUserEventApi {
             @Parameter(
                             description =
                                     "Restrict to one event type. Only session_start, search and"
-                                            + " profile_view can match anything.")
+                                            + " profile_view can match anything. The private"
+                                            + " preference signals (account_mute, account_unmute,"
+                                            + " account_show_fewer, account_show_fewer_undo,"
+                                            + " post_not_interested,"
+                                            + " post_not_interested_undo and"
+                                            + " interaction_limit_change) are not offered and are"
+                                            + " refused with 400.")
                     @RequestParam(required = false)
                     UserEventType eventType,
             @Parameter(description = "Opaque cursor from a previous page")

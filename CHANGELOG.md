@@ -848,6 +848,7 @@ Existing group conversations are deleted by the upgrade, after being copied into
 - `app.security.public-metrics-endpoint`. Actuator no longer shares the application port at all, so the switch that once opened `/actuator/prometheus` there has nothing left to open.
 
 ### Security
+- The administrator activity log no longer returns mute, unmute, show fewer, show fewer undo, not interested, not interested undo and interaction limit change events, refuses a filter that names one with 400, and no longer lists them as filter values; the events stay in ClickHouse for recommendation insights.
 - Authenticated support ticket routes now carry a per-caller rate limit; they previously relied only on a process-wide backstop that one caller could exhaust for everybody.
 - Opening an appeal from a session revokes any unspent emailed link for the same decision, so one decision can never be contested through two routes at once.
 - A decision can now be appealed only once, in any status, closing a route by which a rejected appeal could be refiled indefinitely.

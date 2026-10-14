@@ -178,6 +178,108 @@ class UserEventAnalyticsRepositoryIT {
                 .isSortedAccordingTo(java.util.Comparator.reverseOrder());
     }
 
+    // Seven interaction control signals are kept in ClickHouse for insights but are an account's
+    // private preferences, so the administrator activity log must never read them back.
+    private static final List<UserEventType> PRIVATE_PREFERENCE_SIGNALS =
+            List.of(
+                    UserEventType.ACCOUNT_MUTE,
+                    UserEventType.ACCOUNT_UNMUTE,
+                    UserEventType.ACCOUNT_SHOW_FEWER,
+                    UserEventType.ACCOUNT_SHOW_FEWER_UNDO,
+                    UserEventType.POST_NOT_INTERESTED,
+                    UserEventType.POST_NOT_INTERESTED_UNDO,
+                    UserEventType.INTERACTION_LIMIT_CHANGE);
+
+    @Test
+    void findPage_privatePreferenceSignals_areNeverReturned() {
+        UUID user = UUID.randomUUID();
+        UUID visible = UUID.randomUUID();
+        insert(visible, user, UserEventType.SESSION_START, null, WINDOW_END.minusHours(5));
+        int minutes = 1;
+        for (UserEventType type : PRIVATE_PREFERENCE_SIGNALS) {
+            insert(
+                    UUID.randomUUID(),
+                    user,
+                    type,
+                    UUID.randomUUID(),
+                    WINDOW_END.minusHours(1).minusMinutes(minutes++));
+        }
+
+        List<UserEventRow> forAccount =
+                repository.findPage(
+                        user, WINDOW_END.minusDays(1), WINDOW_END, null, null, null, 50);
+        List<UserEventRow> forEveryone =
+                repository.findPage(
+                        null, WINDOW_END.minusDays(1), WINDOW_END, null, null, null, 50);
+
+        assertThat(forAccount).extracting(UserEventRow::id).containsExactly(visible);
+        assertThat(forEveryone).extracting(UserEventRow::id).containsExactly(visible);
+    }
+
+    @Test
+    void findPage_filterNamingAPrivatePreferenceSignal_returnsNothing() {
+        UUID user = UUID.randomUUID();
+        for (UserEventType type : PRIVATE_PREFERENCE_SIGNALS) {
+            insert(UUID.randomUUID(), user, type, UUID.randomUUID(), WINDOW_END.minusHours(1));
+        }
+
+        for (UserEventType type : PRIVATE_PREFERENCE_SIGNALS) {
+            assertThat(
+                            repository.findPage(
+                                    user,
+                                    WINDOW_END.minusDays(1),
+                                    WINDOW_END,
+                                    type,
+                                    null,
+                                    null,
+                                    50))
+                    .as("explicit filter %s", type)
+                    .isEmpty();
+        }
+    }
+
+    @Test
+    void findPage_otherTypesBesideThePrivateOnes_areUnaffected() {
+        UUID user = UUID.randomUUID();
+        List<UserEventType> shown =
+                List.of(
+                        UserEventType.POST_LIKE,
+                        UserEventType.MESSAGE_REACTION,
+                        UserEventType.MESSAGE_REQUEST_ACCEPT,
+                        UserEventType.COMMENT_HIDDEN);
+        for (UserEventType type : shown) {
+            insert(UUID.randomUUID(), user, type, UUID.randomUUID(), WINDOW_END.minusHours(1));
+        }
+        insert(
+                UUID.randomUUID(),
+                user,
+                UserEventType.ACCOUNT_MUTE,
+                UUID.randomUUID(),
+                WINDOW_END.minusHours(1));
+
+        List<UserEventRow> rows =
+                repository.findPage(
+                        user, WINDOW_END.minusDays(1), WINDOW_END, null, null, null, 50);
+
+        assertThat(rows)
+                .extracting(UserEventRow::eventType)
+                .containsExactlyInAnyOrderElementsOf(shown);
+    }
+
+    @Test
+    void findRecentEntityIds_privatePreferenceSignals_remainReadableForTheReadSet() {
+        UUID user = UUID.randomUUID();
+        UUID post = UUID.randomUUID();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        insert(UUID.randomUUID(), user, UserEventType.POST_NOT_INTERESTED, post, now.minusHours(1));
+
+        List<UUID> ids =
+                repository.findRecentEntityIds(
+                        user, UserEventType.POST_NOT_INTERESTED, now.minusDays(1), now, 10);
+
+        assertThat(ids).containsExactly(post);
+    }
+
     @Test
     void findPage_windowIsHalfOpen_includesFromAndExcludesTo() {
         UUID user = UUID.randomUUID();

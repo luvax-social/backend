@@ -1,6 +1,9 @@
 package com.app.modules.recommendation.enums;
 
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Locale;
+import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -55,6 +58,44 @@ public enum UserEventType {
     COMMENT_HIDDEN,
     COMMENT_UNHIDE,
     INTERACTION_LIMIT_CHANGE;
+
+    /**
+     * The signals that record an account's private interaction preferences.
+     *
+     * <p>They stay in ClickHouse so recommendation insights can use them, and no other reader
+     * changes. The administrator activity log is the one read that must never return them: what an
+     * account muted, asked to see less of, marked not interesting, or who it limited is not
+     * something a moderator browsing behaviour should be able to read back.
+     */
+    private static final Set<UserEventType> PRIVATE_PREFERENCE_SIGNALS =
+            Collections.unmodifiableSet(
+                    EnumSet.of(
+                            ACCOUNT_MUTE,
+                            ACCOUNT_UNMUTE,
+                            ACCOUNT_SHOW_FEWER,
+                            ACCOUNT_SHOW_FEWER_UNDO,
+                            POST_NOT_INTERESTED,
+                            POST_NOT_INTERESTED_UNDO,
+                            INTERACTION_LIMIT_CHANGE));
+
+    /**
+     * Whether this value records an account's private interaction preference.
+     *
+     * @return true when the administrator activity log must neither return nor accept it
+     */
+    public boolean isPrivatePreferenceSignal() {
+        return PRIVATE_PREFERENCE_SIGNALS.contains(this);
+    }
+
+    /**
+     * The private preference signals, for the activity log's exclusion predicate and its filter
+     * vocabulary.
+     *
+     * @return an unmodifiable set in declaration order
+     */
+    public static Set<UserEventType> privatePreferenceSignals() {
+        return PRIVATE_PREFERENCE_SIGNALS;
+    }
 
     @JsonCreator
     public static UserEventType fromJson(String value) {
