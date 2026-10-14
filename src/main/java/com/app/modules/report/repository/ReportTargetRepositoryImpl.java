@@ -39,6 +39,24 @@ public class ReportTargetRepositoryImpl implements ReportTargetRepository {
                             "SELECT sender_id FROM messages WHERE id = :entityId "
                                     + "AND is_deleted = FALSE AND deleted_at IS NULL "
                                     + "AND admin_removed_at IS NULL";
+                    // Only a participant who still has the conversation may report a reaction, and
+                    // never one by an account that blocks them or that they block: that reaction is
+                    // hidden from them, so answering as if it did not exist keeps the block silent.
+                    case MESSAGE_REACTION ->
+                            "SELECT r.user_id FROM message_reactions r "
+                                    + "JOIN messages m ON m.id = r.message_id "
+                                    + "WHERE r.id = :entityId "
+                                    + "AND r.admin_removed_at IS NULL "
+                                    + "AND m.is_deleted = FALSE AND m.deleted_at IS NULL "
+                                    + "AND m.admin_removed_at IS NULL "
+                                    + "AND EXISTS (SELECT 1 FROM conversation_participants cp "
+                                    + "WHERE cp.conversation_id = m.conversation_id "
+                                    + "AND cp.user_id = :reporterId AND cp.left_at IS NULL) "
+                                    + "AND NOT EXISTS (SELECT 1 FROM blocks b "
+                                    + "WHERE (b.blocker_id = :reporterId "
+                                    + "AND b.blocked_id = r.user_id) "
+                                    + "OR (b.blocker_id = r.user_id "
+                                    + "AND b.blocked_id = :reporterId))";
                 };
         return jdbcClient
                 .sql(query)

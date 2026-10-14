@@ -1,5 +1,6 @@
 package com.app.modules.message.repository;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -133,4 +134,53 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
     List<MessageReaction> findLatestVisiblePerConversation(
             @Param("conversationIds") Collection<UUID> conversationIds,
             @Param("viewerId") UUID viewerId);
+
+    /**
+     * Reads the account that authored a reaction, for the moderation path.
+     *
+     * <p>Native and taking no conversation identifier, because moderation reaches a reaction
+     * through a report rather than through a thread the actor participates in.
+     *
+     * @param reactionId the reaction's own identifier
+     * @return the reacting account's id, or empty when no row holds that id
+     */
+    @Query(
+            value = "SELECT r.user_id FROM message_reactions r WHERE r.id = :reactionId",
+            nativeQuery = true)
+    Optional<UUID> findReactorIdForModeration(@Param("reactionId") UUID reactionId);
+
+    /**
+     * Reports whether a reaction currently carries the administrative tombstone.
+     *
+     * @param reactionId the reaction's own identifier
+     * @return true when the row carries an {@code admin_removed_at}, or empty when no row holds
+     *     that id
+     */
+    @Query(
+            value =
+                    "SELECT r.admin_removed_at IS NOT NULL FROM message_reactions r"
+                            + " WHERE r.id = :reactionId",
+            nativeQuery = true)
+    Optional<Boolean> isAdminRemoved(@Param("reactionId") UUID reactionId);
+
+    /**
+     * Sets or clears a reaction's administrative tombstone.
+     *
+     * <p>Touches that column only, so the emoji and {@code reacted_at} survive a removal and a
+     * restore returns the reaction exactly as it was, and the owner's own choices (picking another
+     * emoji, removing the reaction) are never undone by a moderation decision.
+     *
+     * @param reactionId the reaction's own identifier
+     * @param adminRemovedAt removal timestamp, or null when restoring
+     * @return number of updated reactions
+     */
+    @Modifying
+    @Query(
+            value =
+                    "UPDATE message_reactions SET admin_removed_at = :adminRemovedAt"
+                            + " WHERE id = :reactionId",
+            nativeQuery = true)
+    int applyAdminModeration(
+            @Param("reactionId") UUID reactionId,
+            @Param("adminRemovedAt") OffsetDateTime adminRemovedAt);
 }

@@ -160,6 +160,79 @@ class ReportControllerIT {
     }
 
     @Test
+    void submitReport_peersReactionAsParticipant_returnsCreated() {
+        TestUser reactor = createUser("rx_reactor", "user");
+        TestUser reporter = createUser("rx_reporter", "user");
+        UUID reaction = insertConversationWithReaction(reactor, reporter);
+
+        ResponseEntity<Map> response =
+                submitTypedReport(reporter, "message_reaction", reaction, "harassment");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        Map<?, ?> data = (Map<?, ?>) response.getBody().get("data");
+        assertThat(data.get("reportType")).isEqualTo("message_reaction");
+        assertThat(data.get("entityId")).isEqualTo(reaction.toString());
+    }
+
+    @Test
+    void submitReport_ownReaction_returnsSelfReportRefusal() {
+        TestUser reactor = createUser("rx_self_reactor", "user");
+        TestUser other = createUser("rx_self_other", "user");
+        UUID reaction = insertConversationWithReaction(reactor, other);
+
+        ResponseEntity<Map> response =
+                submitTypedReport(reactor, "message_reaction", reaction, "harassment");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody().get("code")).isEqualTo("REPORT_SELF_NOT_ALLOWED");
+    }
+
+    @Test
+    void submitReport_reactionOfAConversationTheReporterIsNotIn_returnsNotFound() {
+        TestUser reactor = createUser("rx_out_reactor", "user");
+        TestUser other = createUser("rx_out_other", "user");
+        TestUser outsider = createUser("rx_out_outsider", "user");
+        UUID reaction = insertConversationWithReaction(reactor, other);
+
+        ResponseEntity<Map> response =
+                submitTypedReport(outsider, "message_reaction", reaction, "harassment");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody().get("code")).isEqualTo("REPORT_TARGET_NOT_FOUND");
+    }
+
+    @Test
+    void submitReport_reactionOfAnAccountThatBlocksTheReporter_returnsNotFound() {
+        TestUser reactor = createUser("rx_blk_reactor", "user");
+        TestUser reporter = createUser("rx_blk_reporter", "user");
+        UUID reaction = insertConversationWithReaction(reactor, reporter);
+        jdbcTemplate.update(
+                "INSERT INTO blocks(blocker_id, blocked_id) VALUES (?, ?)",
+                reactor.id(),
+                reporter.id());
+
+        ResponseEntity<Map> response =
+                submitTypedReport(reporter, "message_reaction", reaction, "harassment");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody().get("code")).isEqualTo("REPORT_TARGET_NOT_FOUND");
+    }
+
+    @Test
+    void submitReport_reactionAnAdministratorAlreadyRemoved_returnsNotFound() {
+        TestUser reactor = createUser("rx_gone_reactor", "user");
+        TestUser reporter = createUser("rx_gone_reporter", "user");
+        UUID reaction = insertConversationWithReaction(reactor, reporter);
+        jdbcTemplate.update(
+                "UPDATE message_reactions SET admin_removed_at = NOW() WHERE id = ?", reaction);
+
+        ResponseEntity<Map> response =
+                submitTypedReport(reporter, "message_reaction", reaction, "harassment");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
     void listReports_regularUser_returnsForbidden() {
         TestUser user = createUser("list_user", "user");
 
@@ -438,6 +511,48 @@ class ReportControllerIT {
                 role);
         String token = jwtTokenProvider.generateAccessToken(id, role.toUpperCase(), 0);
         return new TestUser(id, token);
+    }
+
+    private ResponseEntity<Map> submitTypedReport(
+            TestUser reporter, String reportType, UUID entityId, String reason) {
+        return rest.exchange(
+                "/api/v1/reports",
+                HttpMethod.POST,
+                new HttpEntity<>(
+                        Map.of(
+                                "reportType", reportType,
+                                "reportReason", reason,
+                                "entityId", entityId.toString()),
+                        authHeaders(reporter)),
+                Map.class);
+    }
+
+    // The reactor reacts to a message the other participant sent; returns the reaction's id.
+    private UUID insertConversationWithReaction(TestUser reactor, TestUser sender) {
+        UUID conversation =
+                jdbcTemplate.queryForObject(
+                        "INSERT INTO conversations DEFAULT VALUES RETURNING id", UUID.class);
+        for (TestUser member : List.of(reactor, sender)) {
+            jdbcTemplate.update(
+                    "INSERT INTO conversation_participants(conversation_id, user_id)"
+                            + " VALUES (?, ?)",
+                    conversation,
+                    member.id());
+        }
+        UUID message =
+                jdbcTemplate.queryForObject(
+                        "INSERT INTO messages(conversation_id, sender_id, message_type, content)"
+                                + " VALUES (?, ?, 'text', 'react to this') RETURNING id",
+                        UUID.class,
+                        conversation,
+                        sender.id());
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO message_reactions(message_id, user_id, emoji)"
+                        + " VALUES (?, ?, ?) RETURNING id",
+                UUID.class,
+                message,
+                reactor.id(),
+                "👍");
     }
 
     private ResponseEntity<Map> submitReport(

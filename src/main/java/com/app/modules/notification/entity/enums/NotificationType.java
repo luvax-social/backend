@@ -31,6 +31,9 @@ public enum NotificationType {
     COMMENT_REMOVED,
     STORY_REMOVED,
     MESSAGE_REMOVED,
+    // A message reaction an administrator removed. Like the other enforcement notices it is not
+    // user-toggleable, so the reactor is always told and shown the appeal route.
+    REACTION_REMOVED,
     REPORT_POST_REMOVED,
     POST_RESTORED,
     REPORT_DISMISSED;
@@ -50,6 +53,7 @@ public enum NotificationType {
                             COMMENT_REMOVED,
                             STORY_REMOVED,
                             MESSAGE_REMOVED,
+                            REACTION_REMOVED,
                             REPORT_POST_REMOVED,
                             POST_RESTORED,
                             REPORT_DISMISSED ->

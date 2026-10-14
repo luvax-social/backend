@@ -220,6 +220,7 @@ public class NotificationItemAssembler {
                             COMMENT_REMOVED,
                             STORY_REMOVED,
                             MESSAGE_REMOVED,
+                            REACTION_REMOVED,
                             REPORT_POST_REMOVED,
                             REPORT_DISMISSED ->
                     new Resolved(

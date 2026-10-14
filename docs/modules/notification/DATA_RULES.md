@@ -95,9 +95,11 @@ Every write goes through `NotificationService.create(NotificationDraft)`, which 
 | `post_removed`, `post_restored` | `AdminServiceImpl`, synchronously | none | `post` | post | reason | audit row |
 | `report_post_removed` | `AdminServiceImpl` | none | `report` | post | - | audit row |
 | `report_dismissed` | `AdminServiceImpl` | none | `report` | - | reason | audit row |
-| `comment_removed`, `story_removed`, `message_removed` | `AdminServiceImpl` | none | `admin_action` | - | reason | audit row |
+| `comment_removed`, `story_removed`, `message_removed`, `reaction_removed` | `AdminServiceImpl` | none | `admin_action` | - | reason | audit row |
 | `support_ticket_update` | `SupportTicketServiceImpl`, `VerificationServiceImpl`, synchronously | none | `support_ticket` or `verification_request` | - | - | - |
 | `message` | none since the overhaul | - | - | - | - | - |
+
+`reaction_removed` is an enforcement notice like the other removal notices: it has no `user_settings` toggle (`NotificationServiceImpl.recipientAllows` returns true), it belongs to the `system` category, and it carries the same moderation target and appeal route.
 
 Direct messages left the feed.
 `message.notification.queue`, its DLQ and bindings are retired; `RetiredQueueCleaner` deletes both queues from the broker at startup, idempotently.

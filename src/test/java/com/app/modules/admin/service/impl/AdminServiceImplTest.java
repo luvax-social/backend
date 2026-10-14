@@ -39,6 +39,7 @@ import com.app.modules.admin.repository.AdminActionRepository;
 import com.app.modules.admin.service.AdminActionListingService;
 import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.comment.repository.CommentRepository;
+import com.app.modules.message.repository.MessageReactionRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.service.NotificationDraft;
@@ -70,6 +71,7 @@ class AdminServiceImplTest {
     @Mock private CommentRepository commentRepository;
     @Mock private StoryRepository storyRepository;
     @Mock private MessageRepository messageRepository;
+    @Mock private MessageReactionRepository messageReactionRepository;
     @Mock private ReportRepository reportRepository;
     @Mock private AdminActionMapper adminActionMapper;
     @Mock private NotificationService notificationService;
@@ -89,6 +91,7 @@ class AdminServiceImplTest {
                         commentRepository,
                         storyRepository,
                         messageRepository,
+                        messageReactionRepository,
                         reportRepository,
                         adminActionMapper,
                         new AdminActionRecorder(
@@ -977,6 +980,85 @@ class AdminServiceImplTest {
                 UUID.randomUUID(), messageId, new AdminActionRequest("Harassment", null));
 
         verify(notificationService, never()).create(any(NotificationDraft.class));
+    }
+
+    @Test
+    void removeMessageReaction_liveReaction_setsTheTombstoneAuditsAndNotifiesTheReactor() {
+        UUID reactionId = UUID.randomUUID();
+        UUID reactorId = UUID.randomUUID();
+        when(messageReactionRepository.isAdminRemoved(reactionId)).thenReturn(Optional.of(false));
+        when(messageReactionRepository.findReactorIdForModeration(reactionId))
+                .thenReturn(Optional.of(reactorId));
+        AdminActionResponse expected = response(AdminActionType.REMOVE_MESSAGE_REACTION);
+        stubAudit(expected);
+
+        service.removeMessageReaction(
+                UUID.randomUUID(), reactionId, new AdminActionRequest("Harassment", null));
+
+        verify(messageReactionRepository)
+                .applyAdminModeration(eq(reactionId), any(OffsetDateTime.class));
+        ArgumentCaptor<AdminAction> captor = ArgumentCaptor.forClass(AdminAction.class);
+        verify(adminActionRepository).insert(captor.capture());
+        assertThat(captor.getValue().getTargetUserId()).isEqualTo(reactorId);
+        assertThat(captor.getValue().getTargetEntityType()).isEqualTo("message_reaction");
+        assertThat(captor.getValue().getTargetEntityId()).isEqualTo(reactionId);
+        assertThat(captor.getValue().getMetadata()).isNullOrEmpty();
+        verify(notificationService)
+                .create(
+                        notice(
+                                reactorId,
+                                NotificationType.REACTION_REMOVED,
+                                "admin_action",
+                                expected.id(),
+                                null,
+                                "Harassment"));
+    }
+
+    @Test
+    void restoreMessageReaction_removedReaction_clearsTheTombstoneWithoutNotifying() {
+        UUID reactionId = UUID.randomUUID();
+        when(messageReactionRepository.isAdminRemoved(reactionId)).thenReturn(Optional.of(true));
+        when(messageReactionRepository.findReactorIdForModeration(reactionId))
+                .thenReturn(Optional.of(UUID.randomUUID()));
+        stubAudit(response(AdminActionType.RESTORE_MESSAGE_REACTION));
+
+        service.restoreMessageReaction(
+                UUID.randomUUID(), reactionId, new AdminActionRequest("Appeal accepted", null));
+
+        verify(messageReactionRepository).applyAdminModeration(reactionId, null);
+        verify(notificationService, never()).create(any(NotificationDraft.class));
+    }
+
+    @Test
+    void restoreMessageReaction_notRemoved_throwsInvalidTransition() {
+        UUID reactionId = UUID.randomUUID();
+        when(messageReactionRepository.isAdminRemoved(reactionId)).thenReturn(Optional.of(false));
+
+        assertThatThrownBy(
+                        () ->
+                                service.restoreMessageReaction(
+                                        UUID.randomUUID(),
+                                        reactionId,
+                                        new AdminActionRequest("Appeal accepted", null)))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.ADMIN_INVALID_TRANSITION);
+    }
+
+    @Test
+    void removeMessageReaction_missingReaction_throwsNotFound() {
+        UUID reactionId = UUID.randomUUID();
+        when(messageReactionRepository.isAdminRemoved(reactionId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(
+                        () ->
+                                service.removeMessageReaction(
+                                        UUID.randomUUID(),
+                                        reactionId,
+                                        new AdminActionRequest("Harassment", null)))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ApiErrorCode.MESSAGE_NOT_FOUND);
     }
 
     @Test

@@ -458,6 +458,7 @@ public class NotificationServiceImpl implements NotificationService {
                             COMMENT_REMOVED,
                             STORY_REMOVED,
                             MESSAGE_REMOVED,
+                            REACTION_REMOVED,
                             REPORT_POST_REMOVED,
                             POST_RESTORED,
                             REPORT_DISMISSED,

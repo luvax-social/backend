@@ -28,7 +28,9 @@ public final class AppealCategories {
                     AdminActionType.REMOVE_POST, SupportCategory.APPEAL_CONTENT_REMOVAL,
                     AdminActionType.REMOVE_COMMENT, SupportCategory.APPEAL_CONTENT_REMOVAL,
                     AdminActionType.REMOVE_STORY, SupportCategory.APPEAL_CONTENT_REMOVAL,
-                    AdminActionType.REMOVE_MESSAGE, SupportCategory.APPEAL_CONTENT_REMOVAL);
+                    AdminActionType.REMOVE_MESSAGE, SupportCategory.APPEAL_CONTENT_REMOVAL,
+                    AdminActionType.REMOVE_MESSAGE_REACTION,
+                            SupportCategory.APPEAL_CONTENT_REMOVAL);
 
     private static final Set<String> APPEALABLE_LABELS =
             BY_ACTION.keySet().stream()

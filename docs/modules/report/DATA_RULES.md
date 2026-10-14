@@ -29,7 +29,9 @@ This table cannot be rebuilt from any other source if lost.
 
 | Rule | Enforced By |
 |------|-------------|
-| `report_type` must be one of `'post'`, `'comment'`, `'user'`, `'story'`, `'message'` | `report_type` enum |
+| `report_type` must be one of `'post'`, `'comment'`, `'user'`, `'story'`, `'message'`, `'message_reaction'` | `report_type` enum |
+| A `message_reaction` report's `entity_id` is `message_reactions.id`. The reporter must be a participant who still has the conversation (`left_at IS NULL`), the reaction and its message must carry no tombstone, and no block may exist between reporter and reactor in either direction; anything else answers `REPORT_TARGET_NOT_FOUND` so a block stays silent, and reporting one's own reaction answers `REPORT_SELF_NOT_ALLOWED` | `ReportTargetRepositoryImpl.findOwnerId`, `ReportServiceImpl.persistReport` |
+| The moderation view of a reported reaction (`GET /admin/reports/{reportId}/target`) carries the emoji, the reactor as owner and a snippet of the message it sits on, and reads as removed once the reaction or its message is tombstoned | `AdminReportTargetRepository.findMessageReaction` |
 | `report_reason` must be one of the 8 values in `report_reason` enum | `report_reason` enum |
 | `status` must be one of `'pending'`, `'reviewing'`, `'resolved'`, `'dismissed'`, `'escalated'`; defaults to `'pending'` | `report_status` enum, `DEFAULT 'pending'` |
 | `escalated_by` becomes NULL if the escalating moderator deletes their account | `ON DELETE SET NULL` on `escalated_by` FK |
@@ -85,6 +87,6 @@ This table cannot be rebuilt from any other source if lost.
 | `post` | inbound | Reports with `report_type = 'post'` target a `posts.id` via polymorphic `entity_id` |
 | `comment` | inbound | Reports with `report_type = 'comment'` target a `comments.id` |
 | `story` | inbound | Reports with `report_type = 'story'` target a `stories.id` |
-| `message` | inbound | Reports with `report_type = 'message'` target a `messages.id` |
+| `message` | inbound | Reports with `report_type = 'message'` target a `messages.id`, and `report_type = 'message_reaction'` a `message_reactions.id` |
 | `admin` | outbound | Resolved reports reference `admin_actions.report_id` for audit trail |
 | `post`, `comment`, `social` | outbound | Each reads `ReportedTargetService` to embed `hasReported` in its viewer state. This is the only Java-level dependency any module has on `report`, and `report` itself imports no other module: its target-existence check reaches `posts`, `comments`, `users`, `stories`, and `messages` through native SQL in `ReportTargetRepositoryImpl`, not through their services. The dependency graph around `report` is therefore acyclic |

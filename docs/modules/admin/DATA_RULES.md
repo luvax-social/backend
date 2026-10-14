@@ -38,7 +38,8 @@ The `admin_actions` replica, by contrast, can be rebuilt from PostgreSQL by publ
 
 | Rule | Enforced By |
 |------|-------------|
-| `action_type` must be one of the 41 values in `admin_action_type` enum; V141 added `create_hidden_word`, `edit_hidden_word`, `delete_hidden_word`, `remove_message_reaction` and `restore_message_reaction`, and `AdminActionType` carries the three hidden word values until the reaction moderation lands | `admin_action_type` enum |
+| `PATCH /admin/message-reactions/{reactionId}/remove` and `/restore` set and clear `message_reactions.admin_removed_at`, the reaction's own tombstone, and never touch the message or the reactor's other reactions. A removal needs the reaction not already removed and a restore needs it removed, otherwise `ADMIN_INVALID_TRANSITION`. The audit row targets the reactor (`target_user_id`), has `target_entity_type = 'message_reaction'` and the reaction id as `target_entity_id`, and carries no metadata: the audit log never holds a participant's emoji or message text. A removal closes a linked `message_reaction` report, notifies the reactor with `reaction_removed` and queues the appealable `REACTION_REMOVED` mail; a restore does neither | `AdminServiceImpl.moderateMessageReaction`, `MessageReactionRepository.applyAdminModeration` |
+| `action_type` must be one of the 41 values in `admin_action_type` enum; V141 added `create_hidden_word`, `edit_hidden_word`, `delete_hidden_word`, `remove_message_reaction` and `restore_message_reaction`, and `AdminActionType` carries all five | `admin_action_type` enum |
 | `admin_actions` is an append-only log; there is no `updated_at` and no soft delete | Schema design — no such columns |
 | `target_user_id` becomes NULL if the target user's account is deleted | `ON DELETE SET NULL` on `target_user_id` FK |
 | `report_id` becomes NULL if the associated report is deleted | `ON DELETE SET NULL` on `report_id` FK |

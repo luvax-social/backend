@@ -52,7 +52,10 @@ public class ModerationNoticeRepository {
                                 + " WHEN 'story' THEN (SELECT s.caption FROM stories s"
                                 + " WHERE s.id = a.target_entity_id)"
                                 + " WHEN 'message' THEN (SELECT m.content FROM messages m"
-                                + " WHERE m.id = a.target_entity_id) END AS affected_text,"
+                                + " WHERE m.id = a.target_entity_id)"
+                                + " WHEN 'message_reaction' THEN (SELECT r.emoji"
+                                + " FROM message_reactions r"
+                                + " WHERE r.id = a.target_entity_id) END AS affected_text,"
                                 + " CASE a.target_entity_type"
                                 + " WHEN 'post' THEN (SELECT p.created_at FROM posts p"
                                 + " WHERE p.id = a.target_entity_id)"
@@ -61,7 +64,10 @@ public class ModerationNoticeRepository {
                                 + " WHEN 'story' THEN (SELECT s.created_at FROM stories s"
                                 + " WHERE s.id = a.target_entity_id)"
                                 + " WHEN 'message' THEN (SELECT m.created_at FROM messages m"
-                                + " WHERE m.id = a.target_entity_id) END AS affected_at"
+                                + " WHERE m.id = a.target_entity_id)"
+                                + " WHEN 'message_reaction' THEN (SELECT r.reacted_at"
+                                + " FROM message_reactions r"
+                                + " WHERE r.id = a.target_entity_id) END AS affected_at"
                                 + " FROM admin_actions a WHERE a.id IN (:ids)")
                 .param("ids", adminActionIds)
                 .query(

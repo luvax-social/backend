@@ -260,6 +260,10 @@ public final class ApiConstants {
         public static final String RESTORE_STORY = "/stories/{storyId}/restore";
         public static final String REMOVE_MESSAGE = "/messages/{messageId}/remove";
         public static final String RESTORE_MESSAGE = "/messages/{messageId}/restore";
+        public static final String REMOVE_MESSAGE_REACTION =
+                "/message-reactions/{reactionId}/remove";
+        public static final String RESTORE_MESSAGE_REACTION =
+                "/message-reactions/{reactionId}/restore";
         public static final String RESOLVE_REPORT = "/reports/{reportId}/resolve";
         public static final String DISMISS_REPORT = "/reports/{reportId}/dismiss";
         public static final String ESCALATE_REPORT = "/reports/{reportId}/escalate";

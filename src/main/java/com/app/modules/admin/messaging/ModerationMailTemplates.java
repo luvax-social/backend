@@ -29,7 +29,8 @@ import com.app.modules.mail.enums.ModerationMailTemplate;
 public final class ModerationMailTemplates {
 
     private static final Map<AdminActionType, ModerationMailTemplate> BY_ACTION =
-            // Map.ofEntries rather than Map.of: there are eleven pairs and Map.of stops at ten.
+            // Map.ofEntries rather than Map.of: there are more than ten pairs and Map.of stops at
+            // ten.
             Map.ofEntries(
                     Map.entry(AdminActionType.BAN_USER, ModerationMailTemplate.ACCOUNT_BANNED),
                     Map.entry(
@@ -46,6 +47,9 @@ public final class ModerationMailTemplates {
                     Map.entry(AdminActionType.REMOVE_STORY, ModerationMailTemplate.STORY_REMOVED),
                     Map.entry(
                             AdminActionType.REMOVE_MESSAGE, ModerationMailTemplate.MESSAGE_REMOVED),
+                    Map.entry(
+                            AdminActionType.REMOVE_MESSAGE_REACTION,
+                            ModerationMailTemplate.REACTION_REMOVED),
                     Map.entry(
                             AdminActionType.RESPOND_SUPPORT_TICKET,
                             ModerationMailTemplate.SUPPORT_TICKET_ANSWERED),

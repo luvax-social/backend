@@ -110,6 +110,35 @@ public interface AdminService {
     AdminActionResponse restoreMessage(UUID actorId, UUID messageId, AdminActionRequest request);
 
     /**
+     * Removes a message reaction and records the action atomically.
+     *
+     * <p>Sets the reaction's own administrative tombstone, which hides it from both participants
+     * and leaves the message and the reactor's other reactions alone. Closes a linked report and
+     * notifies the reactor, who is also mailed an appeal notice.
+     *
+     * @param actorId the acting moderator or administrator
+     * @param reactionId the reaction to remove
+     * @param request the audit reason and any linked report
+     * @return the audit row
+     */
+    AdminActionResponse removeMessageReaction(
+            UUID actorId, UUID reactionId, AdminActionRequest request);
+
+    /**
+     * Restores a removed message reaction and records the action atomically.
+     *
+     * <p>Clears the administrative tombstone only, so the reaction returns with its original emoji
+     * and time.
+     *
+     * @param actorId the acting moderator or administrator
+     * @param reactionId the reaction to restore
+     * @param request the audit reason and any linked report
+     * @return the audit row
+     */
+    AdminActionResponse restoreMessageReaction(
+            UUID actorId, UUID reactionId, AdminActionRequest request);
+
+    /**
      * Resolves an open report and records the action atomically.
      *
      * <p>An escalated report may be resolved only by an administrator. A moderator escalated it

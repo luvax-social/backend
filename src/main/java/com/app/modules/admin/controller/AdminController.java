@@ -173,6 +173,30 @@ public class AdminController extends BaseController implements AdminApi {
                 adminService.restoreMessage(SecurityUtils.getCurrentUserId(), messageId, request));
     }
 
+    /** Removes a message reaction for the authenticated moderator or administrator. */
+    @Override
+    @PatchMapping(ApiConstants.Admin.REMOVE_MESSAGE_REACTION)
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<AdminActionResponse>> removeMessageReaction(
+            @PathVariable("reactionId") UUID reactionId,
+            @Valid @RequestBody AdminActionRequest request) {
+        return ok(
+                adminService.removeMessageReaction(
+                        SecurityUtils.getCurrentUserId(), reactionId, request));
+    }
+
+    /** Restores a message reaction for the authenticated moderator or administrator. */
+    @Override
+    @PatchMapping(ApiConstants.Admin.RESTORE_MESSAGE_REACTION)
+    @RateLimiter(name = "lowTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<AdminActionResponse>> restoreMessageReaction(
+            @PathVariable("reactionId") UUID reactionId,
+            @Valid @RequestBody AdminActionRequest request) {
+        return ok(
+                adminService.restoreMessageReaction(
+                        SecurityUtils.getCurrentUserId(), reactionId, request));
+    }
+
     /** Resolves a report for the authenticated moderator or administrator. */
     @Override
     @PatchMapping(ApiConstants.Admin.RESOLVE_REPORT)
