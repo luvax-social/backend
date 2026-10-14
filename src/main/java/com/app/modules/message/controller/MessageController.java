@@ -24,14 +24,17 @@ import com.app.common.response.CursorPageResponse;
 import com.app.common.security.util.SecurityUtils;
 import com.app.modules.message.api.MessageApi;
 import com.app.modules.message.dto.request.CreateDirectConversationRequest;
+import com.app.modules.message.dto.request.MessageReactionRequest;
 import com.app.modules.message.dto.request.SendMessageRequest;
 import com.app.modules.message.dto.request.SetNicknameRequest;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
+import com.app.modules.message.dto.response.MessageReactionResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.UnreadCountResponse;
 import com.app.modules.message.enums.ConversationFolder;
 import com.app.modules.message.service.ConversationService;
+import com.app.modules.message.service.MessageReactionService;
 import com.app.modules.message.service.MessageService;
 
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
@@ -42,11 +45,15 @@ public class MessageController extends BaseController implements MessageApi {
 
     private final ConversationService conversationService;
     private final MessageService messageService;
+    private final MessageReactionService reactionService;
 
     public MessageController(
-            ConversationService conversationService, MessageService messageService) {
+            ConversationService conversationService,
+            MessageService messageService,
+            MessageReactionService reactionService) {
         this.conversationService = conversationService;
         this.messageService = messageService;
+        this.reactionService = reactionService;
     }
 
     /** Starts or reuses a 1-1 conversation with the target user; returns 201. */
@@ -254,6 +261,34 @@ public class MessageController extends BaseController implements MessageApi {
     public ResponseEntity<Void> blockRequester(
             @PathVariable("conversationId") UUID conversationId) {
         conversationService.blockRequester(SecurityUtils.getCurrentUserId(), conversationId);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Sets or changes the authenticated caller's emoji reaction to a message. */
+    @Override
+    @PutMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.REACTION)
+    @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<ApiResponse<MessageReactionResponse>> reactToMessage(
+            @PathVariable("conversationId") UUID conversationId,
+            @PathVariable("messageId") UUID messageId,
+            @RequestBody MessageReactionRequest request) {
+        MessageReactionResponse body =
+                reactionService.react(
+                        SecurityUtils.getCurrentUserId(),
+                        conversationId,
+                        messageId,
+                        request == null ? null : request.emoji());
+        return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
+    }
+
+    /** Removes the authenticated caller's reaction to a message; returns 204 either way. */
+    @Override
+    @DeleteMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.REACTION)
+    @RateLimiter(name = "mediumTraffic", fallbackMethod = "rateLimit")
+    public ResponseEntity<Void> removeMessageReaction(
+            @PathVariable("conversationId") UUID conversationId,
+            @PathVariable("messageId") UUID messageId) {
+        reactionService.unreact(SecurityUtils.getCurrentUserId(), conversationId, messageId);
         return ResponseEntity.noContent().build();
     }
 }

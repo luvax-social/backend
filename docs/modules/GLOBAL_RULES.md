@@ -128,6 +128,9 @@ Tables with `updated_at` triggers: `users` (`trg_users_updated_at`), `posts` (`t
 
 All timestamps use `TIMESTAMPTZ` (timezone-aware). Store and compare in UTC.
 
+Exception: `message_reactions.reacted_at` is set by the reaction upsert statement with `NOW()`, not by `DEFAULT NOW()` alone, because changing the emoji of an existing reaction is a new reaction time and the column must move with it.
+It is still the database clock, never the JVM clock.
+
 ---
 
 ## 7. Media Upload Flow

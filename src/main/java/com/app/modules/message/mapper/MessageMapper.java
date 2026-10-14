@@ -12,13 +12,16 @@ import com.app.common.text.Snippets;
 import com.app.modules.media.entity.MediaAsset;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
+import com.app.modules.message.dto.response.LastReactionPreviewResponse;
 import com.app.modules.message.dto.response.MessageMediaResponse;
+import com.app.modules.message.dto.response.MessageReactionResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.ParticipantResponse;
 import com.app.modules.message.dto.response.ReplyPreviewResponse;
 import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.Message;
+import com.app.modules.message.entity.MessageReaction;
 import com.app.modules.message.enums.MessageType;
 import com.app.modules.users.entity.User;
 
@@ -84,6 +87,8 @@ public interface MessageMapper {
      * @param recipientOfRequest whether the caller is the one asked to accept the request
      * @param hiddenRequest whether the caller, as recipient, has the request filed as hidden
      * @param sendRestrictionLabel whether the caller may not send another message yet
+     * @param lastReaction the newest reaction the caller may see when it is newer than the last
+     *     message, or null
      * @return the conversation summary response
      */
     @Mapping(source = "conversation.id", target = "id")
@@ -102,7 +107,8 @@ public interface MessageMapper {
             String requestStatusLabel,
             boolean recipientOfRequest,
             boolean hiddenRequest,
-            String sendRestrictionLabel);
+            String sendRestrictionLabel,
+            LastReactionPreviewResponse lastReaction);
 
     /**
      * Projects a message entity onto its API response shape, including a tombstoned one.
@@ -152,6 +158,26 @@ public interface MessageMapper {
      */
     default MessageResponse toMessageResponse(
             Message message, MessageMediaResponse media, Map<UUID, Message> replyParents) {
+        return toMessageResponse(message, media, replyParents, null);
+    }
+
+    /**
+     * Projects a message with its resolved media, reply parents and visible reactions.
+     *
+     * <p>A message that is no longer shown carries no reactions whatever the caller passes, so a
+     * stale lookup can never serve reactions beside a tombstone.
+     *
+     * @param message the source message
+     * @param media the resolved attachment, or null when the message carries none
+     * @param replyParents the parents of the rendered messages keyed by id, or null
+     * @param reactions the reactions the caller may see on this message, or null for none
+     * @return the message response
+     */
+    default MessageResponse toMessageResponse(
+            Message message,
+            MessageMediaResponse media,
+            Map<UUID, Message> replyParents,
+            List<MessageReactionResponse> reactions) {
         if (message == null) {
             return null;
         }
@@ -182,7 +208,8 @@ public interface MessageMapper {
                 replyTo,
                 tombstoned,
                 tombstonedAt,
-                message.getCreatedAt());
+                message.getCreatedAt(),
+                tombstoned ? List.of() : reactions);
     }
 
     /**
@@ -211,6 +238,17 @@ public interface MessageMapper {
                 parent.getMessageType(),
                 snippet,
                 unavailable);
+    }
+
+    /**
+     * Projects a reaction onto its response shape.
+     *
+     * @param reaction the stored reaction
+     * @return the reaction response
+     */
+    default MessageReactionResponse toReactionResponse(MessageReaction reaction) {
+        return new MessageReactionResponse(
+                reaction.getUserId(), reaction.getEmoji(), reaction.getReactedAt());
     }
 
     /**

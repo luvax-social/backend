@@ -400,15 +400,17 @@ A redelivery therefore writes an identical row that the engine folds away, on to
 | `user.interaction-limit.changed.v1` | `interaction_limit_change` | `user`, the account itself | `{"nonFollowers":bool,"recentFollowers":bool,"active":bool}` |
 | `comment.hidden.v1` | `comment_hidden` | `comment`, the hidden comment | `{"reason":"hidden_words"\|"limited_interaction"\|"hidden_parent"}` |
 | `comment.unhidden.v1` | `comment_unhide` | `comment`, one row per released comment | none |
+| `message.request.resolved.v1` | `message_request_accept` for `accepted`; `message_request_delete` for `deleted` and `blocked` | `conversation`, the request | none for an accept; `{"blocked":bool}` for a delete |
+| `message.reaction.changed.v1` | `message_reaction` when the event carries an emoji; `message_reaction_remove` when it carries none | `message`, the reacted-to message | `{"emoji":"..."}` for a reaction; none for a removal |
 
 `active` is true when either toggle is on.
 The account of a `comment_hidden` row is the commenter, and the account of a `comment_unhide` row is the post owner who released the comment.
 A payload that lacks the entity id, a boolean flag or a known reason, an envelope without an actor or an `occurredAt`, and an event type with no entry are all permanent failures that dead-letter at once.
-The reason is checked against the closed set of hidden reasons before it is written into the JSON, so a malformed event cannot add structure to a row.
+The reason is checked against the closed set of hidden reasons, and the emoji against the single-emoji rule of the message module, before either is written into the JSON, so a malformed event cannot add structure to a row.
 
 ### Adding a signal
 
-A later event (the message reaction and message request events are the planned ones) is one entry in `DomainSignalMappings` and one binding in `RecommendationRabbitBindingConfig`.
+A later event is one entry in `DomainSignalMappings` and one binding in `RecommendationRabbitBindingConfig`.
 The enum value must already exist in `UserEventType` and in the ClickHouse `Enum8`; V4 added all thirteen values for this phase, ordinals 21 to 33, with ordinals 1 to 20 unchanged.
 `RabbitMqTopologyConfigTest` fails when a mapped key is not bound to the import queue or when any other queue would also receive it, and `DomainSignalMappingsTest` pins each entry.
 

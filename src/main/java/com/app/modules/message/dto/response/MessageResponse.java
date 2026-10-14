@@ -1,6 +1,7 @@
 package com.app.modules.message.dto.response;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import com.app.modules.message.enums.MessageType;
@@ -52,4 +53,14 @@ public record MessageResponse(
                                         + " because that is the timestamp the participants were already"
                                         + " shown.")
                 OffsetDateTime deletedAt,
-        @Schema(description = "Creation timestamp.") OffsetDateTime createdAt) {}
+        @Schema(description = "Creation timestamp.") OffsetDateTime createdAt,
+        @Schema(
+                        description =
+                                "Reactions the caller may see, oldest first; empty for a message that"
+                                        + " is no longer shown, because a restore brings them back.")
+                List<MessageReactionResponse> reactions) {
+
+    public MessageResponse {
+        reactions = reactions == null ? List.of() : List.copyOf(reactions);
+    }
+}

@@ -14,6 +14,7 @@ import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.modules.comment.enums.CommentHiddenReason;
 import com.app.modules.comment.messaging.CommentEventTypes;
 import com.app.modules.message.messaging.MessageEventTypes;
+import com.app.modules.message.util.ReactionEmojiValidator;
 import com.app.modules.recommendation.enums.UserEventType;
 import com.app.modules.social.messaging.SocialEventTypes;
 
@@ -40,6 +41,7 @@ public final class DomainSignalMappings {
     private static final String ENTITY_USER = "user";
     private static final String ENTITY_COMMENT = "comment";
     private static final String ENTITY_CONVERSATION = "conversation";
+    private static final String ENTITY_MESSAGE = "message";
 
     private static final Set<String> HIDDEN_REASONS =
             Stream.of(CommentHiddenReason.values())
@@ -98,6 +100,13 @@ public final class DomainSignalMappings {
                                     ENTITY_COMMENT,
                                     dataId("commentId"),
                                     DomainSignalMappings::hiddenCommentMetadata)),
+                    entry(
+                            MessageEventTypes.MESSAGE_REACTION_CHANGED_V1,
+                            new SignalMapping(
+                                    DomainSignalMappings::reactionType,
+                                    ENTITY_MESSAGE,
+                                    dataId("messageId"),
+                                    DomainSignalMappings::reactionMetadata)),
                     entry(
                             MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
                             new SignalMapping(
@@ -182,6 +191,29 @@ public final class DomainSignalMappings {
                     throw new PermanentMessageException(
                             "Signal " + event.eventType() + " has an unknown resolution");
         };
+    }
+
+    // A reaction that was set carries its emoji and one that was removed carries none, so the
+    // absence of an emoji is what makes the row a removal.
+    private static UserEventType reactionType(DomainEventEnvelope event) {
+        return data(event).get("emoji") == null
+                ? UserEventType.MESSAGE_REACTION_REMOVE
+                : UserEventType.MESSAGE_REACTION;
+    }
+
+    // The emoji is checked against the same single-emoji rule the write path enforces before it is
+    // spliced into JSON, so a malformed event can never inject structure into a stored row. A valid
+    // emoji contains no quote, backslash or control character.
+    private static String reactionMetadata(DomainEventEnvelope event) {
+        Object emoji = data(event).get("emoji");
+        if (emoji == null) {
+            return "";
+        }
+        if (!ReactionEmojiValidator.isSingleEmoji(emoji.toString())) {
+            throw new PermanentMessageException(
+                    "Signal " + event.eventType() + " has an emoji that is not a single emoji");
+        }
+        return "{\"emoji\":\"" + emoji + "\"}";
     }
 
     private static String resolution(DomainEventEnvelope event) {

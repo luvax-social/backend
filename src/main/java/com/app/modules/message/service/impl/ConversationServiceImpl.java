@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,6 +35,7 @@ import com.app.modules.media.entity.MediaAsset;
 import com.app.modules.message.dto.request.CreateDirectConversationRequest;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
+import com.app.modules.message.dto.response.LastReactionPreviewResponse;
 import com.app.modules.message.dto.response.MessageMediaResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.ParticipantResponse;
@@ -41,6 +43,7 @@ import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.ConversationParticipantId;
 import com.app.modules.message.entity.Message;
+import com.app.modules.message.entity.MessageReaction;
 import com.app.modules.message.enums.ConversationFolder;
 import com.app.modules.message.enums.ConversationRequestStatus;
 import com.app.modules.message.mapper.MessageMapper;
@@ -49,6 +52,7 @@ import com.app.modules.message.repository.ConversationParticipantRepository;
 import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.message.repository.ConversationUnreadCount;
 import com.app.modules.message.repository.MessageMediaAssetRepository;
+import com.app.modules.message.repository.MessageReactionRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.message.repository.MessageUserRepository;
 import com.app.modules.message.service.ConversationService;
@@ -82,6 +86,7 @@ public class ConversationServiceImpl implements ConversationService {
     private final MessageMediaAssetRepository mediaAssetRepository;
     private final SocialService socialService;
     private final OutboxService outboxService;
+    private final MessageReactionRepository reactionRepository;
 
     public ConversationServiceImpl(
             ConversationRepository conversationRepository,
@@ -92,7 +97,8 @@ public class ConversationServiceImpl implements ConversationService {
             MessageMapper mapper,
             MessageMediaAssetRepository mediaAssetRepository,
             SocialService socialService,
-            OutboxService outboxService) {
+            OutboxService outboxService,
+            MessageReactionRepository reactionRepository) {
         this.conversationRepository = conversationRepository;
         this.participantRepository = participantRepository;
         this.messageRepository = messageRepository;
@@ -102,6 +108,7 @@ public class ConversationServiceImpl implements ConversationService {
         this.mediaAssetRepository = mediaAssetRepository;
         this.socialService = socialService;
         this.outboxService = outboxService;
+        this.reactionRepository = reactionRepository;
     }
 
     /**
@@ -118,6 +125,48 @@ public class ConversationServiceImpl implements ConversationService {
             Map<UUID, MessageMediaResponse> media, Message message) {
         UUID assetId = message.getMediaAssetId();
         return assetId == null ? null : media.get(assetId);
+    }
+
+    // The preview shows a reaction only when it is the newest thing in the thread. A reaction older
+    // than the last message sits behind that message, which is already the row's preview, and a
+    // reaction never moves the row because it leaves last_message_at and the unread count alone.
+    private Map<UUID, LastReactionPreviewResponse> lastReactions(
+            UUID viewerId,
+            List<UUID> conversationIds,
+            Map<UUID, MessageResponse> lastMessageByConversation) {
+        List<MessageReaction> latest =
+                reactionRepository.findLatestVisiblePerConversation(conversationIds, viewerId);
+        if (latest.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, Message> reactedMessages =
+                messageRepository
+                        .findAllById(latest.stream().map(MessageReaction::getMessageId).toList())
+                        .stream()
+                        .collect(Collectors.toMap(Message::getId, Function.identity()));
+        Map<UUID, LastReactionPreviewResponse> previews = new HashMap<>();
+        for (MessageReaction reaction : latest) {
+            Message message = reactedMessages.get(reaction.getMessageId());
+            if (message == null) {
+                continue;
+            }
+            MessageResponse lastMessage =
+                    lastMessageByConversation.get(message.getConversationId());
+            if (lastMessage != null
+                    && lastMessage.createdAt() != null
+                    && !reaction.getReactedAt().isAfter(lastMessage.createdAt())) {
+                continue;
+            }
+            previews.put(
+                    message.getConversationId(),
+                    new LastReactionPreviewResponse(
+                            reaction.getUserId(),
+                            reaction.getEmoji(),
+                            message.getId(),
+                            reaction.getReactedAt(),
+                            viewerId.equals(message.getSenderId())));
+        }
+        return previews;
     }
 
     @Override
@@ -309,6 +358,8 @@ public class ConversationServiceImpl implements ConversationService {
                                                         mediaFor(lastMessageMedia, m),
                                                         lastMessageParents)));
 
+        Map<UUID, LastReactionPreviewResponse> lastReactionByConversation =
+                lastReactions(actorId, conversationIds, lastMessageByConversation);
         List<ConversationSummaryResponse> content =
                 allConversations.stream()
                         .map(
@@ -332,7 +383,8 @@ public class ConversationServiceImpl implements ConversationService {
                                             requestStatusLabel(c),
                                             recipient,
                                             recipient && c.isRequestHidden(),
-                                            sendRestrictionLabel(c, recipient));
+                                            sendRestrictionLabel(c, recipient),
+                                            lastReactionByConversation.get(c.getId()));
                                 })
                         .toList();
         return CursorPageResponse.of(content, hasNextPage, startCursor, endCursor, cursor != null);

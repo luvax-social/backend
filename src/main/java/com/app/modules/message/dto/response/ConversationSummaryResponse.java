@@ -46,4 +46,11 @@ public record ConversationSummaryResponse(
                                 "awaiting_acceptance when the caller is the sender of an"
                                         + " unaccepted request and may not send another message;"
                                         + " otherwise none.")
-                String sendRestriction) {}
+                String sendRestriction,
+        @Schema(
+                        description =
+                                "Newest reaction the caller may see, present only when it is newer"
+                                        + " than the last message; it never changes the row order or the"
+                                        + " unread count.",
+                        nullable = true)
+                LastReactionPreviewResponse lastReaction) {}

@@ -47,6 +47,7 @@ import com.app.modules.message.mapper.MessageMapper;
 import com.app.modules.message.repository.ConversationParticipantRepository;
 import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.message.repository.MessageMediaAssetRepository;
+import com.app.modules.message.repository.MessageReactionRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.message.repository.MessageUserRepository;
 import com.app.modules.social.policy.InteractionDecision;
@@ -69,6 +70,7 @@ class ConversationServiceImplTest {
     @Mock private MessageMediaAssetRepository mediaAssetRepository;
     @Mock private SocialService socialService;
     @Mock private OutboxService outboxService;
+    @Mock private MessageReactionRepository reactionRepository;
 
     private ConversationServiceImpl service;
 
@@ -84,7 +86,8 @@ class ConversationServiceImplTest {
                         mapper,
                         mediaAssetRepository,
                         socialService,
-                        outboxService);
+                        outboxService,
+                        reactionRepository);
 
         lenient()
                 .when(interactionPolicy.evaluate(any()))
@@ -148,6 +151,7 @@ class ConversationServiceImplTest {
                                 any(),
                                 org.mockito.ArgumentMatchers.anyBoolean(),
                                 org.mockito.ArgumentMatchers.anyBoolean(),
+                                any(),
                                 any()))
                 .thenAnswer(
                         inv -> {
@@ -170,7 +174,8 @@ class ConversationServiceImplTest {
                                     inv.getArgument(7),
                                     inv.getArgument(8),
                                     inv.getArgument(9),
-                                    inv.getArgument(10));
+                                    inv.getArgument(10),
+                                    inv.getArgument(11));
                         });
     }
 

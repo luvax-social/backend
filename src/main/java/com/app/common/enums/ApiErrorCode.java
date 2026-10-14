@@ -143,6 +143,7 @@ public enum ApiErrorCode {
     MESSAGE_INVALID_PAYLOAD("MESSAGE_INVALID_PAYLOAD", "Message payload does not match its type", HttpStatus.BAD_REQUEST),
     MESSAGE_IDEMPOTENCY_CONFLICT("MESSAGE_IDEMPOTENCY_CONFLICT", "Idempotency key reused with a different payload", HttpStatus.CONFLICT),
     MESSAGE_REQUEST_AWAITING_ACCEPTANCE("MESSAGE_REQUEST_AWAITING_ACCEPTANCE", "This message request has not been accepted yet", HttpStatus.CONFLICT),
+    MESSAGE_REACTION_INVALID_EMOJI("MESSAGE_REACTION_INVALID_EMOJI", "A reaction must be exactly one emoji", HttpStatus.BAD_REQUEST),
 
     // Report
     REPORT_NOT_FOUND("REPORT_NOT_FOUND", "Report not found", HttpStatus.NOT_FOUND),

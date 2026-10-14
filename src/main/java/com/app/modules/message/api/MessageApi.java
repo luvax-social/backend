@@ -23,10 +23,12 @@ import com.app.common.config.openapi.MalformedBodyErrorResponses;
 import com.app.common.response.ApiResponse;
 import com.app.common.response.CursorPageResponse;
 import com.app.modules.message.dto.request.CreateDirectConversationRequest;
+import com.app.modules.message.dto.request.MessageReactionRequest;
 import com.app.modules.message.dto.request.SendMessageRequest;
 import com.app.modules.message.dto.request.SetNicknameRequest;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
+import com.app.modules.message.dto.response.MessageReactionResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.UnreadCountResponse;
 
@@ -501,4 +503,78 @@ public interface MessageApi {
     @AuthenticationRequiredResponse
     @PostMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.BLOCK)
     ResponseEntity<Void> blockRequester(@PathVariable("conversationId") UUID conversationId);
+
+    @Operation(
+            summary = "React to a message",
+            description =
+                    "Sets or changes the caller's single emoji reaction to a message. Reacting with"
+                            + " the emoji already set changes nothing. A participant of a pending"
+                            + " message request may react. Requires authentication as an active"
+                            + " participant.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "The caller's reaction"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400",
+                description = "MESSAGE_REACTION_INVALID_EMOJI: not exactly one emoji",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "403",
+                description = "Caller is not an active participant",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description =
+                        "CONVERSATION_NOT_FOUND (missing, or blocked) or MESSAGE_NOT_FOUND"
+                                + " (missing, deleted by its sender or removed by an administrator)",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @MalformedBodyErrorResponses
+    @AuthenticationRequiredResponse
+    @PutMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.REACTION)
+    ResponseEntity<ApiResponse<MessageReactionResponse>> reactToMessage(
+            @PathVariable("conversationId") UUID conversationId,
+            @PathVariable("messageId") UUID messageId,
+            @RequestBody MessageReactionRequest request);
+
+    @Operation(
+            summary = "Remove the caller's reaction to a message",
+            description =
+                    "Removes the caller's reaction. Removing a reaction that does not exist, or one"
+                            + " on a message that is no longer shown, succeeds without effect."
+                            + " Requires authentication as an active participant.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "204",
+                description = "Reaction removed or already absent"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "403",
+                description = "Caller is not an active participant",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "CONVERSATION_NOT_FOUND (missing, or blocked) or MESSAGE_NOT_FOUND",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @DeleteMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.REACTION)
+    ResponseEntity<Void> removeMessageReaction(
+            @PathVariable("conversationId") UUID conversationId,
+            @PathVariable("messageId") UUID messageId);
 }

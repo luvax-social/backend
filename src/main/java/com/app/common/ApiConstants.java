@@ -129,6 +129,7 @@ public final class ApiConstants {
         public static final String ACCEPT = "/{conversationId}/accept";
         public static final String REQUEST = "/{conversationId}/request";
         public static final String BLOCK = "/{conversationId}/block";
+        public static final String REACTION = "/{conversationId}/messages/{messageId}/reaction";
     }
 
     public static final class Notifications {

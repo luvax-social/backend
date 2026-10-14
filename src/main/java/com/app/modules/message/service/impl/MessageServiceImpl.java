@@ -27,10 +27,12 @@ import com.app.common.response.CursorPageResponse;
 import com.app.modules.media.entity.MediaAsset;
 import com.app.modules.message.dto.request.SendMessageRequest;
 import com.app.modules.message.dto.response.MessageMediaResponse;
+import com.app.modules.message.dto.response.MessageReactionResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.Message;
+import com.app.modules.message.entity.MessageReaction;
 import com.app.modules.message.entity.MessageWriteIdempotency;
 import com.app.modules.message.enums.ConversationRequestStatus;
 import com.app.modules.message.enums.MessageType;
@@ -41,6 +43,7 @@ import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.message.repository.MessageIdempotencyRepository;
 import com.app.modules.message.repository.MessageMediaAssetRepository;
 import com.app.modules.message.repository.MessagePostRepository;
+import com.app.modules.message.repository.MessageReactionRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.message.repository.MessageStoryRepository;
 import com.app.modules.message.service.MessageService;
@@ -75,6 +78,7 @@ public class MessageServiceImpl implements MessageService {
     private final MessageMapper mapper;
     private final OutboxService outboxService;
     private final ObjectMapper objectMapper;
+    private final MessageReactionRepository reactionRepository;
 
     public MessageServiceImpl(
             MessageRepository messageRepository,
@@ -87,7 +91,8 @@ public class MessageServiceImpl implements MessageService {
             InteractionPolicyService interactionPolicy,
             MessageMapper mapper,
             OutboxService outboxService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            MessageReactionRepository reactionRepository) {
         this.messageRepository = messageRepository;
         this.idempotencyRepository = idempotencyRepository;
         this.conversationRepository = conversationRepository;
@@ -99,6 +104,7 @@ public class MessageServiceImpl implements MessageService {
         this.mapper = mapper;
         this.outboxService = outboxService;
         this.objectMapper = objectMapper;
+        this.reactionRepository = reactionRepository;
     }
 
     @Override
@@ -316,7 +322,7 @@ public class MessageServiceImpl implements MessageService {
                         ? messageRepository.findFirstByConversation(conversationId, page)
                         : messageRepository.findByConversationBefore(
                                 conversationId, decoded.createdAt(), decoded.id(), page);
-        return toPage(messages, pageSize, cursor);
+        return toPage(messages, pageSize, cursor, actorId);
     }
 
     @Override
@@ -579,17 +585,40 @@ public class MessageServiceImpl implements MessageService {
                 .collect(Collectors.toMap(MediaAsset::getId, mapper::toMediaResponse));
     }
 
+    // One statement per page. The viewer is passed to the query so a reaction from a user blocked
+    // in either direction is left out, and a message that is no longer shown contributes none.
+    private Map<UUID, List<MessageReactionResponse>> resolveReactions(
+            List<Message> page, UUID viewerId) {
+        if (page.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> messageIds = page.stream().map(Message::getId).toList();
+        return reactionRepository.findVisibleForMessages(messageIds, viewerId).stream()
+                .collect(
+                        Collectors.groupingBy(
+                                MessageReaction::getMessageId,
+                                Collectors.mapping(
+                                        mapper::toReactionResponse, Collectors.toList())));
+    }
+
     // Keyset pagination over limit+1 rows: hasNextPage is decided by the pre-trim size, then the
     // extra probe row is dropped.
     private CursorPageResponse<MessageResponse> toPage(
-            List<Message> rows, int pageSize, String cursor) {
+            List<Message> rows, int pageSize, String cursor, UUID viewerId) {
         boolean hasNextPage = rows.size() > pageSize;
         List<Message> page = hasNextPage ? rows.subList(0, pageSize) : rows;
         Map<UUID, MessageMediaResponse> media = resolveMedia(page);
         Map<UUID, Message> parents = ReplyParents.load(messageRepository, page);
+        Map<UUID, List<MessageReactionResponse>> reactions = resolveReactions(page, viewerId);
         List<MessageResponse> content =
                 page.stream()
-                        .map(m -> mapper.toMessageResponse(m, mediaFor(media, m), parents))
+                        .map(
+                                m ->
+                                        mapper.toMessageResponse(
+                                                m,
+                                                mediaFor(media, m),
+                                                parents,
+                                                reactions.get(m.getId())))
                         .toList();
         String startCursor = page.isEmpty() ? null : encodeCursor(page.get(0));
         String endCursor = page.isEmpty() ? null : encodeCursor(page.get(page.size() - 1));

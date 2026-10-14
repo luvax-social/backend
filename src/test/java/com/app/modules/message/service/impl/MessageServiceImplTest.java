@@ -48,6 +48,7 @@ import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.message.repository.MessageIdempotencyRepository;
 import com.app.modules.message.repository.MessageMediaAssetRepository;
 import com.app.modules.message.repository.MessagePostRepository;
+import com.app.modules.message.repository.MessageReactionRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.message.repository.MessageStoryRepository;
 import com.app.modules.post.enums.PostStatus;
@@ -73,6 +74,7 @@ class MessageServiceImplTest {
     @Mock private MessageMapper mapper;
     @Mock private OutboxService outboxService;
     @Mock private ObjectMapper objectMapper;
+    @Mock private MessageReactionRepository reactionRepository;
 
     private MessageServiceImpl service;
 
@@ -90,33 +92,35 @@ class MessageServiceImplTest {
                         interactionPolicy,
                         mapper,
                         outboxService,
-                        objectMapper);
+                        objectMapper,
+                        reactionRepository);
         lenient()
                 .when(interactionPolicy.evaluate(any()))
                 .thenReturn(
                         new InteractionDecision(InteractionOutcome.ALLOW, InteractionReason.NONE));
-        lenient()
-                .when(mapper.toMessageResponse(any(), any(), any()))
-                .thenAnswer(
-                        inv -> {
-                            Message m = inv.getArgument(0);
-                            MessageMediaResponse media = inv.getArgument(1);
-                            return new MessageResponse(
-                                    m.getId(),
-                                    m.getConversationId(),
-                                    m.getSenderId(),
-                                    m.getMessageType(),
-                                    m.getContent(),
-                                    m.getMediaAssetId(),
-                                    media,
-                                    m.getSharedPostId(),
-                                    m.getSharedStoryId(),
-                                    m.getReplyToId(),
-                                    null,
-                                    m.isDeleted(),
-                                    m.getDeletedAt(),
-                                    m.getCreatedAt());
-                        });
+        org.mockito.stubbing.Answer<MessageResponse> echo =
+                inv -> {
+                    Message m = inv.getArgument(0);
+                    MessageMediaResponse media = inv.getArgument(1);
+                    return new MessageResponse(
+                            m.getId(),
+                            m.getConversationId(),
+                            m.getSenderId(),
+                            m.getMessageType(),
+                            m.getContent(),
+                            m.getMediaAssetId(),
+                            media,
+                            m.getSharedPostId(),
+                            m.getSharedStoryId(),
+                            m.getReplyToId(),
+                            null,
+                            m.isDeleted(),
+                            m.getDeletedAt(),
+                            m.getCreatedAt(),
+                            null);
+                };
+        lenient().when(mapper.toMessageResponse(any(), any(), any())).thenAnswer(echo);
+        lenient().when(mapper.toMessageResponse(any(), any(), any(), any())).thenAnswer(echo);
     }
 
     @Test
@@ -352,7 +356,8 @@ class MessageServiceImplTest {
                         null,
                         false,
                         null,
-                        OffsetDateTime.now(ZoneOffset.UTC));
+                        OffsetDateTime.now(ZoneOffset.UTC),
+                        null);
         when(objectMapper.readValue("cached-json", MessageResponse.class)).thenReturn(cached);
 
         MessageResponse response =
@@ -844,7 +849,8 @@ class MessageServiceImplTest {
                         null,
                         false,
                         null,
-                        OffsetDateTime.now(ZoneOffset.UTC));
+                        OffsetDateTime.now(ZoneOffset.UTC),
+                        null);
         when(objectMapper.readValue("cached-json", MessageResponse.class)).thenReturn(cached);
 
         MessageResponse response =

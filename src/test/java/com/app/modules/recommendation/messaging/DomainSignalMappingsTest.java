@@ -35,7 +35,7 @@ class DomainSignalMappingsTest {
     private final UUID post = UUID.randomUUID();
 
     @Test
-    void table_names_exactlyTheEightMappedEvents() {
+    void table_names_exactlyTheMappedEvents() {
         assertThat(DomainSignalMappings.BY_EVENT_TYPE.keySet())
                 .containsExactlyInAnyOrder(
                         SocialEventTypes.USER_SHOW_FEWER_V1,
@@ -45,7 +45,8 @@ class DomainSignalMappingsTest {
                         SocialEventTypes.USER_INTERACTION_LIMIT_CHANGED_V1,
                         CommentEventTypes.COMMENT_UNHIDDEN_V1,
                         CommentEventTypes.COMMENT_HIDDEN_V1,
-                        MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1);
+                        MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
+                        MessageEventTypes.MESSAGE_REACTION_CHANGED_V1);
     }
 
     @Test
@@ -268,6 +269,58 @@ class DomainSignalMappingsTest {
 
         assertThatThrownBy(() -> resolve(MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1, data))
                 .isInstanceOf(PermanentMessageException.class);
+    }
+
+    @Test
+    void reactionChanged_withAnEmoji_isAReactionRowAboutTheMessageCarryingTheEmoji() {
+        UUID conversationId = UUID.randomUUID();
+        UUID messageId = UUID.randomUUID();
+        String family = "👨‍👩‍👧";
+
+        ResolvedSignal signal =
+                resolve(
+                        MessageEventTypes.MESSAGE_REACTION_CHANGED_V1,
+                        Map.of(
+                                "conversationId", conversationId.toString(),
+                                "messageId", messageId.toString(),
+                                "userId", actor.toString(),
+                                "emoji", family,
+                                "reactedAt", OCCURRED_AT.toString()));
+
+        assertThat(signal.userId()).isEqualTo(actor);
+        assertThat(signal.eventType()).isEqualTo(UserEventType.MESSAGE_REACTION);
+        assertThat(signal.entityType()).isEqualTo("message");
+        assertThat(signal.entityId()).isEqualTo(messageId);
+        assertThat(json(signal.metadata()).get("emoji").asString()).isEqualTo(family);
+    }
+
+    @Test
+    void reactionChanged_withNoEmojiKey_isARemovalRowWithNoMetadata() {
+        UUID messageId = UUID.randomUUID();
+        Map<String, Object> data = new HashMap<>();
+        data.put("conversationId", UUID.randomUUID().toString());
+        data.put("messageId", messageId.toString());
+        data.put("userId", actor.toString());
+
+        ResolvedSignal signal = resolve(MessageEventTypes.MESSAGE_REACTION_CHANGED_V1, data);
+
+        assertThat(signal.eventType()).isEqualTo(UserEventType.MESSAGE_REACTION_REMOVE);
+        assertThat(signal.entityId()).isEqualTo(messageId);
+        assertThat(signal.metadata()).isEmpty();
+    }
+
+    @Test
+    void reactionChanged_withAnEmojiThatIsNotOneEmoji_isPermanentlyRejected() {
+        for (String text : List.of("ok", "\"},\"x\":{\"", "👍👍")) {
+            Map<String, Object> data =
+                    Map.of(
+                            "conversationId", UUID.randomUUID().toString(),
+                            "messageId", UUID.randomUUID().toString(),
+                            "emoji", text);
+
+            assertThatThrownBy(() -> resolve(MessageEventTypes.MESSAGE_REACTION_CHANGED_V1, data))
+                    .isInstanceOf(PermanentMessageException.class);
+        }
     }
 
     @Test
