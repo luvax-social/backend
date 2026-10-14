@@ -250,6 +250,12 @@ public class MessageServiceImpl implements MessageService {
         return messageRepository.countTotalUnreadForUser(actorId);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public long getRequestCount(UUID actorId) {
+        return messageRepository.countPendingRequests(actorId);
+    }
+
     private void validatePayload(UUID actorId, UUID conversationId, SendMessageRequest request) {
         boolean hasMedia = request.mediaAssetId() != null;
         boolean hasPost = request.sharedPostId() != null;

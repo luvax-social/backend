@@ -40,17 +40,20 @@ import com.app.modules.message.dto.response.ParticipantResponse;
 import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.ConversationParticipantId;
+import com.app.modules.message.enums.ConversationFolder;
+import com.app.modules.message.enums.ConversationRequestStatus;
 import com.app.modules.message.mapper.MessageMapper;
 import com.app.modules.message.repository.ConversationParticipantRepository;
 import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.message.repository.MessageMediaAssetRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.message.repository.MessageUserRepository;
-import com.app.modules.message.repository.MessageUserSettingsRepository;
-import com.app.modules.social.service.SocialService;
+import com.app.modules.social.policy.InteractionDecision;
+import com.app.modules.social.policy.InteractionOutcome;
+import com.app.modules.social.policy.InteractionPolicyService;
+import com.app.modules.social.policy.InteractionReason;
+import com.app.modules.social.policy.InteractionType;
 import com.app.modules.users.entity.User;
-import com.app.modules.users.entity.UserSettings;
-import com.app.modules.users.enums.MessagePermission;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceImplTest {
@@ -59,8 +62,7 @@ class ConversationServiceImplTest {
     @Mock private ConversationParticipantRepository participantRepository;
     @Mock private MessageRepository messageRepository;
     @Mock private MessageUserRepository userRepository;
-    @Mock private MessageUserSettingsRepository userSettingsRepository;
-    @Mock private SocialService socialService;
+    @Mock private InteractionPolicyService interactionPolicy;
     @Mock private MessageMapper mapper;
     @Mock private MessageMediaAssetRepository mediaAssetRepository;
 
@@ -74,13 +76,14 @@ class ConversationServiceImplTest {
                         participantRepository,
                         messageRepository,
                         userRepository,
-                        userSettingsRepository,
-                        socialService,
+                        interactionPolicy,
                         mapper,
                         mediaAssetRepository);
 
-        lenient().when(socialService.isBlockedBetween(any(), any())).thenReturn(false);
-        lenient().when(userSettingsRepository.findById(any())).thenReturn(Optional.empty());
+        lenient()
+                .when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(InteractionOutcome.ALLOW, InteractionReason.NONE));
         lenient()
                 .when(mapper.toParticipantResponse(any(), any()))
                 .thenAnswer(
@@ -104,7 +107,10 @@ class ConversationServiceImplTest {
                                 any(),
                                 any(),
                                 org.mockito.ArgumentMatchers.anyBoolean(),
-                                org.mockito.ArgumentMatchers.anyBoolean()))
+                                org.mockito.ArgumentMatchers.anyBoolean(),
+                                any(),
+                                org.mockito.ArgumentMatchers.anyBoolean(),
+                                any()))
                 .thenAnswer(
                         inv -> {
                             Conversation c = inv.getArgument(0);
@@ -118,7 +124,10 @@ class ConversationServiceImplTest {
                                     c.getLastMessageAt(),
                                     c.getCreatedAt(),
                                     pinned,
-                                    muted);
+                                    muted,
+                                    inv.getArgument(4),
+                                    inv.getArgument(5),
+                                    inv.getArgument(6));
                         });
         lenient()
                 .when(
@@ -129,7 +138,11 @@ class ConversationServiceImplTest {
                                 any(),
                                 org.mockito.ArgumentMatchers.anyBoolean(),
                                 org.mockito.ArgumentMatchers.anyBoolean(),
-                                org.mockito.ArgumentMatchers.anyBoolean()))
+                                org.mockito.ArgumentMatchers.anyBoolean(),
+                                any(),
+                                org.mockito.ArgumentMatchers.anyBoolean(),
+                                org.mockito.ArgumentMatchers.anyBoolean(),
+                                any()))
                 .thenAnswer(
                         inv -> {
                             Conversation c = inv.getArgument(0);
@@ -147,7 +160,11 @@ class ConversationServiceImplTest {
                                     lastMessage,
                                     pinned,
                                     muted,
-                                    manuallyUnread);
+                                    manuallyUnread,
+                                    inv.getArgument(7),
+                                    inv.getArgument(8),
+                                    inv.getArgument(9),
+                                    inv.getArgument(10));
                         });
     }
 
@@ -187,7 +204,7 @@ class ConversationServiceImplTest {
         UUID targetId = UUID.randomUUID();
         when(userRepository.findByIdAndDeletedAtIsNull(targetId))
                 .thenReturn(Optional.of(user(targetId)));
-        when(socialService.isBlockedBetween(actorId, targetId)).thenReturn(true);
+        policyAnswers(InteractionOutcome.DENY, InteractionReason.BLOCKED);
 
         assertThatThrownBy(
                         () ->
@@ -196,7 +213,7 @@ class ConversationServiceImplTest {
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.NOT_FOUND);
-        verify(conversationRepository, never()).findDirectConversationBetween(any(), any());
+        verify(conversationRepository, never()).saveAndFlush(any(Conversation.class));
     }
 
     @Test
@@ -206,9 +223,7 @@ class ConversationServiceImplTest {
         UUID targetId = UUID.randomUUID();
         when(userRepository.findByIdAndDeletedAtIsNull(targetId))
                 .thenReturn(Optional.of(user(targetId)));
-        when(userSettingsRepository.findById(targetId))
-                .thenReturn(Optional.of(settingsWithRequestsDisabled(targetId)));
-        when(socialService.hasAcceptedFollow(targetId, actorId)).thenReturn(false);
+        policyAnswers(InteractionOutcome.DENY, InteractionReason.PERMISSION_FOLLOWING_ONLY);
 
         assertThatThrownBy(
                         () ->
@@ -217,7 +232,7 @@ class ConversationServiceImplTest {
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.MESSAGE_REQUEST_NOT_ALLOWED);
-        verify(conversationRepository, never()).findDirectConversationBetween(any(), any());
+        verify(conversationRepository, never()).saveAndFlush(any(Conversation.class));
     }
 
     @Test
@@ -227,10 +242,7 @@ class ConversationServiceImplTest {
         UUID targetId = UUID.randomUUID();
         when(userRepository.findByIdAndDeletedAtIsNull(targetId))
                 .thenReturn(Optional.of(user(targetId)));
-        when(userSettingsRepository.findById(targetId))
-                .thenReturn(
-                        Optional.of(settingsWithPermission(targetId, MessagePermission.NOBODY)));
-        when(socialService.hasAcceptedFollow(targetId, actorId)).thenReturn(false);
+        policyAnswers(InteractionOutcome.DENY, InteractionReason.PERMISSION_NOBODY);
 
         assertThatThrownBy(
                         () ->
@@ -239,7 +251,7 @@ class ConversationServiceImplTest {
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ApiErrorCode.MESSAGE_REQUEST_NOT_ALLOWED);
-        verify(conversationRepository, never()).findDirectConversationBetween(any(), any());
+        verify(conversationRepository, never()).saveAndFlush(any(Conversation.class));
     }
 
     @Test
@@ -249,9 +261,7 @@ class ConversationServiceImplTest {
         UUID conversationId = UUID.randomUUID();
         when(userRepository.findByIdAndDeletedAtIsNull(targetId))
                 .thenReturn(Optional.of(user(targetId)));
-        when(userSettingsRepository.findById(targetId))
-                .thenReturn(Optional.of(settingsWithRequestsDisabled(targetId)));
-        when(socialService.hasAcceptedFollow(targetId, actorId)).thenReturn(true);
+        policyAnswers(InteractionOutcome.ALLOW, InteractionReason.NONE);
         when(conversationRepository.findDirectConversationBetween(actorId, targetId))
                 .thenReturn(Optional.empty());
         when(conversationRepository.saveAndFlush(any(Conversation.class)))
@@ -302,6 +312,118 @@ class ConversationServiceImplTest {
         verify(conversationRepository).lockDirectConversationPair(actorId, targetId);
         verify(conversationRepository)
                 .saveAndFlush(argThat(c -> pairKey.equals(c.getDirectPairKey())));
+    }
+
+    @Test
+    void createDirectConversation_routeToRequests_persistsPendingRequestForTarget() {
+        UUID actorId = UUID.randomUUID();
+        UUID targetId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        when(userRepository.findByIdAndDeletedAtIsNull(targetId))
+                .thenReturn(Optional.of(user(targetId)));
+        when(conversationRepository.findDirectConversationBetween(actorId, targetId))
+                .thenReturn(Optional.empty());
+        policyAnswers(InteractionOutcome.ROUTE_TO_REQUESTS, InteractionReason.NOT_FOLLOWED_REQUEST);
+        when(conversationRepository.saveAndFlush(any(Conversation.class)))
+                .thenAnswer(
+                        inv -> {
+                            Conversation c = inv.getArgument(0);
+                            c.setId(conversationId);
+                            return c;
+                        });
+
+        service.createDirectConversation(actorId, new CreateDirectConversationRequest(targetId));
+
+        verify(conversationRepository)
+                .saveAndFlush(
+                        argThat(
+                                (Conversation c) ->
+                                        c.getRequestStatus() == ConversationRequestStatus.PENDING
+                                                && targetId.equals(c.getRequestRecipientId())
+                                                && !c.isRequestHidden()));
+    }
+
+    @Test
+    void createDirectConversation_routeToHiddenRequests_persistsHiddenPendingRequest() {
+        UUID actorId = UUID.randomUUID();
+        UUID targetId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        when(userRepository.findByIdAndDeletedAtIsNull(targetId))
+                .thenReturn(Optional.of(user(targetId)));
+        when(conversationRepository.findDirectConversationBetween(actorId, targetId))
+                .thenReturn(Optional.empty());
+        policyAnswers(InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS, InteractionReason.HIDDEN_WORD);
+        when(conversationRepository.saveAndFlush(any(Conversation.class)))
+                .thenAnswer(
+                        inv -> {
+                            Conversation c = inv.getArgument(0);
+                            c.setId(conversationId);
+                            return c;
+                        });
+
+        service.createDirectConversation(actorId, new CreateDirectConversationRequest(targetId));
+
+        verify(conversationRepository)
+                .saveAndFlush(
+                        argThat(
+                                (Conversation c) ->
+                                        c.getRequestStatus() == ConversationRequestStatus.PENDING
+                                                && c.isRequestHidden()));
+    }
+
+    @Test
+    void createDirectConversation_existingAcceptedConversation_skipsMessagePermission() {
+        UUID actorId = UUID.randomUUID();
+        UUID targetId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        Conversation existing = Conversation.builder().id(conversationId).build();
+        ConversationParticipant actorParticipant = participant(conversationId, actorId, null);
+        when(userRepository.findByIdAndDeletedAtIsNull(targetId))
+                .thenReturn(Optional.of(user(targetId)));
+        when(conversationRepository.findDirectConversationBetween(actorId, targetId))
+                .thenReturn(Optional.of(existing));
+        when(participantRepository.findByIdConversationIdAndIdUserId(conversationId, actorId))
+                .thenReturn(Optional.of(actorParticipant));
+        when(participantRepository.findByIdConversationIdOrderByJoinedAtAsc(conversationId))
+                .thenReturn(List.of(actorParticipant));
+
+        service.createDirectConversation(actorId, new CreateDirectConversationRequest(targetId));
+
+        verify(interactionPolicy, never())
+                .evaluate(argThat(r -> r.type() == InteractionType.MESSAGE_INITIATE));
+        verify(conversationRepository, never()).retireDirectPairKey(any());
+    }
+
+    @Test
+    void createDirectConversation_recipientWhoDeclined_retiresOldConversationAndStartsFresh() {
+        UUID actorId = UUID.randomUUID();
+        UUID targetId = UUID.randomUUID();
+        UUID declinedId = UUID.randomUUID();
+        UUID freshId = UUID.randomUUID();
+        Conversation declined =
+                Conversation.builder()
+                        .id(declinedId)
+                        .requestStatus(ConversationRequestStatus.DECLINED)
+                        .requestRecipientId(actorId)
+                        .build();
+        when(userRepository.findByIdAndDeletedAtIsNull(targetId))
+                .thenReturn(Optional.of(user(targetId)));
+        when(conversationRepository.findDirectConversationBetween(actorId, targetId))
+                .thenReturn(Optional.of(declined));
+        when(conversationRepository.saveAndFlush(any(Conversation.class)))
+                .thenAnswer(
+                        inv -> {
+                            Conversation c = inv.getArgument(0);
+                            c.setId(freshId);
+                            return c;
+                        });
+
+        ConversationResponse result =
+                service.createDirectConversation(
+                        actorId, new CreateDirectConversationRequest(targetId));
+
+        assertThat(result.id()).isEqualTo(freshId);
+        verify(conversationRepository).retireDirectPairKey(declinedId);
     }
 
     @Test
@@ -523,7 +645,8 @@ class ConversationServiceImplTest {
         Conversation conv = Conversation.builder().id(convId).build();
         ConversationParticipant myRow = participant(convId, actorId, null);
         myRow.setManuallyUnread(true);
-        when(conversationRepository.findFirstMyConversations(eq(actorId), any(Pageable.class)))
+        when(conversationRepository.findFirstMyConversations(
+                        eq(actorId), eq("primary"), any(Pageable.class)))
                 .thenReturn(List.of(conv));
         when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(List.of(convId)))
                 .thenReturn(List.of(myRow));
@@ -531,7 +654,7 @@ class ConversationServiceImplTest {
                 .thenReturn(List.of());
 
         CursorPageResponse<ConversationSummaryResponse> result =
-                service.listMyConversations(actorId, null, 20);
+                service.listMyConversations(actorId, ConversationFolder.PRIMARY, null, 20);
 
         assertThat(result.getContent().get(0).manuallyUnread()).isTrue();
     }
@@ -545,7 +668,8 @@ class ConversationServiceImplTest {
         Conversation conv1 = Conversation.builder().id(conv1Id).lastMessageAt(now).build();
         Conversation conv2 =
                 Conversation.builder().id(conv2Id).lastMessageAt(now.minusMinutes(5)).build();
-        when(conversationRepository.findFirstMyConversations(eq(actorId), any(Pageable.class)))
+        when(conversationRepository.findFirstMyConversations(
+                        eq(actorId), eq("primary"), any(Pageable.class)))
                 .thenReturn(List.of(conv1, conv2));
         when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(
                         List.of(conv1Id, conv2Id)))
@@ -555,7 +679,7 @@ class ConversationServiceImplTest {
                 .thenReturn(List.of());
 
         CursorPageResponse<ConversationSummaryResponse> result =
-                service.listMyConversations(actorId, null, 20);
+                service.listMyConversations(actorId, ConversationFolder.PRIMARY, null, 20);
 
         assertThat(result.getContent()).hasSize(2);
         assertThat(result.getPageInfo().getStartCursor()).isNotBlank();
@@ -575,7 +699,8 @@ class ConversationServiceImplTest {
                 Conversation.builder().id(unpinnedConvId).lastMessageAt(now).build();
         ConversationParticipant myPinnedRow = participant(pinnedConvId, actorId, null);
         myPinnedRow.setPinnedAt(now.minusHours(1));
-        when(conversationRepository.findFirstMyConversations(eq(actorId), any(Pageable.class)))
+        when(conversationRepository.findFirstMyConversations(
+                        eq(actorId), eq("primary"), any(Pageable.class)))
                 .thenReturn(List.of(unpinnedConv));
         when(conversationRepository.findMyPinnedConversations(actorId))
                 .thenReturn(List.of(pinnedConv));
@@ -587,7 +712,7 @@ class ConversationServiceImplTest {
                 .thenReturn(List.of());
 
         CursorPageResponse<ConversationSummaryResponse> result =
-                service.listMyConversations(actorId, null, 20);
+                service.listMyConversations(actorId, ConversationFolder.PRIMARY, null, 20);
 
         assertThat(result.getContent()).hasSize(2);
         assertThat(result.getContent().get(0).id()).isEqualTo(pinnedConvId);
@@ -607,11 +732,12 @@ class ConversationServiceImplTest {
     @Test
     void listMyConversations_noActiveConversations_returnsEmptyPageWithNullCursors() {
         UUID actorId = UUID.randomUUID();
-        when(conversationRepository.findFirstMyConversations(eq(actorId), any(Pageable.class)))
+        when(conversationRepository.findFirstMyConversations(
+                        eq(actorId), eq("primary"), any(Pageable.class)))
                 .thenReturn(List.of());
 
         CursorPageResponse<ConversationSummaryResponse> result =
-                service.listMyConversations(actorId, null, 20);
+                service.listMyConversations(actorId, ConversationFolder.PRIMARY, null, 20);
 
         assertThat(result.getContent()).isEmpty();
         assertThat(result.getPageInfo().getStartCursor()).isNull();
@@ -639,7 +765,11 @@ class ConversationServiceImplTest {
                         .lastMessageAt(cursorTime.minusMinutes(10))
                         .build();
         when(conversationRepository.findMyConversationsBefore(
-                        eq(actorId), eq(cursorTime), eq(cursorConvId), any(Pageable.class)))
+                        eq(actorId),
+                        eq("primary"),
+                        eq(cursorTime),
+                        eq(cursorConvId),
+                        any(Pageable.class)))
                 .thenReturn(List.of(conv1));
         when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(List.of(conv1Id)))
                 .thenReturn(List.of());
@@ -647,7 +777,7 @@ class ConversationServiceImplTest {
                 .thenReturn(List.of());
 
         CursorPageResponse<ConversationSummaryResponse> result =
-                service.listMyConversations(actorId, cursor, 20);
+                service.listMyConversations(actorId, ConversationFolder.PRIMARY, cursor, 20);
 
         assertThat(result.getContent()).hasSize(1);
         assertThat(result.getPageInfo().isHasPreviousPage()).isTrue();
@@ -658,7 +788,8 @@ class ConversationServiceImplTest {
         UUID actorId = UUID.randomUUID();
         UUID conv1Id = UUID.randomUUID();
         Conversation conv1 = Conversation.builder().id(conv1Id).lastMessageAt(null).build();
-        when(conversationRepository.findFirstMyConversations(eq(actorId), any(Pageable.class)))
+        when(conversationRepository.findFirstMyConversations(
+                        eq(actorId), eq("primary"), any(Pageable.class)))
                 .thenReturn(List.of(conv1));
         when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(List.of(conv1Id)))
                 .thenReturn(List.of());
@@ -666,7 +797,7 @@ class ConversationServiceImplTest {
                 .thenReturn(List.of());
 
         CursorPageResponse<ConversationSummaryResponse> firstPage =
-                service.listMyConversations(actorId, null, 20);
+                service.listMyConversations(actorId, ConversationFolder.PRIMARY, null, 20);
         String endCursor = firstPage.getPageInfo().getEndCursor();
         assertThat(endCursor).isNotBlank();
 
@@ -676,7 +807,7 @@ class ConversationServiceImplTest {
         // which is outside PostgreSQL's timestamptz range and caused a bind-time 500; it must now
         // decode back to a genuine null so the repository receives real SQL NULL, not a sentinel.
         when(conversationRepository.findMyConversationsBefore(
-                        eq(actorId), isNull(), eq(conv1Id), any(Pageable.class)))
+                        eq(actorId), eq("primary"), isNull(), eq(conv1Id), any(Pageable.class)))
                 .thenReturn(List.of(conv2));
         when(participantRepository.findByIdConversationIdInAndLeftAtIsNull(List.of(conv2Id)))
                 .thenReturn(List.of());
@@ -684,23 +815,21 @@ class ConversationServiceImplTest {
                 .thenReturn(List.of());
 
         CursorPageResponse<ConversationSummaryResponse> secondPage =
-                service.listMyConversations(actorId, endCursor, 20);
+                service.listMyConversations(actorId, ConversationFolder.PRIMARY, endCursor, 20);
 
         assertThat(secondPage.getContent()).hasSize(1);
         verify(conversationRepository)
-                .findMyConversationsBefore(eq(actorId), isNull(), eq(conv1Id), any(Pageable.class));
+                .findMyConversationsBefore(
+                        eq(actorId), eq("primary"), isNull(), eq(conv1Id), any(Pageable.class));
+    }
+
+    private void policyAnswers(InteractionOutcome outcome, InteractionReason reason) {
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(new InteractionDecision(outcome, reason));
     }
 
     private static User user(UUID id) {
         return User.builder().id(id).username("user-" + id).displayName("Display " + id).build();
-    }
-
-    private static UserSettings settingsWithRequestsDisabled(UUID userId) {
-        return settingsWithPermission(userId, MessagePermission.FOLLOWING);
-    }
-
-    private static UserSettings settingsWithPermission(UUID userId, MessagePermission permission) {
-        return UserSettings.builder().userId(userId).messagePermission(permission).build();
     }
 
     private static ConversationParticipant participant(

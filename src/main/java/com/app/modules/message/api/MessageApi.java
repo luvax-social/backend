@@ -86,6 +86,12 @@ public interface MessageApi {
     @GetMapping(ApiConstants.Messages.ROOT)
     ResponseEntity<ApiResponse<CursorPageResponse<ConversationSummaryResponse>>>
             listMyConversations(
+                    @Parameter(
+                                    description =
+                                            "Folder to list: primary (default), requests or"
+                                                    + " hidden_requests")
+                            @RequestParam(value = "folder", defaultValue = "primary")
+                            String folder,
                     @Parameter(description = "Opaque cursor from the previous page")
                             @RequestParam(value = "cursor", required = false)
                             String cursor,

@@ -82,10 +82,20 @@ public interface MessageService {
     void markUnread(UUID actorId, UUID conversationId);
 
     /**
-     * Returns the caller's total unread message count across every active conversation.
+     * Returns the caller's total unread message count across every active conversation, leaving out
+     * incoming message requests, which {@link #getRequestCount} reports instead.
      *
      * @param actorId the authenticated caller
      * @return total unread count
      */
     long getUnreadCount(UUID actorId);
+
+    /**
+     * Returns how many message requests are waiting for the caller: incoming, pending, not filed as
+     * hidden, and carrying at least one message.
+     *
+     * @param actorId the authenticated caller
+     * @return the request count behind the requests badge
+     */
+    long getRequestCount(UUID actorId);
 }

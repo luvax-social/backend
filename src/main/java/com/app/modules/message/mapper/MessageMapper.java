@@ -46,13 +46,22 @@ public interface MessageMapper {
      * @param participants active and former members, already hydrated
      * @param pinned whether the requesting caller has pinned this conversation
      * @param muted whether the requesting caller has muted this conversation
+     * @param requestStatusLabel the request status as the caller may see it
+     * @param recipientOfRequest whether the caller is the one asked to accept the request
+     * @param sendRestrictionLabel whether the caller may not send another message yet
      * @return the conversation detail response
      */
+    @Mapping(source = "requestStatusLabel", target = "requestStatus")
+    @Mapping(source = "recipientOfRequest", target = "isRequestRecipient")
+    @Mapping(source = "sendRestrictionLabel", target = "sendRestriction")
     ConversationResponse toConversationResponse(
             Conversation conversation,
             List<ParticipantResponse> participants,
             boolean pinned,
-            boolean muted);
+            boolean muted,
+            String requestStatusLabel,
+            boolean recipientOfRequest,
+            String sendRestrictionLabel);
 
     /**
      * Builds one conversation-list row from the entity, its active participants, a
@@ -66,9 +75,17 @@ public interface MessageMapper {
      * @param pinned whether the requesting caller has pinned this conversation
      * @param muted whether the requesting caller has muted this conversation
      * @param manuallyUnread whether the requesting caller manually flagged this conversation unread
+     * @param requestStatusLabel the request status as the caller may see it
+     * @param recipientOfRequest whether the caller is the one asked to accept the request
+     * @param hiddenRequest whether the caller, as recipient, has the request filed as hidden
+     * @param sendRestrictionLabel whether the caller may not send another message yet
      * @return the conversation summary response
      */
     @Mapping(source = "conversation.id", target = "id")
+    @Mapping(source = "requestStatusLabel", target = "requestStatus")
+    @Mapping(source = "recipientOfRequest", target = "isRequestRecipient")
+    @Mapping(source = "hiddenRequest", target = "requestHidden")
+    @Mapping(source = "sendRestrictionLabel", target = "sendRestriction")
     ConversationSummaryResponse toSummaryResponse(
             Conversation conversation,
             List<ParticipantResponse> participants,
@@ -76,7 +93,11 @@ public interface MessageMapper {
             MessageResponse lastMessage,
             boolean pinned,
             boolean muted,
-            boolean manuallyUnread);
+            boolean manuallyUnread,
+            String requestStatusLabel,
+            boolean recipientOfRequest,
+            boolean hiddenRequest,
+            String sendRestrictionLabel);
 
     /**
      * Projects a message entity onto its API response shape, including a tombstoned one.

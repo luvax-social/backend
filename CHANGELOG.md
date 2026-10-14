@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- A new conversation with an account that does not follow the sender and allows messages from everyone is now a pending message request instead of a normal conversation, and the unread total leaves incoming requests out.
 - Mutes, show-fewer requests and not-interested marks now take effect: muted posts leave the Following, For You and Explore feeds, show-fewer authors leave For You and Explore but stay in Following, a not-interested post leaves every feed, and muted stories leave the story tray and story discovery; profile pages, search, hashtag pages, comments and direct messages are unchanged.
 - Every feed read now names the surface it serves, so no caller can silently fall back to the Following feed.
 - The activity log documentation now says any event type except the private preference signals may be filtered.
@@ -37,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The deletion count a comment owner sees in the confirmation and in the delete response no longer includes hidden replies by other users, and the live update for a hidden comment no longer names its author or thread.
 
 ### Added
+- Conversations carry a request status (V145), the conversation list takes a `folder` parameter (`primary`, `requests`, `hidden_requests`), and the unread count reports `requestCount` for incoming requests that carry a message.
 - A post a viewer marks as not interested is now sent to the Gorse recommender as `not_interested` negative feedback and taken back when the mark is undone, Gorse is configured to leave such posts out of that viewer's personalized list, and a Gorse rebuild sends only the marks that still stand.
 - Show fewer, mute and unmute, interaction limit changes, and hidden and released comments are now recorded as behavioural events in ClickHouse through the outbox, and the event type list gains thirteen values for them and for the not-interested and message signals that follow.
 - A comment that is hidden when it is written, or newly hidden by an edit, now enqueues an internal `comment.hidden.v1` event naming the reason; live viewers and the author are never sent it.

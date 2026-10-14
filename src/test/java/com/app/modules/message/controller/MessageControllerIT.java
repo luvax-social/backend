@@ -653,6 +653,12 @@ class MessageControllerIT {
     void markRead_resetsUnreadCountToZero() {
         TestUser alice = registerUser("read_alice");
         TestUser bob = registerUser("read_bob");
+        // A follow makes the conversation accepted; a stranger's first message is a request, which
+        // the unread badge deliberately leaves out.
+        jdbcTemplate.update(
+                "INSERT INTO follows(follower_id, following_id, status) VALUES (?, ?, 'accepted')",
+                bob.id(),
+                alice.id());
         UUID conversationId = conversationIdOf(createDirect(alice, bob.id()));
         sendMessage(
                 alice,

@@ -1,5 +1,8 @@
 package com.app.modules.message.service.impl;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -8,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.ConversationParticipantId;
+import com.app.modules.message.enums.ConversationRequestStatus;
 import com.app.modules.message.repository.ConversationParticipantRepository;
 import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.message.service.DirectConversationProvisioner;
@@ -42,12 +46,30 @@ public class DirectConversationProvisionerImpl implements DirectConversationProv
         // each, leaving the pair with two threads and no way to merge them.
         String pairKey = conversationRepository.lockDirectConversationPair(userIdA, userIdB);
 
-        if (conversationRepository.findDirectConversationBetween(userIdA, userIdB).isPresent()) {
-            return;
+        Optional<Conversation> existing =
+                conversationRepository.findDirectConversationBetween(userIdA, userIdB);
+        if (existing.isPresent()) {
+            Conversation current = existing.get();
+            if (current.getRequestStatus() == ConversationRequestStatus.PENDING) {
+                // A mutual follow is the strongest signal that the two want to talk, so it settles
+                // a request that was still waiting instead of leaving it in a folder
+                accept(current);
+                return;
+            }
+            if (current.getRequestStatus() == ConversationRequestStatus.ACCEPTED) {
+                return;
+            }
+            // A declined request is not reopened: its recipient chose to end it, so the pair gets
+            // a fresh conversation and the old one stays as its sender last saw it
+            conversationRepository.retireDirectPairKey(current.getId());
         }
 
         Conversation conversation =
-                Conversation.builder().createdBy(userIdA).directPairKey(pairKey).build();
+                Conversation.builder()
+                        .createdBy(userIdA)
+                        .directPairKey(pairKey)
+                        .requestStatus(ConversationRequestStatus.ACCEPTED)
+                        .build();
         conversationRepository.saveAndFlush(conversation);
         participantRepository.save(participant(conversation.getId(), userIdA));
         participantRepository.save(participant(conversation.getId(), userIdB));
@@ -66,6 +88,16 @@ public class DirectConversationProvisionerImpl implements DirectConversationProv
 
         conversationRepository.lockDirectConversationPair(userIdA, userIdB);
         conversationRepository.deleteEmptyDirectConversation(userIdA, userIdB);
+    }
+
+    private void accept(Conversation conversation) {
+        conversation.setRequestStatus(ConversationRequestStatus.ACCEPTED);
+        conversation.setRequestHidden(false);
+        conversation.setRequestResolvedAt(OffsetDateTime.now(ZoneOffset.UTC));
+        conversationRepository.save(conversation);
+        log.info(
+                "Message request accepted by mutual follow: conversationId={}",
+                conversation.getId());
     }
 
     private static ConversationParticipant participant(UUID conversationId, UUID userId) {

@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -12,6 +13,9 @@ import jakarta.persistence.Table;
 
 import org.hibernate.annotations.Generated;
 import org.hibernate.generator.EventType;
+
+import com.app.modules.message.converter.ConversationRequestStatusConverter;
+import com.app.modules.message.enums.ConversationRequestStatus;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -52,6 +56,34 @@ public class Conversation {
      */
     @Column(name = "direct_pair_key", updatable = false)
     private String directPairKey;
+
+    /**
+     * Where the conversation stands in the message request flow. Every conversation that existed
+     * before V145 is {@code ACCEPTED}.
+     */
+    @Builder.Default
+    @Convert(converter = ConversationRequestStatusConverter.class)
+    @Column(
+            name = "request_status",
+            nullable = false,
+            columnDefinition = "conversation_request_status")
+    private ConversationRequestStatus requestStatus = ConversationRequestStatus.ACCEPTED;
+
+    /**
+     * The account the request was sent to. Kept after acceptance as history, so it identifies the
+     * original recipient but no longer implies an open request.
+     */
+    @Column(name = "request_recipient_id")
+    private UUID requestRecipientId;
+
+    /** Whether a pending request is filed in the recipient's hidden requests folder. */
+    @Builder.Default
+    @Column(name = "request_hidden", nullable = false)
+    private boolean requestHidden = false;
+
+    /** When the request was accepted or declined; null while it is pending. */
+    @Column(name = "request_resolved_at")
+    private OffsetDateTime requestResolvedAt;
 
     /** Maintained exclusively by Postgres trigger {@code trg_conversation_last_message} (V16). */
     @Column(name = "last_message_at", insertable = false, updatable = false)

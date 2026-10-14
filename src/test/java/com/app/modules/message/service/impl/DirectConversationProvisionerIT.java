@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.UUID;
 
+import jakarta.persistence.EntityManager;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -47,6 +49,7 @@ class DirectConversationProvisionerIT {
     private final DirectConversationProvisioner provisioner;
     private final ConversationRepository conversationRepository;
     private final JdbcClient jdbcClient;
+    private final EntityManager entityManager;
 
     private UUID alice;
     private UUID bob;
@@ -54,10 +57,12 @@ class DirectConversationProvisionerIT {
     DirectConversationProvisionerIT(
             DirectConversationProvisioner provisioner,
             ConversationRepository conversationRepository,
-            JdbcClient jdbcClient) {
+            JdbcClient jdbcClient,
+            EntityManager entityManager) {
         this.provisioner = provisioner;
         this.conversationRepository = conversationRepository;
         this.jdbcClient = jdbcClient;
+        this.entityManager = entityManager;
     }
 
     @DynamicPropertySource
@@ -158,6 +163,78 @@ class DirectConversationProvisionerIT {
                                         .param("createdBy", alice)
                                         .update())
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void promotesAnExistingPendingRequestToAccepted() {
+        provisioner.ensureDirectConversation(alice, bob);
+        UUID conversationId =
+                conversationRepository
+                        .findDirectConversationBetween(alice, bob)
+                        .orElseThrow()
+                        .getId();
+        jdbcClient
+                .sql(
+                        "UPDATE conversations SET request_status = 'pending',"
+                                + " request_recipient_id = :recipient, request_hidden = TRUE"
+                                + " WHERE id = :id")
+                .param("recipient", bob)
+                .param("id", conversationId)
+                .update();
+
+        entityManager.clear();
+        provisioner.ensureDirectConversation(alice, bob);
+        entityManager.flush();
+
+        assertThat(requestState(conversationId)).isEqualTo("accepted:false:true");
+        assertThat(countConversationsForPair()).isEqualTo(1);
+    }
+
+    @Test
+    void retiresADeclinedConversationBeforeCreatingAcceptedOne() {
+        provisioner.ensureDirectConversation(alice, bob);
+        UUID declinedId =
+                conversationRepository
+                        .findDirectConversationBetween(alice, bob)
+                        .orElseThrow()
+                        .getId();
+        jdbcClient
+                .sql(
+                        "UPDATE conversations SET request_status = 'declined',"
+                                + " request_recipient_id = :recipient WHERE id = :id")
+                .param("recipient", bob)
+                .param("id", declinedId)
+                .update();
+
+        entityManager.clear();
+        provisioner.ensureDirectConversation(alice, bob);
+
+        UUID freshId =
+                conversationRepository
+                        .findDirectConversationBetween(alice, bob)
+                        .orElseThrow()
+                        .getId();
+        assertThat(freshId).isNotEqualTo(declinedId);
+        assertThat(requestState(freshId)).startsWith("accepted");
+        assertThat(requestState(declinedId)).startsWith("declined");
+        assertThat(
+                        jdbcClient
+                                .sql("SELECT direct_pair_key FROM conversations WHERE id = :id")
+                                .param("id", declinedId)
+                                .query(String.class)
+                                .optional())
+                .isEmpty();
+    }
+
+    private String requestState(UUID conversationId) {
+        return jdbcClient
+                .sql(
+                        "SELECT request_status::text || ':' || request_hidden::text || ':' ||"
+                                + " (request_resolved_at IS NOT NULL)::text"
+                                + " FROM conversations WHERE id = :id")
+                .param("id", conversationId)
+                .query(String.class)
+                .single();
     }
 
     private long countConversationsForPair() {

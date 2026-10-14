@@ -30,6 +30,7 @@ import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.UnreadCountResponse;
+import com.app.modules.message.enums.ConversationFolder;
 import com.app.modules.message.service.ConversationService;
 import com.app.modules.message.service.MessageService;
 
@@ -67,11 +68,15 @@ public class MessageController extends BaseController implements MessageApi {
     @RateLimiter(name = "highTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<CursorPageResponse<ConversationSummaryResponse>>>
             listMyConversations(
+                    @RequestParam(value = "folder", defaultValue = "primary") String folder,
                     @RequestParam(value = "cursor", required = false) String cursor,
                     @RequestParam(value = "limit", defaultValue = "20") int limit) {
         CursorPageResponse<ConversationSummaryResponse> body =
                 conversationService.listMyConversations(
-                        SecurityUtils.getCurrentUserId(), cursor, limit);
+                        SecurityUtils.getCurrentUserId(),
+                        ConversationFolder.fromParam(folder),
+                        cursor,
+                        limit);
         return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
     }
 
@@ -162,9 +167,12 @@ public class MessageController extends BaseController implements MessageApi {
     @GetMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.UNREAD_COUNT)
     @RateLimiter(name = "highTraffic", fallbackMethod = "rateLimit")
     public ResponseEntity<ApiResponse<UnreadCountResponse>> getUnreadCount() {
-        long count = messageService.getUnreadCount(SecurityUtils.getCurrentUserId());
+        UUID actorId = SecurityUtils.getCurrentUserId();
+        long count = messageService.getUnreadCount(actorId);
+        long requestCount = messageService.getRequestCount(actorId);
         return ResponseEntity.ok(
-                ApiResponse.success(ApiSuccessCode.OK, new UnreadCountResponse(count)));
+                ApiResponse.success(
+                        ApiSuccessCode.OK, new UnreadCountResponse(count, requestCount)));
     }
 
     /** Pins a conversation to the top of the authenticated caller's own conversation list. */

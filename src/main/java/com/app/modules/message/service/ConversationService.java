@@ -6,6 +6,7 @@ import com.app.common.response.CursorPageResponse;
 import com.app.modules.message.dto.request.CreateDirectConversationRequest;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
+import com.app.modules.message.enums.ConversationFolder;
 
 /** Conversation lifecycle: creation, membership, group management, and listing. */
 public interface ConversationService {
@@ -13,8 +14,12 @@ public interface ConversationService {
     /**
      * Starts (or reuses) a 1-1 conversation with the target user.
      *
-     * <p>An existing 1-1 between the same two users is reused rather than duplicated; if the caller
-     * had previously left it, their participation is reactivated.
+     * <p>An existing 1-1 between the same two users is reused rather than duplicated, without
+     * asking for message permission again; if the caller had previously left it, their
+     * participation is reactivated. A new conversation is accepted straight away when the target
+     * follows the caller and otherwise becomes a pending request in the target's requests (or
+     * hidden requests) folder. A recipient who declined a request and now writes to the sender
+     * starts a fresh conversation.
      *
      * @param actorId the authenticated caller
      * @param request the target user to converse with
@@ -29,15 +34,20 @@ public interface ConversationService {
             UUID actorId, CreateDirectConversationRequest request);
 
     /**
-     * Lists the caller's active conversations, newest activity first.
+     * Lists the caller's active conversations in one folder, newest activity first.
+     *
+     * <p>The primary folder holds accepted conversations and the caller's own outgoing requests;
+     * the requests and hidden requests folders hold the incoming pending requests that carry a
+     * message.
      *
      * @param actorId the authenticated caller
+     * @param folder which folder to list
      * @param cursor opaque continuation cursor from a previous page, or null for the first page
      * @param limit requested page size, clamped between 1 and 100
      * @return a cursor page of conversation summaries with unread counts
      */
     CursorPageResponse<ConversationSummaryResponse> listMyConversations(
-            UUID actorId, String cursor, int limit);
+            UUID actorId, ConversationFolder folder, String cursor, int limit);
 
     /**
      * Returns one conversation's detail, including active and former participants.

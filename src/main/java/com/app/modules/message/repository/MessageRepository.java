@@ -86,6 +86,10 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     /**
      * Total unread-message count across every active conversation for the given user; same counting
      * rule as {@link #countUnreadPerConversation} without the per-conversation breakdown.
+     *
+     * <p>A message request the user received is not counted, whether pending or declined: it is
+     * surfaced by {@link #countPendingRequests} instead, so a stranger's first message never
+     * inflates the badge on the regular inbox.
      */
     @Query(
             value =
@@ -96,13 +100,41 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
 						ON p.conversation_id = m.conversation_id
 						AND p.user_id = :userId
 						AND p.left_at IS NULL
+					JOIN conversations c ON c.id = m.conversation_id
 					WHERE m.is_deleted = FALSE
 					AND m.admin_removed_at IS NULL
 					AND m.sender_id IS DISTINCT FROM :userId
+					AND (c.request_status = 'accepted' OR c.request_recipient_id <> :userId)
 					AND (p.last_read_at IS NULL OR m.created_at > p.last_read_at)
 					""",
             nativeQuery = true)
     long countTotalUnreadForUser(@Param("userId") UUID userId);
+
+    /**
+     * Counts the user's incoming message requests that are pending, not filed as hidden, and carry
+     * at least one message; the figure behind the requests badge.
+     *
+     * <p>A request nobody has written to yet is not counted, because the requests folder does not
+     * list it either, and a hidden request is not counted because the recipient chose not to be
+     * told about that folder's contents.
+     *
+     * @param userId the recipient
+     * @return the number of visible incoming requests
+     */
+    @Query(
+            value =
+                    """
+					SELECT COUNT(*)
+					FROM conversations c
+					JOIN conversation_participants p
+						ON p.conversation_id = c.id AND p.user_id = :userId AND p.left_at IS NULL
+					WHERE c.request_status = 'pending'
+					AND c.request_recipient_id = :userId
+					AND NOT c.request_hidden
+					AND c.last_message_at IS NOT NULL
+					""",
+            nativeQuery = true)
+    long countPendingRequests(@Param("userId") UUID userId);
 
     /**
      * Reads a message's sender whatever either tombstone says, for the moderation path.
