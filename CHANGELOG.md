@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Mutes, show-fewer requests and not-interested marks now take effect: muted posts leave the Following, For You and Explore feeds, show-fewer authors leave For You and Explore but stay in Following, a not-interested post leaves every feed, and muted stories leave the story tray and story discovery; profile pages, search, hashtag pages, comments and direct messages are unchanged.
+- The feed service no longer offers a `getFeed` overload that silently chose the Following surface, so every caller names its surface, and the activity log documentation now says any event type except the private preference signals may be filtered.
 - Blocking an account now also removes the mutes and show-fewer requests between the two accounts in both directions.
 - `posts.comment_count` and a comment's `reply_count` now count only approved comments, so a hidden comment is not counted until its post owner unhides it.
 - `GET` and `PATCH /users/me/settings` carry `hiddenWordsSystemEnabled`, the account choice to apply the platform-wide hidden word list alongside its personal one; it defaults to true and a request that omits it leaves it unchanged.

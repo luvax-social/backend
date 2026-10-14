@@ -31,6 +31,7 @@ import com.app.modules.hashtag.dto.response.HashtagSummaryResponse;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.post.dto.response.FeedPostResponse;
 import com.app.modules.post.dto.response.PostResponse;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.service.PostLikeService;
 import com.app.modules.post.service.PostService;
 import com.app.modules.post.validation.PostTypeFilter;
@@ -113,14 +114,14 @@ class PostAuthorEmbeddingIT {
         }
 
         Statistics stats = statistics();
-        postService.getFeed(viewer, null, 2);
+        postService.getFeed(viewer, null, 2, FeedSurface.FOLLOWING);
 
         stats.clear();
-        postService.getFeed(viewer, null, 2);
+        postService.getFeed(viewer, null, 2, FeedSurface.FOLLOWING);
         long smallPage = stats.getPrepareStatementCount();
 
         stats.clear();
-        postService.getFeed(viewer, null, 6);
+        postService.getFeed(viewer, null, 6, FeedSurface.FOLLOWING);
         long largePage = stats.getPrepareStatementCount();
 
         assertThat(largePage).isEqualTo(smallPage);
@@ -142,14 +143,16 @@ class PostAuthorEmbeddingIT {
 
         Statistics stats = statistics();
         // Warm up so one-time metamodel statements do not land inside a measured call.
-        postService.getFeed(viewer, null, 1);
+        postService.getFeed(viewer, null, 1, FeedSurface.FOLLOWING);
 
         stats.clear();
-        List<FeedPostResponse> onePost = postService.getFeed(viewer, null, 1).getContent();
+        List<FeedPostResponse> onePost =
+                postService.getFeed(viewer, null, 1, FeedSurface.FOLLOWING).getContent();
         long oneItem = stats.getPrepareStatementCount();
 
         stats.clear();
-        List<FeedPostResponse> twentyPosts = postService.getFeed(viewer, null, 20).getContent();
+        List<FeedPostResponse> twentyPosts =
+                postService.getFeed(viewer, null, 20, FeedSurface.FOLLOWING).getContent();
         long twentyItems = stats.getPrepareStatementCount();
 
         assertThat(onePost).hasSize(1);
@@ -215,7 +218,8 @@ class PostAuthorEmbeddingIT {
         insertPublishedPost(bob);
         insertPublishedPost(alice);
 
-        List<FeedPostResponse> feed = postService.getFeed(viewer, null, 10).getContent();
+        List<FeedPostResponse> feed =
+                postService.getFeed(viewer, null, 10, FeedSurface.FOLLOWING).getContent();
 
         assertThat(feed).hasSize(3);
         // Two of the three posts are alice's; every post carries its own author, and alice's two

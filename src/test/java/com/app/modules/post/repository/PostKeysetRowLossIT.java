@@ -2,17 +2,25 @@ package com.app.modules.post.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.lang.reflect.Method;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.core.simple.JdbcClient.StatementSpec;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
@@ -139,40 +147,73 @@ class PostKeysetRowLossIT {
     }
 
     // The plan is read with sequential scans disabled so a small test table cannot hide the access
-    // path the production table would take. The statement is the one findFirstFeedPosts runs; if
-    // that query changes, this one has to change with it.
-    @Test
-    void feed_keysetQuery_stillUsesTheKeysetIndexAndAntiJoinsTheMarks() {
-        UUID viewer = insertUser("feed_plan_viewer");
-        UUID author = insertUser("feed_plan_author");
-        for (int i = 0; i < 20; i++) {
-            insertPost(author, SHARED_INSTANT.minusMinutes(i));
+    // path the production table would take. The statement is read from the repository's own @Query
+    // annotation rather than repeated here, so a change to either feed query is checked by this
+    // test without anyone remembering to copy it across. The methods are looked up by their
+    // parameter types because getDeclaredMethods() order is unspecified.
+    @ParameterizedTest(name = "{0} with {1} author(s)")
+    @MethodSource("feedQueryShapes")
+    void feed_keysetQuery_stillUsesTheKeysetIndexAndAntiJoinsTheMarks(
+            String method, int authorCount, boolean withCursor) throws NoSuchMethodException {
+        String shape = (withCursor ? "before" : "first") + authorCount;
+        UUID viewer = insertUser("plan_viewer_" + shape);
+        List<UUID> authors = new ArrayList<>();
+        for (int a = 0; a < authorCount; a++) {
+            UUID author = insertUser("plan_author_" + shape + "_" + a);
+            authors.add(author);
+            for (int i = 0; i < 20; i++) {
+                insertPost(author, SHARED_INSTANT.minusMinutes(i));
+            }
         }
         jdbcClient.sql("SET LOCAL enable_seqscan = off").update();
 
-        String plan =
-                String.join(
-                        "\n",
-                        jdbcClient
-                                .sql(
-                                        "EXPLAIN SELECT p.* FROM posts p WHERE p.user_id IN"
-                                                + " (:author) AND p.status = 'published' AND"
-                                                + " p.deleted_at IS NULL AND NOT EXISTS (SELECT 1"
-                                                + " FROM post_not_interested n WHERE n.user_id ="
-                                                + " :viewer AND n.post_id = p.id) ORDER BY"
-                                                + " p.created_at DESC, p.id DESC LIMIT 21")
-                                .param("author", author)
-                                .param("viewer", viewer)
-                                .query(String.class)
-                                .list());
+        StatementSpec spec =
+                jdbcClient
+                        .sql("EXPLAIN " + feedQuery(method, withCursor) + " LIMIT 21")
+                        .param("authorIds", authors)
+                        .param("viewerId", viewer);
+        if (withCursor) {
+            spec = spec.param("cursorTime", SHARED_INSTANT).param("cursorId", UUID.randomUUID());
+        }
+        String plan = String.join("\n", spec.query(String.class).list());
 
-        assertThat(plan)
-                .as("the keyset index must drive the scan")
-                .contains("idx_posts_user_created_id");
+        if (authorCount == 1) {
+            assertThat(plan)
+                    .as("the keyset index must drive the scan")
+                    .contains("idx_posts_user_created_id");
+        } else {
+            // With several authors the planner may order by another posts index and filter the
+            // authors; what matters is that the table is never read sequentially.
+            assertThat(plan).as("no sequential scan of posts").doesNotContain("Seq Scan");
+        }
         assertThat(plan).as("the marks are excluded by an anti-join").contains("Anti Join");
         assertThat(plan)
                 .as("the marks are probed through their primary key")
                 .contains("post_not_interested_pkey");
+    }
+
+    private static Stream<Arguments> feedQueryShapes() {
+        return Stream.of(
+                Arguments.of("findFirstFeedPosts", 1, false),
+                Arguments.of("findFirstFeedPosts", 3, false),
+                Arguments.of("findFeedPostsBefore", 1, true),
+                Arguments.of("findFeedPostsBefore", 3, true));
+    }
+
+    private static String feedQuery(String method, boolean withCursor)
+            throws NoSuchMethodException {
+        Method repositoryMethod =
+                withCursor
+                        ? PostRepository.class.getMethod(
+                                method,
+                                List.class,
+                                UUID.class,
+                                OffsetDateTime.class,
+                                UUID.class,
+                                Pageable.class)
+                        : PostRepository.class.getMethod(
+                                method, List.class, UUID.class, Pageable.class);
+        return repositoryMethod.getAnnotation(Query.class).value();
     }
 
     private List<UUID> pageFeed(List<UUID> authorIds, UUID viewer) {

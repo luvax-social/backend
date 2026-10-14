@@ -29,6 +29,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.app.common.response.ViewerRelationshipResponse;
 import com.app.modules.mail.service.MailService;
 import com.app.modules.post.dto.response.FeedPostResponse;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.service.PostService;
 import com.app.modules.social.service.SocialService;
 import com.app.modules.users.dto.response.PublicUserProfileResponse;
@@ -157,7 +158,7 @@ class ViewerRelationshipFlagsIT {
         showFewer(viewer, fewerAuthor);
 
         List<UUID> feedAuthors =
-                postService.getFeed(viewer, null, 10).getContent().stream()
+                postService.getFeed(viewer, null, 10, FeedSurface.FOLLOWING).getContent().stream()
                         .map(FeedPostResponse::author)
                         .map(author -> author.id())
                         .toList();

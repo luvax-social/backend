@@ -434,12 +434,6 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional(readOnly = true)
-    public CursorPageResponse<FeedPostResponse> getFeed(UUID viewerId, String cursor, int size) {
-        return getFeed(viewerId, cursor, size, FeedSurface.FOLLOWING);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
     public CursorPageResponse<FeedPostResponse> getFeed(
             UUID viewerId, String cursor, int size, FeedSurface surface) {
         // Decoded before the empty-follow-set short-circuit below so a malformed cursor is

@@ -177,6 +177,7 @@ A block stays decided by the existing block checks, and a mute or show-fewer row
 | `message` | inbound | Messaging permissions depend on whether a block relationship exists |
 | `recommendation` | outbound | `user.muted.v1`, `user.unmuted.v1`, `user.show-fewer.v1`, `user.show-fewer-undone.v1` and `user.interaction-limit.changed.v1` are imported into the analytics tier as `user_events` rows by `UserEventImportConsumer`; see the recommendation module's interaction control signals section |
 | `post` | outbound | `PostVisibilityServiceImpl` and `PostLikeServiceImpl` call `SocialService.loadRelationships`, which carries the viewer's mute and show-fewer flags on every embedded relationship, and `PostFeedbackServiceImpl` owns the sibling not-interested mark |
-| `post` | inbound | `PostServiceImpl.getFeed` and `RecommendationFeedServiceImpl` call `SocialService.findFeedSuppressedAuthors` with a `FeedSurface`, which is why `social` imports that post enum |
+| `post` | inbound | `PostServiceImpl.getFeed` calls `SocialService.findFeedSuppressedAuthors` with a `FeedSurface`, which is why `social` imports that post enum |
+| `recommendation` | inbound | `RecommendationFeedServiceImpl` calls `SocialService.findFeedSuppressedAuthors` over each round's candidate owners, on the `FOR_YOU` surface |
 | `story` | inbound | `StoryServiceImpl.getStoryFeed` calls `SocialService.findStoryMutedAuthors`, and story discovery applies the mute inside `StoryRepository.findDiscoverableAuthors` |
 | `story` | outbound | No story class calls `loadRelationships`, so story responses embed no mute or show-fewer flags |

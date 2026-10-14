@@ -29,6 +29,7 @@ import com.app.modules.mail.service.MailService;
 import com.app.modules.post.dto.response.FeedPostResponse;
 import com.app.modules.post.dto.response.PostResponse;
 import com.app.modules.post.dto.response.SavedPostResponse;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.service.PostSaveService;
 import com.app.modules.post.service.PostService;
 import com.app.modules.post.validation.PostTypeFilter;
@@ -116,18 +117,18 @@ class PostViewerStateIT {
         }
 
         Statistics stats = statistics();
-        postService.getFeed(viewer, null, 2);
+        postService.getFeed(viewer, null, 2, FeedSurface.FOLLOWING);
 
         stats.clear();
-        postService.getFeed(viewer, null, 2);
+        postService.getFeed(viewer, null, 2, FeedSurface.FOLLOWING);
         long size2 = stats.getPrepareStatementCount();
 
         stats.clear();
-        postService.getFeed(viewer, null, 6);
+        postService.getFeed(viewer, null, 6, FeedSurface.FOLLOWING);
         long size6 = stats.getPrepareStatementCount();
 
         stats.clear();
-        postService.getFeed(viewer, null, 12);
+        postService.getFeed(viewer, null, 12, FeedSurface.FOLLOWING);
         long size12 = stats.getPrepareStatementCount();
 
         assertThat(size6).isEqualTo(size2);
@@ -173,7 +174,8 @@ class PostViewerStateIT {
         UUID unlikedPost = insertPublishedPost(author);
         like(likedPost, viewer);
 
-        List<FeedPostResponse> feed = postService.getFeed(viewer, null, 10).getContent();
+        List<FeedPostResponse> feed =
+                postService.getFeed(viewer, null, 10, FeedSurface.FOLLOWING).getContent();
 
         assertThat(feed).hasSize(2);
         FeedPostResponse likedResponse =
@@ -193,7 +195,8 @@ class PostViewerStateIT {
         UUID unsavedPost = insertPublishedPost(author);
         save(savedPost, viewer);
 
-        List<FeedPostResponse> feed = postService.getFeed(viewer, null, 10).getContent();
+        List<FeedPostResponse> feed =
+                postService.getFeed(viewer, null, 10, FeedSurface.FOLLOWING).getContent();
 
         assertThat(feed).hasSize(2);
         FeedPostResponse savedResponse =

@@ -152,24 +152,14 @@ public interface PostService {
             UUID viewerId, UUID targetUserId, PostTypeFilter typeFilter, String cursor, int size);
 
     /**
-     * Cursor-paginated chronological feed of published posts from accounts the viewer follows.
+     * Cursor-paginated chronological feed of published posts from accounts the viewer follows, with
+     * the viewer's own interaction preferences applied for the given surface.
      *
      * <p>Only accepted follow relationships contribute to the feed; pending follow requests are
      * excluded. Posts from any account involved in a block relationship with the viewer, in either
      * direction, are excluded. Returns an empty page without querying posts when the viewer follows
      * nobody or when all followed accounts are blocked. Posts are ordered by creation time, newest
      * first.
-     *
-     * @param viewerId authenticated viewer
-     * @param cursor opaque base64 cursor from the previous page; null or blank for the first page
-     * @param size requested page size, normalized to 1–100 with a default of 20
-     * @return cursor page of feed posts ordered by creation time, newest first
-     */
-    CursorPageResponse<FeedPostResponse> getFeed(UUID viewerId, String cursor, int size);
-
-    /**
-     * Cursor-paginated chronological feed of followed accounts, with the viewer's own interaction
-     * preferences applied for the given surface.
      *
      * <p>Posts the viewer marked not interested are never returned, and neither are posts by
      * accounts whose posts the viewer muted. Accounts the viewer asked to see fewer posts from are
@@ -178,8 +168,8 @@ public interface PostService {
      * so the caller names it on every page: the ranked feed passes {@code FOR_YOU_FALLBACK} for the
      * first fallback page and for each continuation page, which arrive at its own endpoint.
      *
-     * <p>The three-argument overload is this method with {@link FeedSurface#FOLLOWING}. Blocks are
-     * excluded exactly as there.
+     * <p>There is deliberately no overload that omits the surface: a caller that does not name one
+     * would silently inherit the Following rules.
      *
      * @param viewerId authenticated viewer
      * @param cursor opaque base64 cursor from the previous page; null or blank for the first page

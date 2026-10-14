@@ -634,7 +634,8 @@ class PostServiceImplTest {
         when(socialService.getAcceptedFollowingExcludingBlocks(viewer))
                 .thenReturn(Collections.emptyList());
 
-        CursorPageResponse<FeedPostResponse> page = service.getFeed(viewer, null, 20);
+        CursorPageResponse<FeedPostResponse> page =
+                service.getFeed(viewer, null, 20, FeedSurface.FOLLOWING);
 
         assertThat(page.getContent()).isEmpty();
         verifyNoInteractions(postRepository);
@@ -651,7 +652,8 @@ class PostServiceImplTest {
         when(postResponseAssembler.assembleFeed(eq(viewer), any()))
                 .thenReturn(List.of(feedResponse));
 
-        CursorPageResponse<FeedPostResponse> page = service.getFeed(viewer, null, 20);
+        CursorPageResponse<FeedPostResponse> page =
+                service.getFeed(viewer, null, 20, FeedSurface.FOLLOWING);
 
         assertThat(page.getContent()).hasSize(1).containsExactly(feedResponse);
     }
@@ -700,19 +702,6 @@ class PostServiceImplTest {
     }
 
     @Test
-    void getFeed_threeArgumentOverload_usesTheFollowingSurface() {
-        UUID viewer = UUID.randomUUID();
-        UUID author = UUID.randomUUID();
-        when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
-        when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(List.of());
-
-        service.getFeed(viewer, null, 20);
-
-        verify(socialService)
-                .findFeedSuppressedAuthors(viewer, List.of(author), FeedSurface.FOLLOWING);
-    }
-
-    @Test
     void getFeed_everyFollowedAuthorSuppressed_returnsEmptyPageWithoutQueryingPosts() {
         UUID viewer = UUID.randomUUID();
         UUID author = UUID.randomUUID();
@@ -745,7 +734,8 @@ class PostServiceImplTest {
         when(postResponseAssembler.assembleFeed(eq(viewer), any()))
                 .thenReturn(List.of(feedResponse));
 
-        CursorPageResponse<FeedPostResponse> page = service.getFeed(viewer, cursor, 20);
+        CursorPageResponse<FeedPostResponse> page =
+                service.getFeed(viewer, cursor, 20, FeedSurface.FOLLOWING);
 
         assertThat(page.getContent()).containsExactly(feedResponse);
         verify(postRepository).findFeedPostsBefore(any(), any(), any(), any(), any());
@@ -757,7 +747,13 @@ class PostServiceImplTest {
 
         // The cursor is decoded before the accepted-following lookup, so an invalid cursor throws
         // even for a viewer who follows nobody; socialService is deliberately never stubbed here.
-        assertThatThrownBy(() -> service.getFeed(viewer, "!!!not-valid-base64!!!", 20))
+        assertThatThrownBy(
+                        () ->
+                                service.getFeed(
+                                        viewer,
+                                        "!!!not-valid-base64!!!",
+                                        20,
+                                        FeedSurface.FOLLOWING))
                 .isInstanceOf(AppException.class)
                 .extracting(e -> ((AppException) e).getErrorCode())
                 .isEqualTo(ApiErrorCode.INVALID_CURSOR);
@@ -772,7 +768,7 @@ class PostServiceImplTest {
         when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
         when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(List.of());
 
-        service.getFeed(viewer, null, 9999);
+        service.getFeed(viewer, null, 9999, FeedSurface.FOLLOWING);
 
         verify(postRepository).findFirstFeedPosts(any(), any(), pageCaptor.capture());
         // normalizeLimit caps at 100, then fetches pageSize+1 to detect next page
@@ -788,7 +784,7 @@ class PostServiceImplTest {
         when(socialService.getAcceptedFollowingExcludingBlocks(viewer)).thenReturn(List.of(author));
         when(postRepository.findFirstFeedPosts(any(), any(), any())).thenReturn(List.of());
 
-        service.getFeed(viewer, null, 0);
+        service.getFeed(viewer, null, 0, FeedSurface.FOLLOWING);
 
         verify(postRepository).findFirstFeedPosts(any(), any(), pageCaptor.capture());
         // normalizeLimit defaults to 20, then fetches pageSize+1 to detect next page
@@ -807,7 +803,8 @@ class PostServiceImplTest {
         when(postResponseAssembler.assembleFeed(eq(viewer), any()))
                 .thenReturn(Collections.nCopies(20, feedResponse));
 
-        CursorPageResponse<FeedPostResponse> page = service.getFeed(viewer, null, 20);
+        CursorPageResponse<FeedPostResponse> page =
+                service.getFeed(viewer, null, 20, FeedSurface.FOLLOWING);
 
         assertThat(page.getPageInfo().isHasNextPage()).isTrue();
         assertThat(page.getContent()).hasSize(20);
@@ -824,7 +821,8 @@ class PostServiceImplTest {
         when(postResponseAssembler.assembleFeed(eq(viewer), eq(posts)))
                 .thenReturn(Collections.nCopies(5, feedResponse));
 
-        CursorPageResponse<FeedPostResponse> page = service.getFeed(viewer, null, 20);
+        CursorPageResponse<FeedPostResponse> page =
+                service.getFeed(viewer, null, 20, FeedSurface.FOLLOWING);
 
         assertThat(page.getPageInfo().isHasNextPage()).isFalse();
         assertThat(page.getContent()).hasSize(5);
