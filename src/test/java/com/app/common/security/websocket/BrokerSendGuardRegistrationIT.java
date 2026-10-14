@@ -107,4 +107,13 @@ class BrokerSendGuardRegistrationIT {
                                 + " registered")
                 .hasAtLeastOneElementOfType(BrokerSendGuardInterceptor.class);
     }
+
+    @Test
+    void wildcardSubscriptionGuard_isRegisteredWhenMessagingIsTheOnlyLiveEndpoint() {
+        assertThat(clientInboundChannel.getInterceptors())
+                .as(
+                        "a wildcard SUBSCRIBE is only refused if this guard is registered, since no"
+                                + " module guard owns a pattern destination")
+                .hasAtLeastOneElementOfType(WildcardSubscriptionGuardInterceptor.class);
+    }
 }

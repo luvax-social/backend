@@ -975,6 +975,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Removed CORS wildcard fallback: `SecurityConfig.corsConfigurationSource` no longer falls back to `setAllowedOriginPatterns("*")` when `app.cors.allowed-origins` is empty; an unset origin list is now a deny-all CORS policy, refusing any wildcard combined with `allowCredentials=true`.
 - Locked actuator endpoints: only `/actuator/health` is permitted without auth; `/actuator/**` now requires `ROLE_ADMIN`, blocking ordinary authenticated users from reading `/actuator/prometheus`, `/actuator/env`, etc.
 - Stopped persisting Google OAuth access token: `OAuthAccount.accessToken` is no longer stored at link time, removing an unused secret from the database-compromise blast radius.
+- Refused live STOMP subscriptions to wildcard destinations (`*`, `?`, `#`, URI-template braces), which previously passed every per-module subscription guard and delivered other accounts' notification, inbox, message and comment frames.
 
 ### Tests
 - A ClickHouse test now compares every `UserEventType` name and ordinal with the `user_events.event_type` column after the shipped migrations, so the enum and the column cannot drift apart unnoticed.
