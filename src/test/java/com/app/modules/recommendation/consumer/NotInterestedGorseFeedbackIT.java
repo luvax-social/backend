@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -361,7 +362,7 @@ class NotInterestedGorseFeedbackIT {
         return eventId;
     }
 
-    private java.util.Optional<GorseFeedback> heldInGorse() {
+    private Optional<GorseFeedback> heldInGorse() {
         return gorseClient.getFeedback(NOT_INTERESTED, viewer.toString(), post.toString());
     }
 

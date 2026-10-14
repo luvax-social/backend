@@ -70,7 +70,8 @@ It costs the user more effort than a like and is a deliberate endorsement to a s
 `RecommendationFeedbackConsumer` handles both events:
 
 - `post.not-interested.v1` writes `post_not_interested` with `feedback_type = 'not_interested'` and `feedback_value` 1.0 to ClickHouse first, by the same durable path as every engagement event, then calls `insertFeedback`.
-- `post.not-interested-undone.v1` writes `post_not_interested_undo` without feedback columns, so a rebuild never replays it, then calls `GorseClient.deleteFeedback`. A Gorse answer of not found is a success, because an undo is idempotent.
+- `post.not-interested-undone.v1` writes `post_not_interested_undo` without feedback columns, so a rebuild never replays it, then calls `GorseClient.deleteFeedback`.
+A Gorse answer of not found is a success, because an undo is idempotent.
 - Neither path calls `hideItem`. The `IsHidden` flag belongs to the item and would hide the post from every viewer, so it is never used for a personal preference.
 - The application filter stays the authority for the viewer's own feeds. The trending top-up and the popularity and chronological fallbacks never pass through Gorse's exclusion, so only the filter covers them.
 

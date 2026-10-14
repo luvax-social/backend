@@ -119,13 +119,12 @@ public interface AdminUserEventApi {
             @Parameter(
                             description =
                                     "Restrict to one event type. Any event type may be named except"
-                                            + " the private"
-                                            + " preference signals (account_mute, account_unmute,"
-                                            + " account_show_fewer, account_show_fewer_undo,"
-                                            + " post_not_interested,"
+                                            + " the private preference signals (account_mute,"
+                                            + " account_unmute, account_show_fewer,"
+                                            + " account_show_fewer_undo, post_not_interested,"
                                             + " post_not_interested_undo and"
-                                            + " interaction_limit_change) are not offered and are"
-                                            + " refused with 400.")
+                                            + " interaction_limit_change), which are refused with"
+                                            + " 400.")
                     @RequestParam(required = false)
                     UserEventType eventType,
             @Parameter(description = "Opaque cursor from a previous page")

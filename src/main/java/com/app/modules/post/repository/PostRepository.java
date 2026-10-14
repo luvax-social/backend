@@ -234,8 +234,9 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
      * null timestamp, which PostgreSQL cannot type-infer.
      *
      * <p>Posts the viewer marked not interested are left out by an anti-join on the mark's primary
-     * key, so the keyset index on {@code (user_id, created_at, id)} still drives the scan and a
-     * viewer with no marks pays one failed index probe per candidate row.
+     * key, so a viewer with no marks pays one failed index probe per candidate row. For a single
+     * author the keyset index on {@code (user_id, created_at, id)} still drives the scan; with
+     * several authors the planner may order by another posts index.
      *
      * @param authorIds post authors eligible to appear in the feed; must not be empty
      * @param viewerId the viewer whose not-interested marks are excluded

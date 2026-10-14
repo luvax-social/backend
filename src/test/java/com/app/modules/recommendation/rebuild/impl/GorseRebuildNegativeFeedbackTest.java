@@ -1,6 +1,7 @@
 package com.app.modules.recommendation.rebuild.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.groups.Tuple.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -173,9 +174,8 @@ class GorseRebuildNegativeFeedbackTest {
         assertThat(sent.getValue())
                 .extracting(GorseFeedback::feedbackType, GorseFeedback::itemId)
                 .containsExactlyInAnyOrder(
-                        org.assertj.core.groups.Tuple.tuple("like", likedPost.toString()),
-                        org.assertj.core.groups.Tuple.tuple(
-                                "not_interested", livePreferencePost.toString()));
+                        tuple("like", likedPost.toString()),
+                        tuple("not_interested", livePreferencePost.toString()));
         assertThat(run.getStatus()).isEqualTo(GorseRebuildStatus.DONE);
         assertThat(run.getFeedbackSent()).isEqualTo(2);
         assertThat(run.getFeedbackSkipped()).isEqualTo(1);

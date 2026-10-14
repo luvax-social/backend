@@ -131,14 +131,14 @@ A change that made carousels type-homogeneous would break a client feature built
 #### Interaction preferences in the feeds
 
 `PostService.getFeed(viewerId, cursor, size, surface)` serves the chronological feed for a `FeedSurface`.
-The three-argument overload is the same method with `FeedSurface.FOLLOWING`.
 The Following tab passes `FOLLOWING`, and the ranked feed passes `FOR_YOU_FALLBACK` when it falls back, for the first page and for every continuation page.
 The cursor carries no surface, so the caller names it on each page.
 `PostServiceImpl.getFeed` subtracts the authors returned by `SocialService.findFeedSuppressedAuthors` from the followed author list before it queries posts.
 Muted authors are subtracted on every surface, and show-fewer authors are subtracted on `FOR_YOU_FALLBACK` only.
 `PostRepository.findFirstFeedPosts` and `findFeedPostsBefore` take the viewer and exclude posts with a `post_not_interested` row for that viewer, on every surface.
-The exclusion is an anti-join on the mark's primary key, so the `idx_posts_user_created_id` keyset index still drives the scan.
-A test reads the query plan to pin that.
+The exclusion is an anti-join on the mark's primary key.
+For a single author the `idx_posts_user_created_id` keyset index still drives the scan.
+With several authors the planner may order by another posts index, so the query plan test pins only that there is no sequential scan, the anti-join and the primary key probe.
 `PostFeedbackService.findNotInterested(viewerId, postIds)` returns the marked subset of a candidate set in one indexed query, for the ranked feed.
 Profile posts, post search, hashtag posts and the saved list do not read these preferences.
 A block exclusion is unchanged, and the preference filters never replace it.

@@ -149,7 +149,8 @@ public class RecommendationFeedbackConsumer {
      */
     // Four consumer threads because a write that waits for the part to be flushed and synced takes
     // tens of milliseconds; ordering does not matter to an append-only table or to the sums Gorse
-    // accumulates, and the inbox's unique key serialises a duplicate across threads.
+    // accumulates, except for the not-interested pair, which is guarded against the standing
+    // preference below; the inbox's unique key serialises a duplicate across threads.
     @RabbitListener(
             id = AnalyticsListenerIds.RECOMMENDATION_FEEDBACK,
             queues = RabbitMqTopologyConfig.RECOMMENDATION_FEEDBACK_QUEUE,
