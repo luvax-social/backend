@@ -13,6 +13,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.PageRequest;
@@ -61,6 +62,7 @@ public class MessageServiceImpl implements MessageService {
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
     private static final String AGGREGATE_TYPE = "message";
+    private static final char CURSOR_SEPARATOR = '|';
 
     private final MessageRepository messageRepository;
     private final MessageIdempotencyRepository idempotencyRepository;
@@ -307,13 +309,13 @@ public class MessageServiceImpl implements MessageService {
         fetchConversation(conversationId);
         requireActiveParticipant(conversationId, actorId);
         int pageSize = normalizeLimit(limit);
-        OffsetDateTime cursorTime = decodeCursor(cursor);
+        HistoryCursor decoded = decodeCursor(cursor);
         PageRequest page = PageRequest.of(0, pageSize + 1);
         List<Message> messages =
-                cursorTime == null
+                decoded == null
                         ? messageRepository.findFirstByConversation(conversationId, page)
                         : messageRepository.findByConversationBefore(
-                                conversationId, cursorTime, page);
+                                conversationId, decoded.createdAt(), decoded.id(), page);
         return toPage(messages, pageSize, cursor);
     }
 
@@ -589,9 +591,8 @@ public class MessageServiceImpl implements MessageService {
                 page.stream()
                         .map(m -> mapper.toMessageResponse(m, mediaFor(media, m), parents))
                         .toList();
-        String startCursor = page.isEmpty() ? null : encodeCursor(page.get(0).getCreatedAt());
-        String endCursor =
-                page.isEmpty() ? null : encodeCursor(page.get(page.size() - 1).getCreatedAt());
+        String startCursor = page.isEmpty() ? null : encodeCursor(page.get(0));
+        String endCursor = page.isEmpty() ? null : encodeCursor(page.get(page.size() - 1));
         return CursorPageResponse.<MessageResponse>builder()
                 .content(content)
                 .pageInfo(
@@ -608,24 +609,43 @@ public class MessageServiceImpl implements MessageService {
         return limit > MAX_PAGE_SIZE ? MAX_PAGE_SIZE : (limit < 1 ? DEFAULT_PAGE_SIZE : limit);
     }
 
-    private String encodeCursor(OffsetDateTime time) {
-        if (time == null) {
+    // The cursor carries the (created_at, id) pair of the last message on the page, because two
+    // messages can share a timestamp and the timestamp alone would skip or repeat the tie group.
+    private String encodeCursor(Message message) {
+        if (message.getCreatedAt() == null) {
             return null;
         }
-        return Base64.getEncoder().encodeToString(time.toString().getBytes(StandardCharsets.UTF_8));
+        return Base64.getEncoder()
+                .encodeToString(
+                        (message.getCreatedAt().toString() + CURSOR_SEPARATOR + message.getId())
+                                .getBytes(StandardCharsets.UTF_8));
     }
 
-    private OffsetDateTime decodeCursor(String cursor) {
+    // A cursor minted before the id joined it carries only the timestamp. The nil UUID sorts below
+    // every id, so the tie-break clause matches nothing and the page resumes strictly before the
+    // timestamp, the behaviour that cursor was issued under.
+    private HistoryCursor decodeCursor(String cursor) {
         if (cursor == null || cursor.isBlank()) {
             return null;
         }
         try {
-            return OffsetDateTime.parse(
-                    new String(Base64.getDecoder().decode(cursor), StandardCharsets.UTF_8));
+            String[] parts =
+                    new String(Base64.getDecoder().decode(cursor), StandardCharsets.UTF_8)
+                            .split(Pattern.quote(String.valueOf(CURSOR_SEPARATOR)), -1);
+            OffsetDateTime createdAt = OffsetDateTime.parse(parts[0]);
+            if (parts.length == 1) {
+                return new HistoryCursor(createdAt, new UUID(0L, 0L));
+            }
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("malformed cursor");
+            }
+            return new HistoryCursor(createdAt, UUID.fromString(parts[1]));
         } catch (RuntimeException e) {
             throw new AppException(ApiErrorCode.BAD_REQUEST, "Invalid cursor format");
         }
     }
+
+    private record HistoryCursor(OffsetDateTime createdAt, UUID id) {}
 
     private static String sha256(String input) {
         try {

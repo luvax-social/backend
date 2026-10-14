@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -427,6 +428,83 @@ class MessageServiceImplTest {
 
         assertThat(result.getContent()).hasSize(1);
         assertThat(result.getContent().get(0).isDeleted()).isTrue();
+    }
+
+    @Test
+    void listHistory_pageCursor_carriesTimestampAndIdOfTheBoundaryMessage() {
+        UUID actorId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        openHistory(actorId, conversationId);
+        OffsetDateTime sharedInstant = OffsetDateTime.parse("2026-01-01T12:00:00.123456Z");
+        Message first = historyMessage(conversationId, sharedInstant);
+        Message second = historyMessage(conversationId, sharedInstant);
+        Message probe = historyMessage(conversationId, sharedInstant);
+        when(messageRepository.findFirstByConversation(eq(conversationId), any(Pageable.class)))
+                .thenReturn(List.of(first, second, probe));
+
+        CursorPageResponse<MessageResponse> page =
+                service.listHistory(actorId, conversationId, null, 2);
+        service.listHistory(actorId, conversationId, page.getPageInfo().getEndCursor(), 2);
+
+        verify(messageRepository)
+                .findByConversationBefore(
+                        eq(conversationId),
+                        eq(sharedInstant),
+                        eq(second.getId()),
+                        any(Pageable.class));
+    }
+
+    @Test
+    void listHistory_cursorWithoutId_resumesStrictlyBeforeTheTimestamp() {
+        UUID actorId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        openHistory(actorId, conversationId);
+        OffsetDateTime instant = OffsetDateTime.parse("2026-01-01T12:00:00.123456Z");
+        String legacyCursor =
+                Base64.getEncoder()
+                        .encodeToString(instant.toString().getBytes(StandardCharsets.UTF_8));
+
+        service.listHistory(actorId, conversationId, legacyCursor, 20);
+
+        // The nil UUID sorts below every id, so the tie-break clause matches nothing and the page
+        // starts strictly before the timestamp as the old cursor promised.
+        verify(messageRepository)
+                .findByConversationBefore(
+                        eq(conversationId), eq(instant), eq(new UUID(0L, 0L)), any(Pageable.class));
+    }
+
+    @Test
+    void listHistory_malformedCursor_throwsBadRequest() {
+        UUID actorId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        openHistory(actorId, conversationId);
+        String malformed =
+                Base64.getEncoder()
+                        .encodeToString(
+                                "2026-01-01T12:00:00Z|not-a-uuid".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service.listHistory(actorId, conversationId, malformed, 20))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.BAD_REQUEST);
+    }
+
+    private void openHistory(UUID actorId, UUID conversationId) {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(directConversation(conversationId)));
+        when(participantRepository.existsByIdConversationIdAndIdUserIdAndLeftAtIsNull(
+                        conversationId, actorId))
+                .thenReturn(true);
+    }
+
+    private static Message historyMessage(UUID conversationId, OffsetDateTime createdAt) {
+        return Message.builder()
+                .id(UUID.randomUUID())
+                .conversationId(conversationId)
+                .messageType(MessageType.TEXT)
+                .content("hello")
+                .createdAt(createdAt)
+                .build();
     }
 
     @Test

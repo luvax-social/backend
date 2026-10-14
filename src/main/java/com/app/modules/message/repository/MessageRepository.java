@@ -44,20 +44,32 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     /**
      * First page of a conversation's history, newest first. Deleted (tombstoned) messages are
      * included so clients can render a "message deleted" placeholder in place.
+     *
+     * <p>Ties on {@code created_at} are broken by {@code id}, so the order is total and the cursor
+     * of {@link #findByConversationBefore} can resume exactly where this page stopped.
      */
     @Query(
             "SELECT m FROM Message m WHERE m.conversationId = :conversationId "
-                    + "ORDER BY m.createdAt DESC")
+                    + "ORDER BY m.createdAt DESC, m.id DESC")
     List<Message> findFirstByConversation(
             @Param("conversationId") UUID conversationId, Pageable pageable);
 
-    /** Keyset page of a conversation's history older than the cursor, newest first. */
+    /**
+     * Keyset page of a conversation's history strictly after the {@code (created_at, id)} cursor in
+     * newest-first order.
+     *
+     * <p>The id breaks ties between messages sharing a timestamp, so a tie group that straddles a
+     * page boundary is neither skipped nor repeated.
+     */
     @Query(
             "SELECT m FROM Message m WHERE m.conversationId = :conversationId "
-                    + "AND m.createdAt < :cursor ORDER BY m.createdAt DESC")
+                    + "AND (m.createdAt < :cursorTime "
+                    + "OR (m.createdAt = :cursorTime AND m.id < :cursorId)) "
+                    + "ORDER BY m.createdAt DESC, m.id DESC")
     List<Message> findByConversationBefore(
             @Param("conversationId") UUID conversationId,
-            @Param("cursor") OffsetDateTime cursor,
+            @Param("cursorTime") OffsetDateTime cursorTime,
+            @Param("cursorId") UUID cursorId,
             Pageable pageable);
 
     /**
@@ -69,7 +81,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
                     """
 					SELECT DISTINCT ON (m.conversation_id) m.* FROM messages m
 					WHERE m.conversation_id IN (:conversationIds)
-					ORDER BY m.conversation_id, m.created_at DESC
+					ORDER BY m.conversation_id, m.created_at DESC, m.id DESC
 					""",
             nativeQuery = true)
     List<Message> findLastMessagePerConversation(
