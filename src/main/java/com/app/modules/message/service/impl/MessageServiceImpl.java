@@ -79,6 +79,7 @@ public class MessageServiceImpl implements MessageService {
     private final OutboxService outboxService;
     private final ObjectMapper objectMapper;
     private final MessageReactionRepository reactionRepository;
+    private final MessageInboxAudience inboxAudience;
 
     public MessageServiceImpl(
             MessageRepository messageRepository,
@@ -92,7 +93,8 @@ public class MessageServiceImpl implements MessageService {
             MessageMapper mapper,
             OutboxService outboxService,
             ObjectMapper objectMapper,
-            MessageReactionRepository reactionRepository) {
+            MessageReactionRepository reactionRepository,
+            MessageInboxAudience inboxAudience) {
         this.messageRepository = messageRepository;
         this.idempotencyRepository = idempotencyRepository;
         this.conversationRepository = conversationRepository;
@@ -105,6 +107,7 @@ public class MessageServiceImpl implements MessageService {
         this.outboxService = outboxService;
         this.objectMapper = objectMapper;
         this.reactionRepository = reactionRepository;
+        this.inboxAudience = inboxAudience;
     }
 
     @Override
@@ -185,7 +188,7 @@ public class MessageServiceImpl implements MessageService {
 
         applyRequestOutcome(conversation, actorId, decision);
         reactivateOtherParticipants(conversation, actorId);
-        enqueueSent(conversationId, saved, actorId, response);
+        enqueueSent(conversation, saved, actorId, response);
         return response;
     }
 
@@ -493,9 +496,20 @@ public class MessageServiceImpl implements MessageService {
         }
     }
 
+    // The audience and folder ride the event so the live consumer can tell each recipient's inbox
+    // which folder the conversation landed in without a lookup. They are decided here, after the
+    // request outcome and the reactivation above, and the consumer strips both before the event
+    // reaches the thread topic, which the requester is subscribed to.
     private void enqueueSent(
-            UUID conversationId, Message saved, UUID actorId, MessageResponse response) {
+            Conversation conversation, Message saved, UUID actorId, MessageResponse response) {
+        UUID conversationId = conversation.getId();
         Map<String, Object> data = new HashMap<>();
+        data.put(
+                "inboxRecipientIds",
+                inboxAudience.recipients(conversation, actorId).stream()
+                        .map(UUID::toString)
+                        .toList());
+        data.put("folder", MessageInboxAudience.folderOf(conversation));
         data.put("conversationId", conversationId.toString());
         data.put("messageId", saved.getId().toString());
         data.put("senderId", actorId.toString());

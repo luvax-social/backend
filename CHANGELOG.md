@@ -38,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The deletion count a comment owner sees in the confirmation and in the delete response no longer includes hidden replies by other users, and the live update for a hidden comment no longer names its author or thread.
 
 ### Added
+- A signed-in account can subscribe to its own `/topic/inbox.{userId}` live topic, which announces a new message or reaction with the conversation id and, for a message, the folder it landed in (`primary`, `requests` or `hidden_requests`) and never any message content; subscribing to another account's inbox is rejected, and a declined recipient or a blocked pair is never sent a frame.
 - A participant can react to a message with exactly one emoji and change or remove it (`PUT` and `DELETE /conversations/{conversationId}/messages/{messageId}/reaction`); reactions appear on every message response, the other participant gets a live `message.reaction.changed.v1` frame, and the conversation list row carries the newest reaction when it is newer than the last message.
 - A reaction on a message its sender deleted or an administrator removed is refused, existing reactions stay hidden while either removal stands and return after an administrative restore, and a blocked pair can neither react nor see each other's reactions.
 - `message_reaction` and `message_reaction_remove` rows are imported into the analytics tier from `message.reaction.changed.v1`.

@@ -9,7 +9,7 @@ import com.app.common.security.config.CorsProperties;
 class MessageWebSocketConfigTest {
 
     private static MessageWebSocketConfig configWith(String origins) {
-        return new MessageWebSocketConfig(null, null, new CorsProperties(origins));
+        return new MessageWebSocketConfig(null, null, null, new CorsProperties(origins));
     }
 
     @Test

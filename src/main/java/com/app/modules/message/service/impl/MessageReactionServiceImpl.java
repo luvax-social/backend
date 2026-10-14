@@ -13,6 +13,7 @@ import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
 import com.app.common.outbox.service.OutboxService;
 import com.app.modules.message.dto.response.MessageReactionResponse;
+import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.Message;
 import com.app.modules.message.entity.MessageReaction;
 import com.app.modules.message.mapper.MessageMapper;
@@ -38,6 +39,7 @@ public class MessageReactionServiceImpl implements MessageReactionService {
     private final SocialService socialService;
     private final MessageMapper mapper;
     private final OutboxService outboxService;
+    private final MessageInboxAudience inboxAudience;
 
     public MessageReactionServiceImpl(
             ConversationRepository conversationRepository,
@@ -46,7 +48,8 @@ public class MessageReactionServiceImpl implements MessageReactionService {
             MessageReactionRepository reactionRepository,
             SocialService socialService,
             MessageMapper mapper,
-            OutboxService outboxService) {
+            OutboxService outboxService,
+            MessageInboxAudience inboxAudience) {
         this.conversationRepository = conversationRepository;
         this.participantRepository = participantRepository;
         this.messageRepository = messageRepository;
@@ -54,13 +57,14 @@ public class MessageReactionServiceImpl implements MessageReactionService {
         this.socialService = socialService;
         this.mapper = mapper;
         this.outboxService = outboxService;
+        this.inboxAudience = inboxAudience;
     }
 
     @Override
     @Transactional
     public MessageReactionResponse react(
             UUID actorId, UUID conversationId, UUID messageId, String emoji) {
-        requireReactableConversation(actorId, conversationId);
+        Conversation conversation = requireReactableConversation(actorId, conversationId);
         Message message = requireMessage(conversationId, messageId);
         if (isTombstoned(message)) {
             throw new AppException(ApiErrorCode.MESSAGE_NOT_FOUND);
@@ -77,7 +81,7 @@ public class MessageReactionServiceImpl implements MessageReactionService {
                         .orElseThrow(() -> new AppException(ApiErrorCode.INTERNAL_ERROR));
         // A reaction an administrator removed stays hidden, so changing its emoji is not news.
         if (changed > 0 && stored.getAdminRemovedAt() == null) {
-            enqueueChanged(conversationId, messageId, actorId, emoji, stored.getReactedAt());
+            enqueueChanged(conversation, messageId, actorId, emoji, stored.getReactedAt());
         }
         return mapper.toReactionResponse(stored);
     }
@@ -85,7 +89,7 @@ public class MessageReactionServiceImpl implements MessageReactionService {
     @Override
     @Transactional
     public void unreact(UUID actorId, UUID conversationId, UUID messageId) {
-        requireReactableConversation(actorId, conversationId);
+        Conversation conversation = requireReactableConversation(actorId, conversationId);
         Message message = requireMessage(conversationId, messageId);
         // A message that is no longer shown has no visible reactions to remove; leaving the row
         // alone lets an administrative restore bring the message back exactly as it was.
@@ -101,7 +105,7 @@ public class MessageReactionServiceImpl implements MessageReactionService {
                 .ifPresent(
                         removed ->
                                 enqueueChanged(
-                                        conversationId,
+                                        conversation,
                                         messageId,
                                         actorId,
                                         null,
@@ -112,10 +116,11 @@ public class MessageReactionServiceImpl implements MessageReactionService {
     // the same not-found a missing conversation gives, so a blocked pair learns nothing from a
     // reaction attempt. The other participants are read whatever their left_at says, because a
     // peer who deleted the conversation and then blocked the actor is still a block.
-    private void requireReactableConversation(UUID actorId, UUID conversationId) {
-        conversationRepository
-                .findById(conversationId)
-                .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
+    private Conversation requireReactableConversation(UUID actorId, UUID conversationId) {
+        Conversation conversation =
+                conversationRepository
+                        .findById(conversationId)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
         if (!participantRepository.existsByIdConversationIdAndIdUserIdAndLeftAtIsNull(
                 conversationId, actorId)) {
             throw new AppException(ApiErrorCode.CONVERSATION_FORBIDDEN);
@@ -130,6 +135,7 @@ public class MessageReactionServiceImpl implements MessageReactionService {
         if (blocked) {
             throw new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND);
         }
+        return conversation;
     }
 
     private Message requireMessage(UUID conversationId, UUID messageId) {
@@ -143,15 +149,22 @@ public class MessageReactionServiceImpl implements MessageReactionService {
     }
 
     // A removal omits the emoji key because the outbox payload map rejects null values; consumers
-    // read an absent emoji as no reaction. The payload carries no recipient list: the thread topic
-    // is the only live audience, and its subscription is already limited to active participants.
+    // read an absent emoji as no reaction. The inbox audience is decided here so the live consumer
+    // needs no lookup, and the consumer strips it before the event reaches the thread topic. No
+    // folder is carried: a reaction does not move a conversation between folders.
     private void enqueueChanged(
-            UUID conversationId,
+            Conversation conversation,
             UUID messageId,
             UUID userId,
             String emoji,
             OffsetDateTime reactedAt) {
+        UUID conversationId = conversation.getId();
         Map<String, Object> data = new HashMap<>();
+        data.put(
+                "inboxRecipientIds",
+                inboxAudience.recipients(conversation, userId).stream()
+                        .map(UUID::toString)
+                        .toList());
         data.put("conversationId", conversationId.toString());
         data.put("messageId", messageId.toString());
         data.put("userId", userId.toString());

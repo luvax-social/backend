@@ -38,6 +38,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.security.user.UserPrincipal;
 import com.app.common.security.websocket.JwtHandshakeInterceptor;
+import com.app.modules.message.live.MessageInboxAuthInterceptor;
 import com.app.modules.message.live.MessageWebSocketAuthInterceptor;
 import com.app.modules.message.repository.ConversationParticipantRepository;
 import com.app.modules.message.repository.MessageUserRepository;
@@ -46,9 +47,9 @@ import com.app.testsupport.TestContainerImages;
 /**
  * What each party to a message request may do with it, one cell per party and operation.
  *
- * <p>The live subscription check is the one the WebSocket channel runs, built over the real
- * repositories. The per-user inbox topic added with the inbox live updates is not a column here
- * yet; that work adds it to this table.
+ * <p>The live subscription checks are the ones the WebSocket channel runs, built over the real
+ * repositories: the thread topic, and the per-user inbox topic subscribed as the account's own
+ * inbox and as the other party's inbox.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -79,7 +80,9 @@ class MessageRequestGateMatrixIT {
         SEND,
         MARK_READ,
         UNREAD_COUNT,
-        SUBSCRIBE_THREAD
+        SUBSCRIBE_THREAD,
+        SUBSCRIBE_OWN_INBOX,
+        SUBSCRIBE_OTHER_INBOX
     }
 
     private static final Map<String, Scenario> SCENARIOS = new HashMap<>();
@@ -172,7 +175,20 @@ class MessageRequestGateMatrixIT {
                 cell(Actor.RECIPIENT_OF_HIDDEN_PENDING, Operation.SUBSCRIBE_THREAD, "allowed"),
                 cell(Actor.RECIPIENT_OF_DECLINED, Operation.SUBSCRIBE_THREAD, "rejected"),
                 cell(Actor.REQUESTER_OF_DECLINED, Operation.SUBSCRIBE_THREAD, "allowed"),
-                cell(Actor.STRANGER, Operation.SUBSCRIBE_THREAD, "rejected"));
+                cell(Actor.STRANGER, Operation.SUBSCRIBE_THREAD, "rejected"),
+                cell(Actor.RECIPIENT_OF_PENDING, Operation.SUBSCRIBE_OWN_INBOX, "allowed"),
+                cell(Actor.RECIPIENT_OF_HIDDEN_PENDING, Operation.SUBSCRIBE_OWN_INBOX, "allowed"),
+                cell(Actor.RECIPIENT_OF_DECLINED, Operation.SUBSCRIBE_OWN_INBOX, "allowed"),
+                cell(Actor.REQUESTER_OF_DECLINED, Operation.SUBSCRIBE_OWN_INBOX, "allowed"),
+                cell(Actor.STRANGER, Operation.SUBSCRIBE_OWN_INBOX, "allowed"),
+                cell(Actor.RECIPIENT_OF_PENDING, Operation.SUBSCRIBE_OTHER_INBOX, "rejected"),
+                cell(
+                        Actor.RECIPIENT_OF_HIDDEN_PENDING,
+                        Operation.SUBSCRIBE_OTHER_INBOX,
+                        "rejected"),
+                cell(Actor.RECIPIENT_OF_DECLINED, Operation.SUBSCRIBE_OTHER_INBOX, "rejected"),
+                cell(Actor.REQUESTER_OF_DECLINED, Operation.SUBSCRIBE_OTHER_INBOX, "rejected"),
+                cell(Actor.STRANGER, Operation.SUBSCRIBE_OTHER_INBOX, "rejected"));
     }
 
     private static Arguments cell(Actor actor, Operation operation, String expected) {
@@ -185,10 +201,11 @@ class MessageRequestGateMatrixIT {
         Scenario scenario = scenarioFor(actor, operation);
         TestUser caller = callerFor(actor, scenario);
 
-        assertThat(observe(operation, caller, scenario.conversationId())).isEqualTo(expected);
+        assertThat(observe(operation, caller, scenario)).isEqualTo(expected);
     }
 
-    private String observe(Operation operation, TestUser caller, UUID conversationId) {
+    private String observe(Operation operation, TestUser caller, Scenario scenario) {
+        UUID conversationId = scenario.conversationId();
         String base = "/api/v1/conversations/" + conversationId;
         return switch (operation) {
             case LIST_FOLDERS -> {
@@ -210,6 +227,8 @@ class MessageRequestGateMatrixIT {
                 yield "unread=" + data.get("unreadCount") + " requests=" + data.get("requestCount");
             }
             case SUBSCRIBE_THREAD -> subscribe(caller, conversationId);
+            case SUBSCRIBE_OWN_INBOX -> subscribeInbox(caller, caller.id());
+            case SUBSCRIBE_OTHER_INBOX -> subscribeInbox(caller, counterpartOf(caller, scenario));
         };
     }
 
@@ -224,6 +243,32 @@ class MessageRequestGateMatrixIT {
                 new MessageWebSocketAuthInterceptor(participantRepository, userRepository);
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
         accessor.setDestination("/topic/conversations." + conversationId + ".messages");
+        Map<String, Object> attributes = new HashMap<>();
+        attributes.put(
+                JwtHandshakeInterceptor.PRINCIPAL_ATTRIBUTE,
+                new UserPrincipal(caller.id(), null, "user", "ACTIVE"));
+        accessor.setSessionAttributes(attributes);
+        Message<?> frame = MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
+        try {
+            interceptor.preSend(frame, null);
+            return "allowed";
+        } catch (MessageDeliveryException ex) {
+            return "rejected";
+        }
+    }
+
+    // The other party's inbox is the one an actor has a reason to want: the requester's for a
+    // recipient, the recipient's for the requester and for an outsider.
+    private static UUID counterpartOf(TestUser caller, Scenario scenario) {
+        return caller.id().equals(scenario.recipient().id())
+                ? scenario.requester().id()
+                : scenario.recipient().id();
+    }
+
+    private String subscribeInbox(TestUser caller, UUID inboxOwnerId) {
+        MessageInboxAuthInterceptor interceptor = new MessageInboxAuthInterceptor(userRepository);
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+        accessor.setDestination("/topic/inbox." + inboxOwnerId);
         Map<String, Object> attributes = new HashMap<>();
         attributes.put(
                 JwtHandshakeInterceptor.PRINCIPAL_ATTRIBUTE,

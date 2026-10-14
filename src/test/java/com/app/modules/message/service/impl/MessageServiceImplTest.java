@@ -75,6 +75,7 @@ class MessageServiceImplTest {
     @Mock private OutboxService outboxService;
     @Mock private ObjectMapper objectMapper;
     @Mock private MessageReactionRepository reactionRepository;
+    @Mock private MessageInboxAudience inboxAudience;
 
     private MessageServiceImpl service;
 
@@ -93,7 +94,8 @@ class MessageServiceImplTest {
                         mapper,
                         outboxService,
                         objectMapper,
-                        reactionRepository);
+                        reactionRepository,
+                        inboxAudience);
         lenient()
                 .when(interactionPolicy.evaluate(any()))
                 .thenReturn(
@@ -323,6 +325,41 @@ class MessageServiceImplTest {
                         eq(actorId),
                         argThat(data -> createdAt.toString().equals(data.get("sentAt"))));
         verify(idempotencyRepository, never()).insertIfAbsent(any(), any(), any());
+    }
+
+    @Test
+    void sendMessage_success_carriesTheInboxAudienceAndFolderOnTheEvent() {
+        UUID actorId = UUID.randomUUID();
+        UUID otherId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID messageId = UUID.randomUUID();
+        stubActiveGroupParticipant(conversationId, actorId);
+        when(inboxAudience.recipients(any(), eq(actorId))).thenReturn(List.of(otherId));
+        Message saved =
+                Message.builder()
+                        .id(messageId)
+                        .conversationId(conversationId)
+                        .senderId(actorId)
+                        .messageType(MessageType.TEXT)
+                        .content("hello")
+                        .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
+                        .build();
+        when(messageRepository.saveAndFlush(any())).thenReturn(saved);
+
+        service.sendMessage(actorId, conversationId, textRequest("hello"), null);
+
+        verify(outboxService)
+                .enqueue(
+                        eq(MessageEventTypes.MESSAGE_SENT_V1),
+                        eq(MessageEventTypes.MESSAGE_SENT_V1),
+                        eq("message"),
+                        eq(messageId),
+                        eq(actorId),
+                        argThat(
+                                data ->
+                                        List.of(otherId.toString())
+                                                        .equals(data.get("inboxRecipientIds"))
+                                                && "primary".equals(data.get("folder"))));
     }
 
     @Test
