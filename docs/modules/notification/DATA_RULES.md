@@ -56,7 +56,7 @@ These tables cannot be rebuilt from any other source if lost.
 
 | Rule | Enforced By |
 |------|-------------|
-| `type` is one of the 19 values of `notification_type` | enum |
+| `type` is one of the 20 values of `notification_type` | enum |
 | `category` is one of the 7 values of `notification_category` | enum (V115) |
 | At most one open group per recipient and key | partial unique index `uq_notifications_open_group (recipient_id, aggregation_key) WHERE is_group_open AND deleted_at IS NULL` |
 | An actor appears in a row at most once | primary key of `notification_actors` |

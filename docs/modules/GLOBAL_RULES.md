@@ -75,6 +75,12 @@ Tables that use soft delete via a `deleted_at TIMESTAMPTZ` column:
 > Do not reason about soft-deleted user rows as a state the running system can produce.
 > A soft-deleted user can only be created by direct SQL, which is how the one observed during the phase 3 audit came to exist.
 
+Two further states sit beside `deleted_at` and are not owner soft deletes.
+`conversations.request_status` (V145) is `accepted`, `pending` or `declined`.
+`declined` records the recipient's decision on a message request, hides the conversation from that recipient, and reads to the sender exactly like `pending`, so it is neither a `deleted_at` nor visible to the other participant.
+`message_reactions.admin_removed_at` (V146) is the reaction's own moderation tombstone, independent of the message's `admin_removed_at`.
+A reaction is hidden from both participants while it is set, an administrative restore clears only it, and the reactor's own removal deletes the row, so a reaction has no owner soft delete.
+
 Rules:
 - All queries against soft-deleted tables must include `WHERE deleted_at IS NULL` unless explicitly retrieving deleted records.
 - Partial indexes already enforce `deleted_at IS NULL` for common access patterns; always use these indexes.
@@ -123,6 +129,9 @@ The enforcement they call for is already in place, so adding that flow will not 
 | `created_at` | Database `DEFAULT NOW()` | Do not set in application code |
 | `updated_at` | Trigger `fn_update_updated_at` | Do not set in application code for tables that have this trigger |
 | `deleted_at` | Application code | Set to `NOW()` on soft delete; `NULL` to restore |
+| `admin_removed_at` | Application code | Set when a moderator removes `messages`, `comments`, `stories` or `message_reactions` rows; `NULL` to restore |
+| `accepted_at` | Trigger `trg_follow_accepted_at` (V134) | Set when a follow becomes accepted; null while pending; do not set in application code |
+| `request_resolved_at` | Application code | Set when a message request is accepted or declined |
 
 Tables with `updated_at` triggers: `users` (`trg_users_updated_at`), `posts` (`trg_posts_updated_at`), `comments` (`trg_comments_updated_at`), `conversations` (`trg_conversations_updated_at`), `user_mutes` (`trg_user_mutes_updated_at`), `interaction_limits` (`trg_interaction_limits_updated_at`), `hidden_words` (`trg_hidden_words_updated_at`).
 
@@ -214,6 +223,8 @@ Several domain tables use PostgreSQL enum types as the column type for classific
 | `admin_actions` | `action_type` | `admin_action_type` |
 | `reports` | `report_reason` | `report_reason` |
 | `reports` | `report_type` | `report_type` |
+| `user_settings` | `message_permission` | `message_permission` (V135) |
+| `conversations` | `request_status` | `conversation_request_status` (V145) |
 
 Alongside these, the schema includes config tables (`notification_type_configs`, `moderation_action_configs`, `report_reason_configs`) that store display metadata and behavioral policy for each enum value.
 
@@ -222,6 +233,8 @@ Alongside these, the schema includes config tables (`notification_type_configs`,
 - The enum enforces that only valid, schema-defined values can be written to the column. This is enforced at the database level with zero overhead on the write path.
 - The config table stores supplementary metadata: `display_name`, `template_key`, `is_enabled`, `is_user_toggleable`, `scope`, etc. This data is read by the application layer for rendering, routing, and policy decisions.
 - The two layers are complementary. Config tables do not replace enums.
+- `message_permission` and `conversation_request_status` are constraint-only enums with no config table.
+- A new value for a config-backed enum takes two migrations, because PostgreSQL cannot use a value added in the same transaction: V141 added the interaction control values to `admin_action_type`, `report_type` and `notification_type`, and V142 inserted their `moderation_action_configs` and `notification_type_configs` rows.
 
 **Implication**: Adding a new notification type, report reason, or admin action type requires a schema migration (adding the value to the enum). This is intentional — these are domain primitives, not user-configurable data that an admin can add arbitrarily at runtime.
 
