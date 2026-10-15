@@ -72,6 +72,14 @@ import lombok.extern.slf4j.Slf4j;
  * appear at least {@value #MIN_EVENTS_PER_TYPE} times: that is the coverage {@code SeedRunner} used
  * to check against the PostgreSQL table, which no longer exists. {@code post_view} is produced by
  * the recommendation consumer draining {@code post.viewed.v1}, asynchronously after the run.
+ *
+ * <p><b>Interaction control signals</b>: the mutes, show-fewer marks, interaction limits, hidden
+ * and released comments, reactions and message request decisions the other writers seed each have a
+ * signal in {@code user_events}. The writer of the row records it in the {@link
+ * InteractionSignalLedger} with the row's own time, and this writer imports the ledger together
+ * with the drawn events, so these types are covered by the same floor without a signal ever
+ * describing something that has no row. A signal older than the table's retention is dated at the
+ * edge of the window.
  */
 @Slf4j
 @Service
@@ -95,17 +103,29 @@ public class AnalyticsSeedWriter {
     static final int MIN_EVENTS_PER_TYPE = 5;
 
     /**
-     * Event types this writer never draws. {@code post_view} is written by the recommendation
-     * consumer from {@code post.viewed.v1}. The other thirteen record an interaction control or a
-     * message request that changes real rows (a mute, a hidden comment, a reaction), so a seeded
-     * event with no row behind it would describe something that never happened; they are produced
-     * only by the domain events that make those changes.
+     * Event types this writer does not import, because another consumer writes them. {@code
+     * post_view} comes from the recommendation consumer draining {@code post.viewed.v1}. {@code
+     * post_not_interested} and its undo come from the same consumer draining the {@code
+     * post.not-interested} events {@code SeedOutboxEmitter} replays, because those two are also
+     * sent to Gorse as feedback and an import would skip that half. Their five-per-type floor is
+     * asserted on the replayed events, not here.
      */
     public static final Set<UserEventType> UNSEEDED_TYPES =
             EnumSet.of(
                     UserEventType.POST_VIEW,
                     UserEventType.POST_NOT_INTERESTED,
-                    UserEventType.POST_NOT_INTERESTED_UNDO,
+                    UserEventType.POST_NOT_INTERESTED_UNDO);
+
+    /**
+     * Event types that record an interaction control or a message request, which change real rows
+     * (a mute, a hidden comment, a reaction). A seeded event with no row behind it would describe
+     * something that never happened, so this writer never draws them at random: the writer of each
+     * row records the signal in the {@link InteractionSignalLedger} and this writer imports what
+     * the ledger holds. The floor of {@value #MIN_EVENTS_PER_TYPE} applies to them like to any
+     * drawn type.
+     */
+    static final Set<UserEventType> LEDGER_TYPES =
+            EnumSet.of(
                     UserEventType.ACCOUNT_SHOW_FEWER,
                     UserEventType.ACCOUNT_SHOW_FEWER_UNDO,
                     UserEventType.ACCOUNT_MUTE,
@@ -117,6 +137,11 @@ public class AnalyticsSeedWriter {
                     UserEventType.COMMENT_HIDDEN,
                     UserEventType.COMMENT_UNHIDE,
                     UserEventType.INTERACTION_LIMIT_CHANGE);
+
+    // user_events keeps twelve months. A signal whose row is older than that (a reaction to a
+    // message from the account's first year) is dated at the edge of the window instead of being
+    // written into a partition the table would drop at once.
+    private static final int SIGNAL_RETENTION_DAYS = 360;
 
     // Every key below is a com.app.modules.admin.enums.PlatformMetric wire key, verbatim - the
     // seed writer and the real StatsCollectionJob/AdminStatsService must agree on these or the
@@ -175,6 +200,7 @@ public class AnalyticsSeedWriter {
 
     private final JdbcTemplate jdbc;
     private final SeedOutboxBatchWriter outboxBatchWriter;
+    private final InteractionSignalLedger signalLedger;
 
     /**
      * Enqueues {@code BUCKET_DAYS * BUCKETS_PER_DAY} half-hour platform statistics buckets, and
@@ -372,7 +398,10 @@ public class AnalyticsSeedWriter {
         }
 
         List<SeedOutboxBatchWriter.UserEventImport> events =
-                generateUserEvents(timeline, random, userIds, postIds, hashtagIds, storyIds);
+                new ArrayList<>(
+                        generateUserEvents(
+                                timeline, random, userIds, postIds, hashtagIds, storyIds));
+        events.addAll(retentionBounded(signalLedger.drain(), timeline.referenceNow()));
         assertEveryProducedTypeCovered(events);
 
         int enqueued = 0;
@@ -381,6 +410,25 @@ public class AnalyticsSeedWriter {
             enqueued += outboxBatchWriter.emitUserEventImportBatch(events.subList(from, to));
         }
         return enqueued;
+    }
+
+    private List<SeedOutboxBatchWriter.UserEventImport> retentionBounded(
+            List<SeedOutboxBatchWriter.UserEventImport> signals, Instant referenceNow) {
+        Instant earliest = referenceNow.minus(Duration.ofDays(SIGNAL_RETENTION_DAYS));
+        return signals.stream()
+                .map(
+                        signal ->
+                                signal.createdAt().isBefore(earliest)
+                                        ? new SeedOutboxBatchWriter.UserEventImport(
+                                                signal.eventId(),
+                                                signal.userId(),
+                                                signal.eventType(),
+                                                signal.entityType(),
+                                                signal.entityId(),
+                                                signal.metadata(),
+                                                earliest)
+                                        : signal)
+                .toList();
     }
 
     /**

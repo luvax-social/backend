@@ -1348,74 +1348,196 @@
       "undone": true
     },
     {
-      "conversation_id": "conv_055",
-      "message_index": 4,
-      "reactor": "kade.closedacc",
+      "conversation_id": "conv_009",
+      "message_index": 1,
+      "reactor": "sophieg.design",
       "emoji": "😍",
       "undone": false
     },
     {
-      "conversation_id": "conv_058",
-      "message_index": 5,
-      "reactor": "kimberly.captures",
+      "conversation_id": "conv_016",
+      "message_index": 2,
+      "reactor": "vivian.frontend",
       "emoji": "❤️",
       "undone": false
     },
     {
-      "conversation_id": "conv_022",
-      "message_index": 6,
-      "reactor": "phillipa.lockedacc",
+      "conversation_id": "conv_020",
+      "message_index": 3,
+      "reactor": "nadia.gymlife",
       "emoji": "😂",
       "undone": false
     },
     {
       "conversation_id": "conv_021",
-      "message_index": 7,
-      "reactor": "brian.noposts",
+      "message_index": 4,
+      "reactor": "hope.quietacc",
       "emoji": "👍",
       "undone": false
     },
     {
-      "conversation_id": "conv_030",
-      "message_index": 8,
-      "reactor": "violet.new1",
+      "conversation_id": "conv_025",
+      "message_index": 5,
+      "reactor": "derekshoots",
       "emoji": "😮",
       "undone": false
     },
     {
-      "conversation_id": "conv_047",
-      "message_index": 9,
-      "reactor": "tucker.trailrunner",
+      "conversation_id": "conv_027",
+      "message_index": 6,
+      "reactor": "james.carter.dev",
       "emoji": "😢",
       "undone": false
     },
     {
-      "conversation_id": "conv_038",
-      "message_index": 10,
-      "reactor": "pending.verify4",
+      "conversation_id": "conv_028",
+      "message_index": 1,
+      "reactor": "closet.by.hana",
       "emoji": "🔥",
       "undone": false
     },
     {
-      "conversation_id": "conv_040",
-      "message_index": 11,
-      "reactor": "pending.verify2",
+      "conversation_id": "conv_031",
+      "message_index": 2,
+      "reactor": "tyler.sysadmin",
       "emoji": "🎉",
       "undone": false
     },
     {
-      "conversation_id": "conv_017",
+      "conversation_id": "conv_043",
       "message_index": 3,
-      "reactor": "felix.noposts2",
+      "reactor": "yasmin.brandmarketing",
       "emoji": "👏",
       "undone": false
     },
     {
-      "conversation_id": "conv_012",
-      "message_index": 2,
-      "reactor": "ivy.privatestudent",
+      "conversation_id": "conv_048",
+      "message_index": 5,
+      "reactor": "lily.uxui",
       "emoji": "🙏",
       "undone": false
+    }
+  ],
+  "reaction_moderation": [
+    {
+      "conversation_id": "conv_009",
+      "message_index": 1,
+      "reactor": "sophieg.design",
+      "reporter": "phil.senior4",
+      "report_reason": "hate_speech",
+      "report_status": "resolved",
+      "action": "remove_restore",
+      "admin": "admin",
+      "note": "Reviewed the reaction reported as hate speech",
+      "days_ago": 6
+    },
+    {
+      "conversation_id": "conv_016",
+      "message_index": 2,
+      "reactor": "vivian.frontend",
+      "reporter": "quinn.familyonly",
+      "report_reason": "nudity",
+      "report_status": "resolved",
+      "action": "remove_restore",
+      "admin": "rachel.admin",
+      "note": "Reviewed the reaction reported as nudity",
+      "days_ago": 7
+    },
+    {
+      "conversation_id": "conv_020",
+      "message_index": 3,
+      "reactor": "nadia.gymlife",
+      "reporter": "user_power",
+      "report_reason": "violence",
+      "report_status": "resolved",
+      "action": "remove_restore",
+      "admin": "mod1",
+      "note": "Reviewed the reaction reported as violence",
+      "days_ago": 8
+    },
+    {
+      "conversation_id": "conv_021",
+      "message_index": 4,
+      "reactor": "hope.quietacc",
+      "reporter": "brian.noposts",
+      "report_reason": "hate_speech",
+      "report_status": "resolved",
+      "action": "remove_restore",
+      "admin": "admin",
+      "note": "Reviewed the reaction reported as hate speech",
+      "days_ago": 9
+    },
+    {
+      "conversation_id": "conv_025",
+      "message_index": 5,
+      "reactor": "derekshoots",
+      "reporter": "victor.marathon",
+      "report_reason": "nudity",
+      "report_status": "resolved",
+      "action": "remove_restore",
+      "admin": "mod.laura",
+      "note": "Reviewed the reaction reported as nudity",
+      "days_ago": 10
+    },
+    {
+      "conversation_id": "conv_027",
+      "message_index": 6,
+      "reactor": "james.carter.dev",
+      "reporter": "user_private",
+      "report_reason": "violence",
+      "report_status": "resolved",
+      "action": "remove",
+      "admin": "rachel.admin",
+      "note": "Reviewed the reaction reported as violence",
+      "days_ago": 11
+    },
+    {
+      "conversation_id": "conv_028",
+      "message_index": 1,
+      "reactor": "closet.by.hana",
+      "reporter": "corner.sandwich3",
+      "report_reason": "nudity",
+      "report_status": "dismissed",
+      "action": "dismiss",
+      "admin": "admin",
+      "note": "Reviewed the reaction reported as nudity",
+      "days_ago": 12
+    },
+    {
+      "conversation_id": "conv_031",
+      "message_index": 2,
+      "reactor": "tyler.sysadmin",
+      "reporter": "chloe.productdesign",
+      "report_reason": "violence",
+      "report_status": "dismissed",
+      "action": "dismiss",
+      "admin": "mod1",
+      "note": "Reviewed the reaction reported as violence",
+      "days_ago": 13
+    },
+    {
+      "conversation_id": "conv_043",
+      "message_index": 3,
+      "reactor": "yasmin.brandmarketing",
+      "reporter": "dean.lensman",
+      "report_reason": "hate_speech",
+      "report_status": "pending",
+      "action": "none",
+      "admin": null,
+      "note": "Reviewed the reaction reported as hate speech",
+      "days_ago": 14
+    },
+    {
+      "conversation_id": "conv_048",
+      "message_index": 5,
+      "reactor": "lily.uxui",
+      "reporter": "yasmin.brandmarketing",
+      "report_reason": "violence",
+      "report_status": "reviewing",
+      "action": "none",
+      "admin": "mod.laura",
+      "note": "Reviewed the reaction reported as violence",
+      "days_ago": 15
     }
   ]
 }

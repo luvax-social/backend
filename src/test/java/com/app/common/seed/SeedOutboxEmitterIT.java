@@ -162,6 +162,17 @@ class SeedOutboxEmitterIT {
         // positive_feedback_types with an empty bucket behind it.
         assertThat(counts.shares()).isPositive();
 
+        // Every not-interested mark, undone or not, is replayed so the recommender receives it, and
+        // an undone one is followed by its removal.
+        long marks = seeded.content().interactionControl().notInterested().size();
+        long undone =
+                seeded.content().interactionControl().notInterested().stream()
+                        .filter(n -> n.undone())
+                        .count();
+        assertThat(marks).isGreaterThanOrEqualTo(10);
+        assertThat(undone).isGreaterThanOrEqualTo(5);
+        assertThat(counts.notInterested()).isEqualTo((int) (marks + undone));
+
         Map<String, Integer> countByType = countOutboxEventsByType();
         assertThat(countByType.get("post.index.upsert.v1")).isEqualTo(allPostCount);
         assertThat(countByType.get("hashtag.index.upsert.v1")).isEqualTo(hashtagCount);
@@ -171,6 +182,33 @@ class SeedOutboxEmitterIT {
         assertThat(countByType.get("post.viewed.v1")).isEqualTo(counts.views());
         assertThat(countByType.get("post.shared.v1")).isEqualTo(counts.shares());
         assertThat(countByType.get("admin.action.recorded.v1")).isEqualTo(adminActionCount);
+        assertThat(countByType.get("post.not-interested.v1")).isEqualTo((int) marks);
+        assertThat(countByType.get("post.not-interested-undone.v1")).isEqualTo((int) undone);
+        // A comment the owner's rules hid is announced as hidden, so no consumer notifies about it.
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
+                                        + " 'comment.created.v1' AND payload->'data'->>'visibility' ="
+                                        + " 'hidden'",
+                                Integer.class))
+                .isEqualTo(
+                        jdbcTemplate.queryForObject(
+                                "SELECT COUNT(*) FROM comments WHERE moderation_status = 'hidden'"
+                                        + " AND deleted_at IS NULL AND admin_removed_at IS NULL",
+                                Integer.class))
+                .isPositive();
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
+                                        + " 'comment.created.v1' AND payload->'data'->>'visibility' ="
+                                        + " 'visible'",
+                                Integer.class))
+                .isEqualTo(
+                        commentCount
+                                - jdbcTemplate.queryForObject(
+                                        "SELECT COUNT(*) FROM comments WHERE moderation_status = 'hidden'"
+                                                + " AND deleted_at IS NULL AND admin_removed_at IS NULL",
+                                        Integer.class));
 
         Integer total =
                 jdbcTemplate.queryForObject("SELECT COUNT(*) FROM outbox_events", Integer.class);
@@ -183,6 +221,7 @@ class SeedOutboxEmitterIT {
                                 + commentCount
                                 + counts.views()
                                 + counts.shares()
+                                + counts.notInterested()
                                 + adminActionCount);
 
         // Every row must still be PENDING: the outbox publisher is disabled in this test, so

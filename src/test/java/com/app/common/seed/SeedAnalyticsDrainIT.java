@@ -65,9 +65,10 @@ import com.app.testsupport.TestContainerImages;
  *
  * <p>The full seed enqueues about 59,000 analytics events, which the publisher's default rate needs
  * ten minutes to drain, far too long for a test. So the events the seed really produced are kept in
- * full for the audit log and cut down to the newest 48 statistics buckets and the first 500
- * behavioural events, and the assertions compare ClickHouse with what was kept. The full volume is
- * drained by the local rehearsal instead.
+ * full for the audit log and cut down to the newest 48 statistics buckets and a slice of the
+ * behavioural events (the newest 500 plus the interaction control signals of the last two months),
+ * and the assertions compare ClickHouse with what was kept. The full volume is drained by the local
+ * rehearsal instead.
  */
 @SpringBootTest(
         properties = {
@@ -99,7 +100,15 @@ class SeedAnalyticsDrainIT {
     private static final String STATS_EVENT = "admin.platform-stats.collected.v1";
     private static final String IMPORT_EVENT = "recommendation.user-event.imported.v1";
     private static final int KEPT_BUCKETS = 48;
-    private static final int KEPT_IMPORTS = 500;
+    private static final int KEPT_NEWEST_IMPORTS = 500;
+    // The types the interaction control rows produce. Their signals are kept when they are recent
+    // enough to survive the event table's twelve month retention whatever the date of the run.
+    private static final String SIGNAL_TYPES =
+            "('account_mute', 'account_unmute', 'account_show_fewer', 'account_show_fewer_undo',"
+                    + " 'message_reaction', 'message_reaction_remove', 'message_request_accept',"
+                    + " 'message_request_delete', 'comment_hidden', 'comment_unhide',"
+                    + " 'interaction_limit_change')";
+    private static final Instant SEED_CLOCK = Instant.parse("2026-08-25T00:00:00Z");
 
     static final ClickHouseContainer clickhouse = ClickHouseTestSupport.startProvisioned();
 
@@ -212,7 +221,7 @@ class SeedAnalyticsDrainIT {
     void seededAnalytics_drainThroughTheConsumersAndAgreeWithPostgres() throws Exception {
         assertThat(gate.attempt()).isTrue();
         seedEverything();
-        keepARepresentativeSlice();
+        int keptImports = keepARepresentativeSlice();
 
         List<UUID> expected =
                 jdbcTemplate.queryForList(
@@ -242,8 +251,25 @@ class SeedAnalyticsDrainIT {
         assertThat(clickHouseCount("SELECT count() FROM admin_actions FINAL")).isEqualTo(auditRows);
         assertThat(clickHouseCount("SELECT uniqExact(bucket_start) FROM platform_stats"))
                 .isEqualTo(KEPT_BUCKETS);
-        assertThat(clickHouseCount("SELECT count() FROM user_events FINAL"))
-                .isEqualTo(KEPT_IMPORTS);
+        assertThat(clickHouseCount("SELECT count() FROM user_events FINAL")).isEqualTo(keptImports);
+        // The signals of the seeded interaction control rows are accepted by the event table's
+        // enum and keep the metadata their mapping records.
+        assertThat(
+                        clickHouseCount(
+                                "SELECT count() FROM user_events FINAL WHERE event_type IN "
+                                        + SIGNAL_TYPES))
+                .isPositive();
+        assertThat(
+                        clickHouseCount(
+                                "SELECT count() FROM user_events FINAL WHERE event_type ="
+                                        + " 'account_mute' AND metadata NOT LIKE '{\"posts\":%'"))
+                .isZero();
+        assertThat(
+                        clickHouseCount(
+                                "SELECT count() FROM user_events FINAL WHERE event_type ="
+                                        + " 'message_reaction' AND metadata NOT LIKE"
+                                        + " '{\"emoji\":%'"))
+                .isZero();
         // Imported events must never be replayed into the recommender.
         assertThat(
                         clickHouseCount(
@@ -288,7 +314,7 @@ class SeedAnalyticsDrainIT {
 
     // Everything but the analytics events goes, because their consumers are not part of this test,
     // and the statistics buckets and behavioural events are cut down as the class comment says.
-    private void keepARepresentativeSlice() {
+    private int keepARepresentativeSlice() {
         jdbcTemplate.update(
                 "DELETE FROM outbox_events WHERE event_type NOT IN (?, ?, ?)",
                 ADMIN_ACTION_EVENT,
@@ -301,25 +327,34 @@ class SeedAnalyticsDrainIT {
                 STATS_EVENT,
                 STATS_EVENT,
                 KEPT_BUCKETS);
+        // The newest events and the interaction control signals of the last two months are inside
+        // the event table's retention window whatever the date of the run.
         jdbcTemplate.update(
                 "DELETE FROM outbox_events WHERE event_type = ? AND event_id NOT IN"
-                        + " (SELECT event_id FROM outbox_events WHERE event_type = ?"
-                        + " ORDER BY payload->'data'->>'createdAt', event_id LIMIT ?)",
+                        + " (SELECT event_id FROM (SELECT event_id FROM outbox_events WHERE"
+                        + " event_type = ? ORDER BY payload->'data'->>'createdAt' DESC, event_id"
+                        + " LIMIT ?) newest UNION SELECT event_id FROM outbox_events WHERE"
+                        + " event_type = ? AND payload->'data'->>'eventType' IN "
+                        + SIGNAL_TYPES
+                        + " AND (payload->'data'->>'createdAt')::timestamptz >= ?)",
                 IMPORT_EVENT,
                 IMPORT_EVENT,
-                KEPT_IMPORTS);
+                KEPT_NEWEST_IMPORTS,
+                IMPORT_EVENT,
+                java.sql.Timestamp.from(SEED_CLOCK.minus(java.time.Duration.ofDays(60))));
         assertThat(
                         count(
                                 "SELECT COUNT(*) FROM outbox_events WHERE event_type = '"
                                         + STATS_EVENT
                                         + "'"))
                 .isEqualTo(KEPT_BUCKETS);
-        assertThat(
-                        count(
-                                "SELECT COUNT(*) FROM outbox_events WHERE event_type = '"
-                                        + IMPORT_EVENT
-                                        + "'"))
-                .isEqualTo(KEPT_IMPORTS);
+        int keptImports =
+                count(
+                        "SELECT COUNT(*) FROM outbox_events WHERE event_type = '"
+                                + IMPORT_EVENT
+                                + "'");
+        assertThat(keptImports).isGreaterThanOrEqualTo(KEPT_NEWEST_IMPORTS);
+        return keptImports;
     }
 
     private int count(String sql) {

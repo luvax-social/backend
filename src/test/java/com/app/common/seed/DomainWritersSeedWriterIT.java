@@ -152,6 +152,121 @@ class DomainWritersSeedWriterIT {
         assertHiddenCommentsMatchTheOwnersWordLists();
         assertMessageRequestsCoverEveryStatusAndStayConsistent();
         assertRepliesAndReactions();
+        assertReactionAndHiddenWordModeration();
+    }
+
+    // Each new admin action type reaches five rows, a reaction report is closed by the action that
+    // closed it, and the notification a removal sends names the reaction's owner.
+    private void assertReactionAndHiddenWordModeration() {
+        for (String actionType :
+                new String[] {
+                    "create_hidden_word",
+                    "edit_hidden_word",
+                    "delete_hidden_word",
+                    "remove_message_reaction",
+                    "restore_message_reaction"
+                }) {
+            assertThat(
+                            count(
+                                    "SELECT COUNT(*) FROM admin_actions WHERE action_type = ?::admin_action_type",
+                                    actionType))
+                    .as("admin actions of type %s", actionType)
+                    .isGreaterThanOrEqualTo(5);
+        }
+        assertThat(count("SELECT COUNT(*) FROM reports WHERE report_type = 'message_reaction'"))
+                .isGreaterThanOrEqualTo(5);
+        for (String status : new String[] {"pending", "reviewing", "resolved", "dismissed"}) {
+            assertThat(
+                            count(
+                                    "SELECT COUNT(*) FROM reports WHERE report_type ="
+                                            + " 'message_reaction' AND status ="
+                                            + " ?::report_status",
+                                    status))
+                    .as("message reaction reports with status %s", status)
+                    .isPositive();
+        }
+        // A reporter is the other participant, never the reactor.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM reports r JOIN message_reactions mr ON mr.id ="
+                                        + " r.entity_id JOIN messages m ON m.id = mr.message_id"
+                                        + " WHERE r.report_type = 'message_reaction' AND"
+                                        + " (r.reporter_id = mr.user_id OR NOT EXISTS (SELECT 1 FROM"
+                                        + " conversation_participants p WHERE p.conversation_id ="
+                                        + " m.conversation_id AND p.user_id = r.reporter_id))"))
+                .isZero();
+        // A removal resolves the report it was taken for, and no report is resolved before the
+        // action that resolved it.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a JOIN reports r ON r.id ="
+                                        + " a.report_id WHERE a.action_type ="
+                                        + " 'remove_message_reaction' AND (r.status <> 'resolved' OR"
+                                        + " r.reviewed_at <> a.created_at OR a.target_entity_id <>"
+                                        + " r.entity_id)"))
+                .isZero();
+        // The reaction a moderator left removed carries the tombstone; the ones restored do not.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM message_reactions WHERE admin_removed_at IS NOT NULL"))
+                .isEqualTo(1);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a WHERE a.action_type ="
+                                        + " 'restore_message_reaction' AND EXISTS (SELECT 1 FROM"
+                                        + " message_reactions mr WHERE mr.id = a.target_entity_id AND"
+                                        + " mr.admin_removed_at IS NOT NULL)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions r JOIN admin_actions d ON"
+                                        + " d.target_entity_id = r.target_entity_id AND d.action_type"
+                                        + " = 'remove_message_reaction' WHERE r.action_type ="
+                                        + " 'restore_message_reaction' AND r.created_at <="
+                                        + " d.created_at"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications n JOIN admin_actions a ON a.id ="
+                                        + " n.admin_action_id JOIN message_reactions mr ON mr.id ="
+                                        + " a.target_entity_id WHERE n.type = 'reaction_removed' AND"
+                                        + " n.recipient_id = mr.user_id AND n.category = 'system'"))
+                .isEqualTo(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions WHERE action_type ="
+                                        + " 'remove_message_reaction'"))
+                .isGreaterThanOrEqualTo(5);
+        // Hidden Words audit history matches the lists: an edit and a create name a stored entry,
+        // a delete names one that is gone, and every audit row records the phrase.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a WHERE a.action_type IN"
+                                        + " ('create_hidden_word', 'edit_hidden_word',"
+                                        + " 'delete_hidden_word') AND (a.target_entity_type <>"
+                                        + " 'hidden_word' OR a.metadata->>'phrase' IS NULL OR"
+                                        + " a.report_id IS NOT NULL OR a.target_user_id IS NOT NULL)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a WHERE a.action_type ="
+                                        + " 'delete_hidden_word' AND EXISTS (SELECT 1 FROM"
+                                        + " hidden_words h WHERE h.id = a.target_entity_id)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a WHERE a.action_type ="
+                                        + " 'edit_hidden_word' AND NOT EXISTS (SELECT 1 FROM"
+                                        + " hidden_words h WHERE h.id = a.target_entity_id AND"
+                                        + " h.phrase = a.metadata->>'phrase')"))
+                .isZero();
+        assertThat(count("SELECT COUNT(*) FROM hidden_words"))
+                .isEqualTo(
+                        count(
+                                        "SELECT COUNT(*) FROM admin_actions WHERE action_type ="
+                                                + " 'create_hidden_word'")
+                                - count(
+                                        "SELECT COUNT(*) FROM admin_actions WHERE action_type ="
+                                                + " 'delete_hidden_word'"));
     }
 
     // Every request status reaches five rows, and a request sits between two accounts with no
@@ -631,20 +746,21 @@ class DomainWritersSeedWriterIT {
                         "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
                                 + " 'recommendation.user-event.imported.v1'",
                         Integer.class);
-        assertThat(enqueued).isEqualTo(10_000);
+        // 10,000 random behavioural events plus the signals of the seeded interaction control rows.
+        assertThat(enqueued).isGreaterThan(10_000);
         Integer distinct =
                 jdbcTemplate.queryForObject(
                         "SELECT COUNT(DISTINCT event_id) FROM outbox_events WHERE event_type ="
                                 + " 'recommendation.user-event.imported.v1'",
                         Integer.class);
-        assertThat(distinct).isEqualTo(10_000);
+        assertThat(distinct).isEqualTo(enqueued);
         Integer outsideRetention =
                 jdbcTemplate.queryForObject(
                         "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
                                 + " 'recommendation.user-event.imported.v1'"
                                 + " AND (payload->'data'->>'createdAt')::timestamptz < ?",
                         Integer.class,
-                        java.sql.Timestamp.from(REFERENCE_NOW.minus(Duration.ofDays(91))));
+                        java.sql.Timestamp.from(REFERENCE_NOW.minus(Duration.ofDays(361))));
         assertThat(outsideRetention).isZero();
     }
 

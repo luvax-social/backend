@@ -16,6 +16,7 @@ import com.app.common.seed.model.MessageRequestSeed;
 import com.app.common.seed.model.MuteSeed;
 import com.app.common.seed.model.NotInterestedSeed;
 import com.app.common.seed.model.PostSeed;
+import com.app.common.seed.model.ReactionReportSeed;
 import com.app.common.seed.model.ReactionSeed;
 import com.app.common.seed.model.ReplyParentSeed;
 import com.app.common.seed.model.ShowFewerSeed;
@@ -37,6 +38,10 @@ final class InteractionControlValidator {
             Set.of("hidden_words", "limited_interaction", "hidden_parent");
     private static final Set<String> REQUEST_STATUSES =
             Set.of("pending", "hidden", "declined", "accepted");
+    private static final Set<String> REACTION_REPORT_REASONS =
+            Set.of("nudity", "violence", "hate_speech");
+    private static final Set<String> REPORT_ACTIONS =
+            Set.of("remove", "remove_restore", "dismiss", "none");
     private static final int MAX_PHRASE_LENGTH = 64;
     private static final int MAX_PHRASE_TOKENS = 6;
     // The audit history of an edited or deleted platform entry sits after its creation, so the
@@ -82,6 +87,7 @@ final class InteractionControlValidator {
         validator.validateMessageRequests(content.messageRequests());
         validator.validateReplyParents(content.replyParents());
         validator.validateReactions(content.reactions());
+        validator.validateReactionModeration(content.reactionModeration(), content.reactions());
     }
 
     private void validateMutes(List<MuteSeed> mutes) {
@@ -345,6 +351,68 @@ final class InteractionControlValidator {
                             + "#"
                             + reaction.reactor(),
                     where);
+        }
+    }
+
+    // A report names an existing, visible reaction. The reporter is the other participant, the
+    // status follows from what moderation did, and an account that acted is staff.
+    private void validateReactionModeration(
+            List<ReactionReportSeed> reports, List<ReactionSeed> reactions) {
+        Set<String> liveReactions = new HashSet<>();
+        for (ReactionSeed reaction : reactions) {
+            if (!reaction.undone()) {
+                liveReactions.add(
+                        reaction.conversationId()
+                                + "#"
+                                + reaction.messageIndex()
+                                + "#"
+                                + reaction.reactor());
+            }
+        }
+        Set<String> reported = new HashSet<>();
+        for (ReactionReportSeed report : reports) {
+            String key =
+                    report.conversationId() + "#" + report.messageIndex() + "#" + report.reactor();
+            String where = "reaction_moderation entry '" + key + "'";
+            if (!liveReactions.contains(key)) {
+                throw fail(where + " does not name a reaction in reactions");
+            }
+            requireNewKey(reported, key, where);
+            ConversationSeed conversation = requireConversation(report.conversationId(), where);
+            if (report.reporter().equals(report.reactor())
+                    || !conversation.participants().contains(report.reporter())) {
+                throw fail(
+                        where + " must be reported by the other participant of the conversation");
+            }
+            if (!REACTION_REPORT_REASONS.contains(report.reportReason())) {
+                throw fail(where + " has report_reason '" + report.reportReason() + "'");
+            }
+            if (!REPORT_ACTIONS.contains(report.action())) {
+                throw fail(where + " has unknown action '" + report.action() + "'");
+            }
+            String expectedStatus =
+                    switch (report.action()) {
+                        case "remove", "remove_restore" -> "resolved";
+                        case "dismiss" -> "dismissed";
+                        default -> report.admin() == null ? "pending" : "reviewing";
+                    };
+            if (!expectedStatus.equals(report.reportStatus())) {
+                throw fail(
+                        where
+                                + " has report_status '"
+                                + report.reportStatus()
+                                + "', expected "
+                                + expectedStatus);
+            }
+            if (report.admin() != null) {
+                UserSeed admin = userByUsername.get(report.admin());
+                if (admin == null || "user".equals(admin.role())) {
+                    throw fail(where + " names '" + report.admin() + "', who is not staff");
+                }
+            }
+            if (report.daysAgo() < 1) {
+                throw fail(where + " must be at least a day old");
+            }
         }
     }
 

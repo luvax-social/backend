@@ -22,7 +22,9 @@ import com.app.common.seed.model.MessageRequestSeed;
 import com.app.common.seed.model.MessageSeed;
 import com.app.common.seed.model.ReactionSeed;
 import com.app.common.seed.model.ReplyParentSeed;
+import com.app.common.seed.outbox.SeedOutboxBatchWriter.UserEventImport;
 import com.app.common.seed.time.SeedTimeline;
+import com.app.modules.recommendation.enums.UserEventType;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -110,6 +112,7 @@ public class MessageSeedWriter {
     private static final int REACTION_DELAY_SPREAD_MINUTES = 55;
 
     private final JdbcTemplate jdbc;
+    private final InteractionSignalLedger signalLedger;
 
     /**
      * Inserts every conversation from {@code conversations.json} with its participants and
@@ -138,6 +141,7 @@ public class MessageSeedWriter {
         List<Object[]> messageRows = new ArrayList<>();
         List<PendingConversation> pending = new ArrayList<>();
         List<Object[]> reactionRows = new ArrayList<>();
+        int reactionCount = 0;
         Map<String, Map<Integer, Integer>> replyParents = replyParentsByConversation(content);
         Map<String, List<ReactionSeed>> reactions = reactionsByConversation(content);
 
@@ -284,23 +288,56 @@ public class MessageSeedWriter {
             }
 
             for (ReactionSeed reaction : reactions.getOrDefault(conversation.id(), List.of())) {
+                signalLedger.rememberMessage(
+                        conversation.id(),
+                        reaction.messageIndex(),
+                        messageIds.get(reaction.messageIndex()));
+                UUID reactorId =
+                        requireUser(usersByUsername, reaction.reactor(), conversation.id());
+                UUID messageId = messageIds.get(reaction.messageIndex());
                 Instant reactedAt =
                         messageTimes
                                 .get(reaction.messageIndex())
                                 .plus(
                                         Duration.ofMinutes(
                                                 REACTION_MIN_DELAY_MINUTES
-                                                        + (reactionRows.size() * 7L)
+                                                        + (reactionCount++ * 7L)
                                                                 % REACTION_DELAY_SPREAD_MINUTES));
+                if (reactedAt.isAfter(timeline.referenceNow())) {
+                    reactedAt = timeline.referenceNow();
+                }
+                String key =
+                        conversation.id()
+                                + "#"
+                                + reaction.messageIndex()
+                                + "#"
+                                + reaction.reactor();
+                signalLedger.record(
+                        new UserEventImport(
+                                InteractionSignalLedger.signalId("reaction", key),
+                                reactorId,
+                                UserEventType.MESSAGE_REACTION,
+                                "message",
+                                messageId,
+                                "{\"emoji\":\"" + reaction.emoji() + "\"}",
+                                reactedAt));
+                if (reaction.undone()) {
+                    Instant removedAt = reactedAt.plus(Duration.ofHours(3));
+                    signalLedger.record(
+                            new UserEventImport(
+                                    InteractionSignalLedger.signalId("reaction_remove", key),
+                                    reactorId,
+                                    UserEventType.MESSAGE_REACTION_REMOVE,
+                                    "message",
+                                    messageId,
+                                    removedAt.isAfter(timeline.referenceNow())
+                                            ? timeline.referenceNow()
+                                            : removedAt));
+                    continue;
+                }
                 reactionRows.add(
                         new Object[] {
-                            messageIds.get(reaction.messageIndex()),
-                            requireUser(usersByUsername, reaction.reactor(), conversation.id()),
-                            reaction.emoji(),
-                            Timestamp.from(
-                                    reactedAt.isAfter(timeline.referenceNow())
-                                            ? timeline.referenceNow()
-                                            : reactedAt)
+                            messageId, reactorId, reaction.emoji(), Timestamp.from(reactedAt)
                         });
             }
 
@@ -342,15 +379,12 @@ public class MessageSeedWriter {
         return byConversation;
     }
 
-    // An undone reaction has no row, so it is left out here and only its signals are recorded.
     private Map<String, List<ReactionSeed>> reactionsByConversation(SeedContent content) {
         Map<String, List<ReactionSeed>> byConversation = new HashMap<>();
         for (ReactionSeed reaction : content.interactionControl().reactions()) {
-            if (!reaction.undone()) {
-                byConversation
-                        .computeIfAbsent(reaction.conversationId(), key -> new ArrayList<>())
-                        .add(reaction);
-            }
+            byConversation
+                    .computeIfAbsent(reaction.conversationId(), key -> new ArrayList<>())
+                    .add(reaction);
         }
         return byConversation;
     }
@@ -461,6 +495,19 @@ public class MessageSeedWriter {
                             Timestamp.from(repliedAt),
                             requestMessageId
                         });
+            }
+            if (accepted || declined) {
+                signalLedger.record(
+                        new UserEventImport(
+                                InteractionSignalLedger.signalId("message_request", request.id()),
+                                recipientId,
+                                accepted
+                                        ? UserEventType.MESSAGE_REQUEST_ACCEPT
+                                        : UserEventType.MESSAGE_REQUEST_DELETE,
+                                "conversation",
+                                conversationId,
+                                accepted ? null : "{\"blocked\":false}",
+                                resolvedAt));
             }
             index++;
         }

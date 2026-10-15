@@ -5,7 +5,8 @@ import java.util.List;
 /**
  * Parsed content of {@code safety/interaction_control.json}: the mutes, show-fewer and
  * not-interested preferences, interaction limits, Hidden Words entries and filtered comments, and
- * the message requests, reply quotes and reactions the seed writes.
+ * the message requests, reply quotes and reactions the seed writes, and the reports and moderation
+ * decisions about some of those reactions.
  */
 public record InteractionControlSeed(
         List<MuteSeed> mutes,
@@ -16,7 +17,8 @@ public record InteractionControlSeed(
         List<HiddenCommentSeed> hiddenComments,
         List<MessageRequestSeed> messageRequests,
         List<ReplyParentSeed> replyParents,
-        List<ReactionSeed> reactions) {
+        List<ReactionSeed> reactions,
+        List<ReactionReportSeed> reactionModeration) {
 
     public InteractionControlSeed {
         mutes = mutes == null ? List.of() : List.copyOf(mutes);
@@ -28,5 +30,7 @@ public record InteractionControlSeed(
         messageRequests = messageRequests == null ? List.of() : List.copyOf(messageRequests);
         replyParents = replyParents == null ? List.of() : List.copyOf(replyParents);
         reactions = reactions == null ? List.of() : List.copyOf(reactions);
+        reactionModeration =
+                reactionModeration == null ? List.of() : List.copyOf(reactionModeration);
     }
 }

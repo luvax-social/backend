@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -25,7 +26,9 @@ import com.app.common.seed.model.CommentPoolEntry;
 import com.app.common.seed.model.HiddenCommentSeed;
 import com.app.common.seed.model.PostSeed;
 import com.app.common.seed.model.UserSeed;
+import com.app.common.seed.outbox.SeedOutboxBatchWriter.UserEventImport;
 import com.app.common.seed.time.SeedTimeline;
+import com.app.modules.recommendation.enums.UserEventType;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -104,6 +107,7 @@ public class CommentSeedWriter {
                     + " ?, ?)";
 
     private final JdbcTemplate jdbc;
+    private final InteractionSignalLedger signalLedger;
 
     /**
      * Inserts every scripted reply chain and a per-post batch of pooled standalone comments (and
@@ -424,6 +428,8 @@ public class CommentSeedWriter {
             writtenBySeedId.put(seed.id(), row);
             depthBySeedId.put(seed.id(), depth);
             written.add(row);
+            recordSignals(
+                    seed, id, authorId, usersByUsername.get(seed.postOwner()), createdAt, timeline);
             rows.add(
                     new Object[] {
                         id,
@@ -442,6 +448,41 @@ public class CommentSeedWriter {
                 INSERT_FILTERED_COMMENT_SQL, rows, rows.size(), this::bindFilteredCommentRow);
         log.info("[seed] comments: {} filtered comments written", rows.size());
         return written;
+    }
+
+    // A comment the rules hid was announced as hidden when it was written, and one the owner then
+    // released was announced again when the owner unhid it, a day later. A released comment is
+    // stored approved, so the ledger also remembers it for the notification writer.
+    private void recordSignals(
+            HiddenCommentSeed seed,
+            UUID commentId,
+            UUID authorId,
+            UUID postOwnerId,
+            Instant createdAt,
+            SeedTimeline timeline) {
+        signalLedger.record(
+                new UserEventImport(
+                        InteractionSignalLedger.signalId("comment_hidden", seed.id()),
+                        authorId,
+                        UserEventType.COMMENT_HIDDEN,
+                        "comment",
+                        commentId,
+                        "{\"reason\":\"" + seed.reason() + "\"}",
+                        createdAt.plusSeconds(1)));
+        if (seed.unhidden()) {
+            Instant unhiddenAt = createdAt.plus(Duration.ofDays(1));
+            signalLedger.record(
+                    new UserEventImport(
+                            InteractionSignalLedger.signalId("comment_unhide", seed.id()),
+                            postOwnerId,
+                            UserEventType.COMMENT_UNHIDE,
+                            "comment",
+                            commentId,
+                            unhiddenAt.isAfter(timeline.referenceNow())
+                                    ? timeline.referenceNow()
+                                    : unhiddenAt));
+            signalLedger.markUnhidden(commentId);
+        }
     }
 
     private void bindFilteredCommentRow(PreparedStatement ps, Object[] row) throws SQLException {

@@ -115,7 +115,9 @@ What happens on that run:
    if any value falls short.
    Behavioural event types are asserted on the generated set before it is enqueued, because the
    PostgreSQL `user_events` table that used to be counted no longer exists.
-   Every event type except the ones in `AnalyticsSeedWriter.UNSEEDED_TYPES` must appear at least 5 times: `post_view`, which arrives from `post.viewed.v1`, and the interaction control and message request types, which only the domain events that change real rows produce.
+   Every event type except the ones in `AnalyticsSeedWriter.UNSEEDED_TYPES` must appear at least 5 times.
+   `post_view` arrives from `post.viewed.v1`, and `post_not_interested` with its undo arrive from the `post.not-interested` events `SeedOutboxEmitter` replays, because the feedback consumer sends those to Gorse as well.
+   The other eleven interaction control types (mutes, show fewer, reactions, request decisions, hidden and released comments, limit changes) are imported from signals each writer records for the rows it wrote, so no signal describes something that has no row behind it.
 
 ## Analytics after a seed run
 
@@ -128,7 +130,7 @@ Wait until `outbox_events` has no `PENDING` row and the four analytics queues ar
 SELECT count() FROM admin_actions FINAL;
 -- 4,320, plus any bucket the statistics job collected since
 SELECT uniqExact(bucket_start) FROM platform_stats;
--- at least 5 of every seeded event type; post_view arrives from post.viewed.v1 and the interaction control and message request types are never seeded
+-- at least 5 of every seeded event type; post_view, post_not_interested and post_not_interested_undo arrive from the recommendation consumer draining post.viewed.v1 and the replayed post.not-interested events
 SELECT event_type, count() FROM user_events FINAL GROUP BY event_type;
 ```
 
@@ -280,6 +282,12 @@ Entries marked undone write no row, because undoing a preference deletes it; the
 | Reply quotes | `conv_024` (`yuna.study`, `dean.lensman`), `conv_025` (`derekshoots`, `victor.marathon`), `conv_028` (`closet.by.hana`, `corner.sandwich3`) | A message shows the quoted message above it |
 | Reply to an unavailable message | `conv_014` (`recovered.user1`, `tyson.videographer`) quotes a deleted message; `conv_013` (`streetwear.atx1`, `user_public`) and `conv_015` (`derek.freelancedev`, `aaron.codes`) quote a message a moderator removed | The quote reads as unavailable |
 | Reactions | The conversations above and `conv_031`, `conv_033`, `conv_036`, `conv_039`, `conv_042`, `conv_043` | Ten different emoji across the thread and conversation list |
+| Reaction reports, removed and restored | `phil.senior4` reporting `sophieg.design` (`conv_009`), `quinn.familyonly` reporting `vivian.frontend` (`conv_016`), `user_power` reporting `nadia.gymlife` (`conv_020`), `brian.noposts` reporting `hope.quietacc` (`conv_021`), `victor.marathon` reporting `derekshoots` (`conv_025`) | Log in as `admin`: each report is resolved, the reaction was removed and later restored, and the audit log holds both actions |
+| Reaction report, removal stands | `user_private` reporting `james.carter.dev` (`conv_027`) | The report is resolved, the reaction stays hidden from both participants, and `james.carter.dev` has a reaction removed notice |
+| Reaction reports, dismissed | `corner.sandwich3` reporting `closet.by.hana` (`conv_028`), `chloe.productdesign` reporting `tyler.sysadmin` (`conv_031`) | The reaction is untouched and the reporter has a dismissed notice |
+| Reaction reports, open | `dean.lensman` reporting `yasmin.brandmarketing` (`conv_043`, pending), `yasmin.brandmarketing` reporting `lily.uxui` (`conv_048`, under review by `mod.laura`) | The reports wait in the moderation queue |
+| Reaction removed notices | The reactors of the six removed reactions: `sophieg.design`, `vivian.frontend`, `nadia.gymlife`, `hope.quietacc`, `derekshoots`, `james.carter.dev` | Each has a `reaction_removed` notification, even where the reaction was restored afterwards, as for a removed message |
+| Hidden Words audit history | Log in as `admin` or `rachel.admin` | Thirteen platform phrases were created, five of them reworded and five deleted ten days later, so the audit log holds `create_hidden_word`, `edit_hidden_word` and `delete_hidden_word` rows whose metadata keeps each phrase |
 | Reaction on a removed message | `conv_014`, `conv_013`, `conv_015`, `conv_026` (`quinn.familyonly`, `ryan.walsh94`), `conv_admin_014` (`admin`, `shop.mimidress`) | The reaction is hidden while the message is deleted or removed |
 
 Recent followers are accounts whose follow request is months old and whose approval is the seed run itself.

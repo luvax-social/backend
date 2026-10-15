@@ -147,7 +147,13 @@ class SeedRunnerIT {
                 .hasMessageContaining("user_settings.message_permission='following'")
                 .hasMessageContaining("user_settings.message_permission='nobody'")
                 .hasMessageContaining("conversations.request_status='pending'")
-                .hasMessageContaining("conversations.request_status='declined'");
+                .hasMessageContaining("conversations.request_status='declined'")
+                // The values the interaction control migrations added to existing enums are covered
+                // by the existing columns, so the report names them too.
+                .hasMessageContaining("reports.report_type='message_reaction'")
+                .hasMessageContaining("notifications.type='reaction_removed'")
+                .hasMessageContaining("admin_actions.action_type='create_hidden_word'")
+                .hasMessageContaining("admin_actions.action_type='remove_message_reaction'");
     }
 
     private void insertHashtags(String status, int count) {

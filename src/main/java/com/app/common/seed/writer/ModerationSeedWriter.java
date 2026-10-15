@@ -17,12 +17,17 @@ import org.springframework.stereotype.Service;
 
 import com.app.common.seed.loader.SeedContent;
 import com.app.common.seed.model.ConversationSeed;
+import com.app.common.seed.model.HiddenWordSeed;
 import com.app.common.seed.model.ModerationCaseSeed;
 import com.app.common.seed.model.ModerationSupplementaryAction;
 import com.app.common.seed.model.ModerationSupplementaryReport;
 import com.app.common.seed.model.PostSeed;
+import com.app.common.seed.model.ReactionReportSeed;
 import com.app.common.seed.model.UserSeed;
 import com.app.common.seed.time.SeedTimeline;
+import com.app.common.text.TextMatchNormalizer;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -159,6 +164,17 @@ public class ModerationSeedWriter {
                     + " status, reviewed_by, reviewed_at, resolution_note, escalated_by,"
                     + " escalated_at, escalation_reason, created_at) VALUES (?, ?, ?::report_type,"
                     + " ?::report_reason, ?, ?::report_status, ?, ?, ?, ?, ?, ?, ?)";
+    private static final String INSERT_ADMIN_ACTION_WITH_METADATA_SQL =
+            "INSERT INTO admin_actions (id, admin_id, action_type, target_user_id,"
+                    + " target_entity_type, target_entity_id, report_id, reason, metadata, created_at)"
+                    + " VALUES (?, ?, ?::admin_action_type, ?, ?, ?, ?, ?, ?::jsonb, ?)";
+    private static final String UPDATE_REACTION_ADMIN_REMOVED_AT_SQL =
+            "UPDATE message_reactions SET admin_removed_at = ? WHERE id = ?";
+    private static final ObjectMapper METADATA_MAPPER = new ObjectMapper();
+    private static final Duration REACTION_REPORT_REVIEW_DELAY = Duration.ofHours(1);
+    private static final Duration REACTION_ACTION_DELAY = Duration.ofHours(2);
+    private static final Duration REACTION_RESTORE_DELAY = Duration.ofDays(1);
+    private static final double MIN_REACTION_DECISION_FIT = 0.05;
     private static final String UPDATE_REPORT_STATUS_SQL =
             "UPDATE reports SET status = ?::report_status, reviewed_by = COALESCE(?, reviewed_by),"
                     + " reviewed_at = COALESCE(?, reviewed_at), resolution_note ="
@@ -215,6 +231,7 @@ public class ModerationSeedWriter {
             "INSERT INTO hashtags (id, name, status, created_at) VALUES (?, ?, 'active'::hashtag_status, ?)";
 
     private final JdbcTemplate jdbc;
+    private final InteractionSignalLedger signalLedger;
 
     private final Map<String, UUID> commentIdByRef = new HashMap<>();
     private final Map<String, UUID> storyIdByOwnerUsername = new HashMap<>();
@@ -285,6 +302,9 @@ public class ModerationSeedWriter {
 
         allReportIds.addAll(
                 writeBackgroundReports(content, postIdBySeedId, usersByUsername, timeline));
+        allReportIds.addAll(writeReactionModeration(content, usersByUsername, timeline));
+        int hiddenWordActions = writeHiddenWordHistory(content, usersByUsername, timeline);
+        adminActionCount += hiddenWordActions;
 
         log.info(
                 "[seed] reports: {} rows written, admin_actions: {} rows written, user_warnings:"
@@ -294,6 +314,268 @@ public class ModerationSeedWriter {
                 warningCount,
                 strikeCount);
         return allReportIds;
+    }
+
+    // Each reaction report is dated after the reaction it is about, and the moderator's decision
+    // follows the report. A removed reaction keeps its tombstone only when the removal stands: a
+    // removal that was later restored ends with no tombstone, and both actions stay in the audit
+    // log. A dismissed or still-open report leaves the reaction untouched.
+    private List<UUID> writeReactionModeration(
+            SeedContent content, Map<String, UUID> usersByUsername, SeedTimeline timeline) {
+        Instant referenceNow = timeline.referenceNow();
+        List<UUID> reportIds = new ArrayList<>();
+        for (ReactionReportSeed seed : content.interactionControl().reactionModeration()) {
+            UUID messageId = signalLedger.messageId(seed.conversationId(), seed.messageIndex());
+            UUID reactorId = requireUser(usersByUsername, seed.reactor(), "reaction_moderation");
+            UUID reporterId = requireUser(usersByUsername, seed.reporter(), "reaction_moderation");
+            UUID adminId =
+                    seed.admin() == null
+                            ? null
+                            : requireUser(usersByUsername, seed.admin(), "reaction_moderation");
+            List<Map<String, Object>> reactions =
+                    messageId == null
+                            ? List.of()
+                            : jdbc.queryForList(
+                                    "SELECT id, reacted_at FROM message_reactions WHERE message_id"
+                                            + " = ? AND user_id = ?",
+                                    messageId,
+                                    reactorId);
+            if (reactions.isEmpty()) {
+                throw new IllegalStateException(
+                        "ModerationSeedWriter: reaction_moderation entry '"
+                                + seed.conversationId()
+                                + "#"
+                                + seed.messageIndex()
+                                + "' by '"
+                                + seed.reactor()
+                                + "' has no reaction row; MessageSeedWriter must run first");
+            }
+            UUID reactionId = (UUID) reactions.get(0).get("id");
+            Instant reactedAt =
+                    ((java.sql.Timestamp) reactions.get(0).get("reacted_at")).toInstant();
+
+            Instant earliest = reactedAt.plus(REACTION_REPORT_REVIEW_DELAY);
+            Duration span = reactionDecisionSpan(seed.action());
+            // The decision has to land before the seed clock. A reaction too recent to leave room
+            // for the whole span pulls the report back toward the reaction, and the delays between
+            // the steps shrink to what is left, so the order of the steps always survives.
+            Instant reportedAt = referenceNow.minus(Duration.ofDays(seed.daysAgo()));
+            if (reportedAt.plus(span).isAfter(referenceNow)) {
+                reportedAt = referenceNow.minus(span);
+            }
+            if (reportedAt.isBefore(earliest)) {
+                reportedAt = earliest;
+            }
+            double fit =
+                    span.isZero()
+                            ? 1.0
+                            : Math.min(
+                                    1.0,
+                                    (double) Duration.between(reportedAt, referenceNow).toMillis()
+                                            / span.toMillis());
+            if (fit < MIN_REACTION_DECISION_FIT) {
+                throw new IllegalStateException(
+                        "ModerationSeedWriter: the reaction '"
+                                + seed.conversationId()
+                                + "#"
+                                + seed.messageIndex()
+                                + "' is too recent to carry a moderation decision; pick an older message");
+            }
+            Instant decidedAt = reportedAt.plus(scaled(REACTION_ACTION_DELAY, fit));
+            Instant restoredAt = decidedAt.plus(scaled(REACTION_RESTORE_DELAY, fit));
+
+            boolean closed =
+                    "resolved".equals(seed.reportStatus())
+                            || "dismissed".equals(seed.reportStatus());
+            Instant reviewedAt =
+                    closed ? decidedAt : reportedAt.plus(scaled(REACTION_REPORT_REVIEW_DELAY, fit));
+            UUID reportId = UUID.randomUUID();
+            jdbc.update(
+                    INSERT_REPORT_SQL,
+                    reportId,
+                    reporterId,
+                    "message_reaction",
+                    seed.reportReason(),
+                    reactionId,
+                    seed.reportStatus(),
+                    adminId,
+                    adminId == null ? null : java.sql.Timestamp.from(reviewedAt),
+                    closed ? seed.note() : null,
+                    null,
+                    null,
+                    null,
+                    java.sql.Timestamp.from(reportedAt));
+            reportIds.add(reportId);
+
+            switch (seed.action()) {
+                case "remove", "remove_restore" -> {
+                    insertAdminActionWithMetadata(
+                            adminId,
+                            "remove_message_reaction",
+                            reactorId,
+                            "message_reaction",
+                            reactionId,
+                            reportId,
+                            seed.note(),
+                            null,
+                            decidedAt);
+                    if ("remove".equals(seed.action())) {
+                        jdbc.update(
+                                UPDATE_REACTION_ADMIN_REMOVED_AT_SQL,
+                                java.sql.Timestamp.from(decidedAt),
+                                reactionId);
+                    } else {
+                        insertAdminActionWithMetadata(
+                                adminId,
+                                "restore_message_reaction",
+                                reactorId,
+                                "message_reaction",
+                                reactionId,
+                                null,
+                                "Restored after a second look at the thread",
+                                null,
+                                restoredAt);
+                    }
+                }
+                case "dismiss" ->
+                        insertAdminActionWithMetadata(
+                                adminId,
+                                "dismiss_report",
+                                null,
+                                "message_reaction",
+                                reactionId,
+                                reportId,
+                                seed.note(),
+                                null,
+                                decidedAt);
+                default -> {}
+            }
+        }
+        log.info("[seed] reaction moderation: {} reports written", reportIds.size());
+        return reportIds;
+    }
+
+    private static Duration reactionDecisionSpan(String action) {
+        return switch (action) {
+            case "remove_restore" -> REACTION_ACTION_DELAY.plus(REACTION_RESTORE_DELAY);
+            case "remove", "dismiss" -> REACTION_ACTION_DELAY;
+            default -> REACTION_REPORT_REVIEW_DELAY;
+        };
+    }
+
+    private static Duration scaled(Duration duration, double fit) {
+        return Duration.ofMillis(Math.round(duration.toMillis() * fit));
+    }
+
+    // The audit history of the platform Hidden Words list. Every entry was created by an
+    // administrator; an edited one was created with its earlier wording and reworded later, and a
+    // deleted one was created and removed later, so its row is gone and only the audit rows and
+    // their metadata remember the phrase. The entry itself is the target, as in
+    // AdminHiddenWordServiceImpl.
+    private int writeHiddenWordHistory(
+            SeedContent content, Map<String, UUID> usersByUsername, SeedTimeline timeline) {
+        int written = 0;
+        for (HiddenWordSeed word : content.interactionControl().hiddenWords()) {
+            if (word.owner() != null) {
+                continue;
+            }
+            UUID adminId = requireUser(usersByUsername, word.admin(), "hidden_words");
+            String normalized = TextMatchNormalizer.normalizePhrase(word.phrase());
+            UUID wordId =
+                    word.deleted()
+                            ? UUID.randomUUID()
+                            : jdbc.queryForObject(
+                                    "SELECT id FROM hidden_words WHERE normalized_phrase = ?",
+                                    UUID.class,
+                                    normalized);
+            Instant createdAt = timeline.referenceNow().minus(Duration.ofDays(word.daysAgo()));
+            Instant changedAt =
+                    createdAt.plus(
+                            Duration.ofDays(
+                                    InteractionControlConstraints.PLATFORM_WORD_CHANGE_DELAY_DAYS));
+            String createdPhrase =
+                    word.previousPhrase() == null ? word.phrase() : word.previousPhrase();
+            insertAdminActionWithMetadata(
+                    adminId,
+                    "create_hidden_word",
+                    null,
+                    "hidden_word",
+                    wordId,
+                    null,
+                    word.reason(),
+                    phraseMetadata(createdPhrase, null),
+                    createdAt);
+            written++;
+            if (word.previousPhrase() != null) {
+                insertAdminActionWithMetadata(
+                        adminId,
+                        "edit_hidden_word",
+                        null,
+                        "hidden_word",
+                        wordId,
+                        null,
+                        word.reason(),
+                        phraseMetadata(word.phrase(), word.previousPhrase()),
+                        changedAt);
+                written++;
+            } else if (word.deleted()) {
+                insertAdminActionWithMetadata(
+                        adminId,
+                        "delete_hidden_word",
+                        null,
+                        "hidden_word",
+                        wordId,
+                        null,
+                        word.reason(),
+                        phraseMetadata(word.phrase(), null),
+                        changedAt);
+                written++;
+            }
+        }
+        log.info("[seed] hidden words: {} audit rows written", written);
+        return written;
+    }
+
+    private String phraseMetadata(String phrase, String previousPhrase) {
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("phrase", phrase);
+        metadata.put("normalizedPhrase", TextMatchNormalizer.normalizePhrase(phrase));
+        if (previousPhrase != null) {
+            metadata.put("previousPhrase", previousPhrase);
+            metadata.put(
+                    "previousNormalizedPhrase",
+                    TextMatchNormalizer.normalizePhrase(previousPhrase));
+        }
+        try {
+            return METADATA_MAPPER.writeValueAsString(metadata);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(
+                    "ModerationSeedWriter: metadata could not be written", e);
+        }
+    }
+
+    private void insertAdminActionWithMetadata(
+            UUID adminId,
+            String actionType,
+            UUID targetUserId,
+            String targetEntityType,
+            UUID targetEntityId,
+            UUID reportId,
+            String reason,
+            String metadataJson,
+            Instant createdAt) {
+        jdbc.update(
+                INSERT_ADMIN_ACTION_WITH_METADATA_SQL,
+                UUID.randomUUID(),
+                adminId,
+                actionType,
+                targetUserId,
+                targetEntityType,
+                targetEntityId,
+                reportId,
+                reason,
+                metadataJson,
+                java.sql.Timestamp.from(createdAt));
     }
 
     // Only case_01_spam_escalation's outcome depends on referenceNow ("expiry is in the future");

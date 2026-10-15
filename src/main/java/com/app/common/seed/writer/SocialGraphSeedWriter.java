@@ -26,8 +26,10 @@ import com.app.common.seed.model.InteractionLimitSeed;
 import com.app.common.seed.model.MuteSeed;
 import com.app.common.seed.model.ShowFewerSeed;
 import com.app.common.seed.model.UserSeed;
+import com.app.common.seed.outbox.SeedOutboxBatchWriter.UserEventImport;
 import com.app.common.seed.time.SeedTimeline;
 import com.app.common.text.TextMatchNormalizer;
+import com.app.modules.recommendation.enums.UserEventType;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -184,7 +186,10 @@ public class SocialGraphSeedWriter {
             "INSERT INTO hidden_words (phrase, normalized_phrase, created_by, created_at,"
                     + " updated_at) VALUES (?, ?, ?, ?, ?)";
 
+    private static final int UNDO_AFTER_DAYS = 2;
+
     private final JdbcTemplate jdbc;
+    private final InteractionSignalLedger signalLedger;
 
     /**
      * Inserts the seeded {@code follows} (~{@value #TOTAL_FOLLOWS_TARGET} rows, with up to {@value
@@ -776,41 +781,91 @@ public class SocialGraphSeedWriter {
 
         List<Object[]> mutes = new ArrayList<>();
         for (MuteSeed mute : seed.mutes()) {
+            UUID viewerId = requireUser(usersByUsername, mute.viewer());
+            UUID targetId = requireUser(usersByUsername, mute.target());
+            Instant mutedAt = referenceNow.minus(Duration.ofDays(mute.daysAgo()));
+            String key = mute.viewer() + "->" + mute.target();
+            signalLedger.record(
+                    new UserEventImport(
+                            InteractionSignalLedger.signalId("mute", key),
+                            viewerId,
+                            UserEventType.ACCOUNT_MUTE,
+                            "user",
+                            targetId,
+                            "{\"posts\":"
+                                    + mute.mutePosts()
+                                    + ",\"stories\":"
+                                    + mute.muteStories()
+                                    + "}",
+                            mutedAt));
             if (mute.undone()) {
+                signalLedger.record(
+                        new UserEventImport(
+                                InteractionSignalLedger.signalId("unmute", key),
+                                viewerId,
+                                UserEventType.ACCOUNT_UNMUTE,
+                                "user",
+                                targetId,
+                                mutedAt.plus(Duration.ofDays(UNDO_AFTER_DAYS))));
                 continue;
             }
-            Timestamp at = daysBefore(referenceNow, mute.daysAgo());
+            Timestamp at = Timestamp.from(mutedAt);
             mutes.add(
                     new Object[] {
-                        requireUser(usersByUsername, mute.viewer()),
-                        requireUser(usersByUsername, mute.target()),
-                        mute.mutePosts(),
-                        mute.muteStories(),
-                        at,
-                        at
+                        viewerId, targetId, mute.mutePosts(), mute.muteStories(), at, at
                     });
         }
         jdbc.batchUpdate(INSERT_MUTE_SQL, mutes);
 
         List<Object[]> showFewer = new ArrayList<>();
         for (ShowFewerSeed entry : seed.showFewer()) {
-            if (!entry.undone()) {
-                showFewer.add(
-                        new Object[] {
-                            requireUser(usersByUsername, entry.viewer()),
-                            requireUser(usersByUsername, entry.author()),
-                            daysBefore(referenceNow, entry.daysAgo())
-                        });
+            UUID viewerId = requireUser(usersByUsername, entry.viewer());
+            UUID authorId = requireUser(usersByUsername, entry.author());
+            Instant markedAt = referenceNow.minus(Duration.ofDays(entry.daysAgo()));
+            String key = entry.viewer() + "->" + entry.author();
+            signalLedger.record(
+                    new UserEventImport(
+                            InteractionSignalLedger.signalId("show_fewer", key),
+                            viewerId,
+                            UserEventType.ACCOUNT_SHOW_FEWER,
+                            "user",
+                            authorId,
+                            markedAt));
+            if (entry.undone()) {
+                signalLedger.record(
+                        new UserEventImport(
+                                InteractionSignalLedger.signalId("show_fewer_undo", key),
+                                viewerId,
+                                UserEventType.ACCOUNT_SHOW_FEWER_UNDO,
+                                "user",
+                                authorId,
+                                markedAt.plus(Duration.ofDays(UNDO_AFTER_DAYS))));
+                continue;
             }
+            showFewer.add(new Object[] {viewerId, authorId, Timestamp.from(markedAt)});
         }
         jdbc.batchUpdate(INSERT_SHOW_FEWER_SQL, showFewer);
 
         List<Object[]> limits = new ArrayList<>();
         for (InteractionLimitSeed limit : seed.interactionLimits()) {
             Instant startedAt = referenceNow.minus(Duration.ofDays(limit.startedDaysAgo()));
+            UUID ownerId = requireUser(usersByUsername, limit.owner());
+            signalLedger.record(
+                    new UserEventImport(
+                            InteractionSignalLedger.signalId("interaction_limit", limit.owner()),
+                            ownerId,
+                            UserEventType.INTERACTION_LIMIT_CHANGE,
+                            "user",
+                            ownerId,
+                            "{\"nonFollowers\":"
+                                    + limit.limitNonFollowers()
+                                    + ",\"recentFollowers\":"
+                                    + limit.limitRecentFollowers()
+                                    + ",\"active\":true}",
+                            startedAt));
             limits.add(
                     new Object[] {
-                        requireUser(usersByUsername, limit.owner()),
+                        ownerId,
                         limit.limitNonFollowers(),
                         limit.limitRecentFollowers(),
                         Timestamp.from(startedAt.plus(Duration.ofDays(limit.durationDays()))),
@@ -877,10 +932,6 @@ public class SocialGraphSeedWriter {
                             + "' which does not exist in users.json");
         }
         return userId;
-    }
-
-    private Timestamp daysBefore(Instant referenceNow, int days) {
-        return Timestamp.from(referenceNow.minus(Duration.ofDays(days)));
     }
 
     private String unorderedPairKey(String usernameA, String usernameB) {

@@ -429,6 +429,7 @@ public class SeedRunner {
                         "user_hidden_words",
                         "hidden_words",
                         "post_not_interested",
+                        "message_reactions",
                         "support_tickets",
                         "verification_requests",
                         "outbox_events");

@@ -39,13 +39,15 @@ class AnalyticsSeedWriterTest {
     private JdbcTemplate jdbc;
     private SeedOutboxBatchWriter batchWriter;
     private AnalyticsSeedWriter writer;
+    private InteractionSignalLedger ledger;
     private List<UUID> userIds;
 
     @BeforeEach
     void setUp() {
         jdbc = mock(JdbcTemplate.class);
         batchWriter = mock(SeedOutboxBatchWriter.class);
-        writer = new AnalyticsSeedWriter(jdbc, batchWriter);
+        ledger = new InteractionSignalLedger();
+        writer = new AnalyticsSeedWriter(jdbc, batchWriter, ledger);
         userIds = ids(40);
         when(jdbc.queryForObject(anyString(), eq(Long.class))).thenReturn(50L);
         when(jdbc.query(anyString(), ArgumentMatchers.<ResultSetExtractor<Map<String, Long>>>any()))
@@ -53,6 +55,16 @@ class AnalyticsSeedWriterTest {
         when(jdbc.query(anyString(), ArgumentMatchers.<RowMapper<UUID>>any())).thenReturn(userIds);
         when(batchWriter.emitUserEventImportBatch(any()))
                 .thenAnswer(invocation -> ((List<?>) invocation.getArgument(0)).size());
+        recordEveryLedgerType();
+    }
+
+    // The rows a full seed run leaves behind, reduced to the minimum each type must reach.
+    private void recordEveryLedgerType() {
+        for (UserEventType type : AnalyticsSeedWriter.LEDGER_TYPES) {
+            for (int i = 0; i < AnalyticsSeedWriter.MIN_EVENTS_PER_TYPE; i++) {
+                ledger.record(signal(type, i));
+            }
+        }
     }
 
     @Test
@@ -89,7 +101,8 @@ class AnalyticsSeedWriterTest {
         Map<UserEventType, Integer> counts = new EnumMap<>(UserEventType.class);
         events.forEach(event -> counts.merge(event.eventType(), 1, Integer::sum));
         for (UserEventType type : UserEventType.values()) {
-            if (AnalyticsSeedWriter.UNSEEDED_TYPES.contains(type)) {
+            if (AnalyticsSeedWriter.UNSEEDED_TYPES.contains(type)
+                    || AnalyticsSeedWriter.LEDGER_TYPES.contains(type)) {
                 assertThat(counts).doesNotContainKey(type);
             } else {
                 assertThat(counts.getOrDefault(type, 0))
@@ -97,7 +110,79 @@ class AnalyticsSeedWriterTest {
                         .isGreaterThanOrEqualTo(AnalyticsSeedWriter.MIN_EVENTS_PER_TYPE);
             }
         }
-        AnalyticsSeedWriter.assertEveryProducedTypeCovered(events);
+    }
+
+    @Test
+    void write_importsTheSignalsOfSeededRowsAndFailsWhenOneTypeFallsShort() {
+        List<SeedOutboxBatchWriter.UserEventImport> imported = new ArrayList<>();
+        org.mockito.Mockito.doAnswer(
+                        invocation -> {
+                            List<SeedOutboxBatchWriter.UserEventImport> batch =
+                                    invocation.getArgument(0);
+                            imported.addAll(batch);
+                            return batch.size();
+                        })
+                .when(batchWriter)
+                .emitUserEventImportBatch(any());
+        writer.write(new SeedTimeline(20260825L, REFERENCE_NOW));
+
+        Map<UserEventType, Integer> counts = new EnumMap<>(UserEventType.class);
+        imported.forEach(event -> counts.merge(event.eventType(), 1, Integer::sum));
+        for (UserEventType type : AnalyticsSeedWriter.LEDGER_TYPES) {
+            assertThat(counts.get(type)).as("imported %s", type.toJson()).isEqualTo(5);
+        }
+        assertThat(imported)
+                .filteredOn(event -> AnalyticsSeedWriter.LEDGER_TYPES.contains(event.eventType()))
+                .allSatisfy(event -> assertThat(event.metadata()).isEqualTo("{\"seeded\":true}"));
+
+        ledger.record(signal(UserEventType.ACCOUNT_MUTE, 99));
+        for (UserEventType type : AnalyticsSeedWriter.LEDGER_TYPES) {
+            if (type != UserEventType.ACCOUNT_MUTE && type != UserEventType.ACCOUNT_UNMUTE) {
+                for (int i = 0; i < AnalyticsSeedWriter.MIN_EVENTS_PER_TYPE; i++) {
+                    ledger.record(signal(type, 100 + i));
+                }
+            }
+        }
+        assertThatThrownBy(() -> writer.write(new SeedTimeline(20260825L, REFERENCE_NOW)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("account_unmute=0");
+    }
+
+    @Test
+    void write_datesASignalNoEarlierThanTheRetentionOfTheEventTable() {
+        List<SeedOutboxBatchWriter.UserEventImport> imported = new ArrayList<>();
+        org.mockito.Mockito.doAnswer(
+                        invocation -> {
+                            List<SeedOutboxBatchWriter.UserEventImport> batch =
+                                    invocation.getArgument(0);
+                            imported.addAll(batch);
+                            return batch.size();
+                        })
+                .when(batchWriter)
+                .emitUserEventImportBatch(any());
+        for (UserEventType type : AnalyticsSeedWriter.LEDGER_TYPES) {
+            for (int i = 0; i < AnalyticsSeedWriter.MIN_EVENTS_PER_TYPE; i++) {
+                ledger.record(
+                        new SeedOutboxBatchWriter.UserEventImport(
+                                UUID.nameUUIDFromBytes(("old-" + type + i).getBytes()),
+                                userIds.get(0),
+                                type,
+                                null,
+                                null,
+                                null,
+                                REFERENCE_NOW.minus(Duration.ofDays(700))));
+            }
+        }
+
+        writer.write(new SeedTimeline(20260825L, REFERENCE_NOW));
+
+        assertThat(imported)
+                .filteredOn(event -> AnalyticsSeedWriter.LEDGER_TYPES.contains(event.eventType()))
+                .allSatisfy(
+                        event ->
+                                assertThat(event.createdAt())
+                                        .isAfterOrEqualTo(
+                                                REFERENCE_NOW.minus(Duration.ofDays(360))));
     }
 
     @Test
@@ -143,6 +228,17 @@ class AnalyticsSeedWriterTest {
                 ids(60),
                 ids(20),
                 ids(10));
+    }
+
+    private SeedOutboxBatchWriter.UserEventImport signal(UserEventType type, int index) {
+        return new SeedOutboxBatchWriter.UserEventImport(
+                UUID.nameUUIDFromBytes(("signal-" + type + index).getBytes()),
+                userIds.get(index % userIds.size()),
+                type,
+                "user",
+                userIds.get((index + 1) % userIds.size()),
+                "{\"seeded\":true}",
+                REFERENCE_NOW.minus(Duration.ofDays(1 + index)));
     }
 
     private static List<UUID> ids(int count) {
