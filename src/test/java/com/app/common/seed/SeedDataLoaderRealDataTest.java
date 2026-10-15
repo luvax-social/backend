@@ -121,6 +121,45 @@ class SeedDataLoaderRealDataTest {
     }
 
     @Test
+    void load_realSeedContent_coversEveryMessageRequestStatusReplyQuoteAndReaction() {
+        SeedContent content = new SeedDataLoader().load();
+        InteractionControlSeed seed = content.interactionControl();
+
+        for (String status : List.of("pending", "hidden", "declined", "accepted")) {
+            assertThat(count(seed.messageRequests(), r -> status.equals(r.status())))
+                    .as("message requests with status %s", status)
+                    .isGreaterThanOrEqualTo(5);
+        }
+        assertThat(count(seed.replyParents(), r -> true))
+                .as("reply quotes")
+                .isGreaterThanOrEqualTo(5);
+        assertThat(count(seed.reactions(), r -> !r.undone()))
+                .as("reactions")
+                .isGreaterThanOrEqualTo(5);
+        assertThat(count(seed.reactions(), r -> r.undone()))
+                .as("undone reactions")
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                seed.reactions(),
+                                r ->
+                                        content.conversations().stream()
+                                                .filter(c -> c.id().equals(r.conversationId()))
+                                                .anyMatch(
+                                                        c -> {
+                                                            var message =
+                                                                    c.messages()
+                                                                            .get(r.messageIndex());
+                                                            return message.isDeleted()
+                                                                    || message
+                                                                                    .adminRemovedAtOffsetMinutes()
+                                                                            != null;
+                                                        })))
+                .as("reactions on a deleted or removed message")
+                .isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
     void load_realSeedContent_spreadsMessagePermissionAcrossAllThreeValues() {
         SeedContent content = new SeedDataLoader().load();
 

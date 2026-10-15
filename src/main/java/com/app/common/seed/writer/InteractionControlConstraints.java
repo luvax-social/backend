@@ -8,12 +8,15 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.app.common.seed.loader.SeedContent;
+import com.app.common.seed.model.ConversationSeed;
 import com.app.common.seed.model.HiddenCommentSeed;
 import com.app.common.seed.model.InteractionControlSeed;
 import com.app.common.seed.model.InteractionLimitSeed;
+import com.app.common.seed.model.MessageRequestSeed;
 import com.app.common.seed.model.MuteSeed;
 import com.app.common.seed.model.NotInterestedSeed;
 import com.app.common.seed.model.PostSeed;
+import com.app.common.seed.model.ReactionSeed;
 import com.app.common.seed.model.ShowFewerSeed;
 
 /**
@@ -64,12 +67,29 @@ final class InteractionControlConstraints {
         for (HiddenCommentSeed comment : seed.hiddenComments()) {
             pairs.add(unordered(comment.commenter(), comment.postOwner()));
         }
+        for (MessageRequestSeed request : seed.messageRequests()) {
+            pairs.add(unordered(request.requester(), request.recipient()));
+        }
+        // A reaction needs a conversation both of whose accounts can still see each other.
+        Map<String, ConversationSeed> conversationById =
+                content.conversations().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        ConversationSeed::id, conversation -> conversation));
+        for (ReactionSeed reaction : seed.reactions()) {
+            List<String> participants =
+                    conversationById.get(reaction.conversationId()).participants();
+            pairs.add(unordered(participants.get(0), participants.get(1)));
+        }
         return pairs;
     }
 
     /**
      * Directed follows the generator must not create, written {@code follower->following}: a
-     * comment hidden by a limit on non-followers needs an author who is not a follower.
+     * comment hidden by a limit on non-followers needs an author who is not a follower, and a
+     * message request exists only between accounts that follow neither way, because a follow would
+     * have put the conversation straight into the recipient's inbox or hidden it behind the
+     * sender's own limit.
      */
     static Set<String> forbiddenFollows(SeedContent content) {
         InteractionControlSeed seed = content.interactionControl();
@@ -81,6 +101,10 @@ final class InteractionControlConstraints {
                     && !recentFollowPairs.contains(pair)) {
                 forbidden.add(pair);
             }
+        }
+        for (MessageRequestSeed request : seed.messageRequests()) {
+            forbidden.add(request.requester() + "->" + request.recipient());
+            forbidden.add(request.recipient() + "->" + request.requester());
         }
         return forbidden;
     }

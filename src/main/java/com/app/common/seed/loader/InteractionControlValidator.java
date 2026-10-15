@@ -7,16 +7,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.app.common.seed.model.ConversationSeed;
 import com.app.common.seed.model.HiddenCommentSeed;
 import com.app.common.seed.model.HiddenWordSeed;
 import com.app.common.seed.model.InteractionControlSeed;
 import com.app.common.seed.model.InteractionLimitSeed;
+import com.app.common.seed.model.MessageRequestSeed;
 import com.app.common.seed.model.MuteSeed;
 import com.app.common.seed.model.NotInterestedSeed;
 import com.app.common.seed.model.PostSeed;
+import com.app.common.seed.model.ReactionSeed;
+import com.app.common.seed.model.ReplyParentSeed;
 import com.app.common.seed.model.ShowFewerSeed;
 import com.app.common.seed.model.UserSeed;
 import com.app.common.text.TextMatchNormalizer;
+import com.app.modules.message.util.ReactionEmojiValidator;
 
 /**
  * Checks the cross-file references and the invariants of {@code safety/interaction_control.json}
@@ -30,6 +35,8 @@ final class InteractionControlValidator {
     private static final Set<Integer> LIMIT_DURATIONS = Set.of(1, 3, 7, 14, 28);
     private static final Set<String> HIDDEN_REASONS =
             Set.of("hidden_words", "limited_interaction", "hidden_parent");
+    private static final Set<String> REQUEST_STATUSES =
+            Set.of("pending", "hidden", "declined", "accepted");
     private static final int MAX_PHRASE_LENGTH = 64;
     private static final int MAX_PHRASE_TOKENS = 6;
     // The audit history of an edited or deleted platform entry sits after its creation, so the
@@ -39,8 +46,13 @@ final class InteractionControlValidator {
     private final Map<String, UserSeed> userByUsername = new HashMap<>();
     private final Map<String, PostSeed> postById = new HashMap<>();
     private final Map<String, List<PostSeed>> publishedPostsByAuthor = new HashMap<>();
+    private final Map<String, ConversationSeed> conversationById = new HashMap<>();
 
-    private InteractionControlValidator(List<UserSeed> users, List<PostSeed> posts) {
+    private InteractionControlValidator(
+            List<UserSeed> users, List<PostSeed> posts, List<ConversationSeed> conversations) {
+        for (ConversationSeed conversation : conversations) {
+            conversationById.put(conversation.id(), conversation);
+        }
         for (UserSeed user : users) {
             userByUsername.put(user.username(), user);
         }
@@ -55,14 +67,21 @@ final class InteractionControlValidator {
     }
 
     static void validate(
-            InteractionControlSeed content, List<UserSeed> users, List<PostSeed> posts) {
-        InteractionControlValidator validator = new InteractionControlValidator(users, posts);
+            InteractionControlSeed content,
+            List<UserSeed> users,
+            List<PostSeed> posts,
+            List<ConversationSeed> conversations) {
+        InteractionControlValidator validator =
+                new InteractionControlValidator(users, posts, conversations);
         validator.validateMutes(content.mutes());
         validator.validateShowFewer(content.showFewer());
         validator.validateNotInterested(content.notInterested());
         validator.validateLimits(content.interactionLimits());
         validator.validateHiddenWords(content.hiddenWords());
         validator.validateHiddenComments(content.hiddenComments());
+        validator.validateMessageRequests(content.messageRequests());
+        validator.validateReplyParents(content.replyParents());
+        validator.validateReactions(content.reactions());
     }
 
     private void validateMutes(List<MuteSeed> mutes) {
@@ -226,6 +245,123 @@ final class InteractionControlValidator {
                             + " must reply to a still-hidden comment of its own author on the same"
                             + " post");
         }
+    }
+
+    // A request is a stranger's first message to an account that allows everyone to write to it, so
+    // no two accounts may already share a conversation, and the pair is unique across requests.
+    private void validateMessageRequests(List<MessageRequestSeed> requests) {
+        Set<String> pairs = new HashSet<>();
+        for (ConversationSeed conversation : conversationById.values()) {
+            pairs.add(
+                    unordered(
+                            conversation.participants().get(0),
+                            conversation.participants().get(1)));
+        }
+        Set<String> ids = new HashSet<>();
+        for (MessageRequestSeed request : requests) {
+            String where = "message_requests entry '" + request.id() + "'";
+            requireNewKey(ids, request.id(), where);
+            requireActiveUser(request.requester(), where);
+            requireActiveUser(request.recipient(), where);
+            requireDistinct(request.requester(), request.recipient(), where);
+            if (!REQUEST_STATUSES.contains(request.status())) {
+                throw fail(where + " has unknown status '" + request.status() + "'");
+            }
+            if (!"everyone".equals(userByUsername.get(request.recipient()).messagePermission())) {
+                throw fail(
+                        where
+                                + " is addressed to an account that does not allow everyone to write to it");
+            }
+            if (request.text() == null || request.text().isBlank()) {
+                throw fail(where + " has no text");
+            }
+            boolean accepted = "accepted".equals(request.status());
+            if (accepted != (request.replyText() != null)) {
+                throw fail(where + " must carry reply_text exactly when it is accepted");
+            }
+            if (request.daysAgo() < 1) {
+                throw fail(where + " must be at least a day old");
+            }
+            requireNewKey(
+                    pairs,
+                    unordered(request.requester(), request.recipient()),
+                    where + " (its two accounts already share a conversation or a request)");
+        }
+    }
+
+    private void validateReplyParents(List<ReplyParentSeed> parents) {
+        Set<String> children = new HashSet<>();
+        for (ReplyParentSeed parent : parents) {
+            String where =
+                    "reply_parents entry '"
+                            + parent.conversationId()
+                            + "#"
+                            + parent.messageIndex()
+                            + "'";
+            ConversationSeed conversation = requireConversation(parent.conversationId(), where);
+            int size = conversation.messages().size();
+            if (parent.messageIndex() <= 0
+                    || parent.messageIndex() >= size
+                    || parent.replyToIndex() < 0
+                    || parent.replyToIndex() >= parent.messageIndex()) {
+                throw fail(
+                        where
+                                + " must quote an earlier message of a conversation with "
+                                + size
+                                + " messages");
+            }
+            requireNewKey(children, parent.conversationId() + "#" + parent.messageIndex(), where);
+        }
+    }
+
+    private void validateReactions(List<ReactionSeed> reactions) {
+        Set<String> seen = new HashSet<>();
+        for (ReactionSeed reaction : reactions) {
+            String where =
+                    "reactions entry '"
+                            + reaction.conversationId()
+                            + "#"
+                            + reaction.messageIndex()
+                            + "' by '"
+                            + reaction.reactor()
+                            + "'";
+            ConversationSeed conversation = requireConversation(reaction.conversationId(), where);
+            if (reaction.messageIndex() < 0
+                    || reaction.messageIndex() >= conversation.messages().size()) {
+                throw fail(where + " names a message the conversation does not have");
+            }
+            if (!conversation.participants().contains(reaction.reactor())) {
+                throw fail(where + " is not by a participant of the conversation");
+            }
+            if (reaction.emoji() == null
+                    || !ReactionEmojiValidator.isSingleEmoji(reaction.emoji())) {
+                throw fail(where + " does not carry exactly one emoji");
+            }
+            requireNewKey(
+                    seen,
+                    reaction.conversationId()
+                            + "#"
+                            + reaction.messageIndex()
+                            + "#"
+                            + reaction.reactor(),
+                    where);
+        }
+    }
+
+    private ConversationSeed requireConversation(String id, String where) {
+        ConversationSeed conversation = conversationById.get(id);
+        if (conversation == null) {
+            throw fail(
+                    where
+                            + " names conversation '"
+                            + id
+                            + "', which does not exist in conversations.json");
+        }
+        return conversation;
+    }
+
+    private static String unordered(String a, String b) {
+        return a.compareTo(b) < 0 ? a + "|" + b : b + "|" + a;
     }
 
     private void requireValidPhrase(String phrase, String where) {

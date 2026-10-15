@@ -22,7 +22,7 @@ before reseeding.
 | Media assets (Pexels-sourced, R2-hosted) | 631 (536 images, 70 videos, 25 banners) |
 | Avatars (randomuser.me, externally hosted) | 140, one per user, never uploaded to R2 |
 | Comment pool entries | 1,020 across 25 topic pools |
-| Conversations / messages | 85 conversations, ~1,600 messages |
+| Conversations / messages | 110 conversations (85 authored, 25 message requests), ~1,650 messages |
 | Moderation cases (full narrative) | 6 |
 | Reports | ~180 (narrative + standalone) |
 | Warnings / strikes | 27 / 14 |
@@ -273,6 +273,14 @@ Entries marked undone write no row, because undoing a preference deletes it; the
 | Platform hidden words | Log in as `admin` | The registry lists eight phrases, five of them edited from an earlier wording |
 | Filtered comments | Open the first posts of `user_power`, `user_public`, `derekshoots`, `sophieg.design`, `kane.runs`, `closet.by.hana` as the owner | The hidden comments page shows the comments filtered by words, the replies hidden with their parent, and the comments a limit filtered |
 | Unhidden comments | The same owners, further down their timelines | Comments that match a word but were released by the owner read as ordinary comments |
+| Message requests, pending | Recipients `user_public` (from `nora.reads`, `owen.quiet`), `user_power` (from `thea.scrolls`, `marcus.lurks`), `derekshoots` (from `elena.watcher`, `rory.nopost`) | Each request shows in the requests folder and the request count; the sender can send nothing further |
+| Message requests, hidden | `user_power` (from `saskia.quiet2`, `devon.reader`), `user_public` (from `ingrid.silent`), `derekshoots` (from `caleb.browses`), `sophieg.design` (from `yasmin.quiet3`), `kane.runs` (from `bruno.observer`), `closet.by.hana` (from `leonie.reads2`) | Each sits in the hidden requests folder, because the message contains one of the recipient's hidden words or the recipient has an active limit |
+| Message requests, declined | Senders `hugo.lurker`, `jonas.silent3`, `rania.quiet5`, `tobin.reads3`, `keiko.observer2`, `andres.nopost3` | The sender sees a pending request and cannot send again; the recipient no longer has the conversation |
+| Message requests, accepted | `lidia.reads4` and `user_public`, `kasper.quiet6` and `user_power`, `juno.comments` and `derekshoots`, `silas.replies` and `kane.runs`, `nadia.chimesin` and `sophieg.design`, `garrett.rarely` and `victor.marathon` | An ordinary conversation whose first reply quotes the request |
+| Reply quotes | `conv_024` (`yuna.study`, `dean.lensman`), `conv_025` (`derekshoots`, `victor.marathon`), `conv_028` (`closet.by.hana`, `corner.sandwich3`) | A message shows the quoted message above it |
+| Reply to an unavailable message | `conv_014` (`recovered.user1`, `tyson.videographer`) quotes a deleted message; `conv_013` (`streetwear.atx1`, `user_public`) and `conv_015` (`derek.freelancedev`, `aaron.codes`) quote a message a moderator removed | The quote reads as unavailable |
+| Reactions | The conversations above and `conv_031`, `conv_033`, `conv_036`, `conv_039`, `conv_042`, `conv_043` | Ten different emoji across the thread and conversation list |
+| Reaction on a removed message | `conv_014`, `conv_013`, `conv_015`, `conv_026` (`quinn.familyonly`, `ryan.walsh94`), `conv_admin_014` (`admin`, `shop.mimidress`) | The reaction is hidden while the message is deleted or removed |
 
 Recent followers are accounts whose follow request is months old and whose approval is the seed run itself.
 Every other accepted follow carries the approval date of its request, which is why a limit on recent followers hides some commenters and not others.
@@ -294,7 +302,7 @@ describes.
 | `moderation/moderation_cases.json` | 6 narrative moderation cases plus supplementary actions and reports | `ModerationSeedWriter` |
 | `media/media_manifest.json` | 631 Pexels-sourced media entries already uploaded to R2 (avatars are not in this file - see "Avatars" below) | `MediaSeedWriter`, `UserSeedWriter` (banner `cdn_url` lookup) |
 | `support/support_ticket_pools.json` | Pooled support-ticket request, response and escalation prose | `SupportSeedWriter` |
-| `safety/interaction_control.json` | Mutes, show-fewer and not-interested marks, interaction limits, Hidden Words entries and filtered comments | `SocialGraphSeedWriter`, `EngagementSeedWriter`, `CommentSeedWriter` |
+| `safety/interaction_control.json` | Mutes, show-fewer and not-interested marks, interaction limits, Hidden Words entries, filtered comments, message requests, reply quotes and reactions | `SocialGraphSeedWriter`, `EngagementSeedWriter`, `CommentSeedWriter`, `MessageSeedWriter` |
 | `verification/badges.json` | 16 verification requests bound to named accounts, 12 legacy grants and 5 revocations | `SupportSeedWriter` (the request lane), `VerificationSeedWriter` |
 
 ## Java package map

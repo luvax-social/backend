@@ -86,7 +86,9 @@ public class SeedRunner {
                     new EnumColumn("notifications", "type", "notification_type"),
                     new EnumColumn("notifications", "category", "notification_category"),
                     new EnumColumn("admin_actions", "action_type", "admin_action_type"),
-                    new EnumColumn("user_settings", "message_permission", "message_permission"));
+                    new EnumColumn("user_settings", "message_permission", "message_permission"),
+                    new EnumColumn(
+                            "conversations", "request_status", "conversation_request_status"));
 
     private static final int MIN_ROWS_PER_ENUM_VALUE = 5;
 

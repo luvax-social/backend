@@ -121,7 +121,7 @@ public class SeedDataLoader {
         validateConversationParticipantScopedFieldsResolve(conversations);
         validateSupplementaryReportsAreUnique(supplementaryReports);
         validateBadgeSubjectsExist(badges, users);
-        InteractionControlValidator.validate(interactionControl, users, posts);
+        InteractionControlValidator.validate(interactionControl, users, posts, conversations);
 
         return new SeedContent(
                 personas,

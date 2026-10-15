@@ -111,6 +111,8 @@ class DomainWritersSeedWriterIT {
     @Autowired private AnalyticsSeedWriter analyticsSeedWriter;
 
     private static final Instant REFERENCE_NOW = Instant.parse("2026-08-25T00:00:00Z");
+    private static final int AUTHORED_CONVERSATIONS = 85;
+    private static final int MESSAGE_REQUESTS = 25;
 
     @Test
     void write_seedsDomainWritersAgainstRealSchema() {
@@ -148,6 +150,168 @@ class DomainWritersSeedWriterIT {
         assertUserEventsEnqueuedForImport();
         assertUserEventsCoverEveryEventTypeValue();
         assertHiddenCommentsMatchTheOwnersWordLists();
+        assertMessageRequestsCoverEveryStatusAndStayConsistent();
+        assertRepliesAndReactions();
+    }
+
+    // Every request status reaches five rows, and a request sits between two accounts with no
+    // follow or block, as the rules that route a first message assume.
+    private void assertMessageRequestsCoverEveryStatusAndStayConsistent() {
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations WHERE request_status ="
+                                        + " 'pending' AND NOT request_hidden"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations WHERE request_status ="
+                                        + " 'pending' AND request_hidden"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(count("SELECT COUNT(*) FROM conversations WHERE request_status = 'declined'"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations WHERE request_status ="
+                                        + " 'accepted' AND request_recipient_id IS NOT NULL"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations WHERE request_recipient_id IS"
+                                        + " NOT NULL"))
+                .isEqualTo(MESSAGE_REQUESTS);
+
+        // A recipient only receives requests while allowing everyone to write.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN user_settings s ON"
+                                        + " s.user_id = c.request_recipient_id WHERE"
+                                        + " s.message_permission <> 'everyone'"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN conversation_participants p"
+                                        + " ON p.conversation_id = c.id AND p.user_id <>"
+                                        + " c.request_recipient_id WHERE c.request_recipient_id IS"
+                                        + " NOT NULL AND (EXISTS (SELECT 1 FROM follows f WHERE"
+                                        + " (f.follower_id = p.user_id AND f.following_id ="
+                                        + " c.request_recipient_id) OR (f.follower_id ="
+                                        + " c.request_recipient_id AND f.following_id = p.user_id))"
+                                        + " OR EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id ="
+                                        + " p.user_id AND b.blocked_id = c.request_recipient_id) OR"
+                                        + " (b.blocker_id = c.request_recipient_id AND b.blocked_id"
+                                        + " = p.user_id)))"))
+                .isZero();
+
+        // An open or declined request holds the requester's one text message and nothing else, so
+        // a declined request shows its sender exactly what a pending one does.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c WHERE c.request_status IN"
+                                        + " ('pending', 'declined') AND (SELECT COUNT(*) FROM"
+                                        + " messages m WHERE m.conversation_id = c.id) <> 1"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN messages m ON"
+                                        + " m.conversation_id = c.id WHERE c.request_status IN"
+                                        + " ('pending', 'declined') AND (m.sender_id ="
+                                        + " c.request_recipient_id OR m.message_type <> 'text' OR"
+                                        + " m.is_deleted OR m.admin_removed_at IS NOT NULL)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c WHERE c.request_status ="
+                                        + " 'declined' AND (c.request_resolved_at IS NULL OR"
+                                        + " c.request_hidden)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN conversation_participants"
+                                        + " p ON p.conversation_id = c.id WHERE c.request_status ="
+                                        + " 'declined' AND ((p.user_id = c.request_recipient_id) <>"
+                                        + " (p.left_at IS NOT NULL))"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN conversation_participants"
+                                        + " p ON p.conversation_id = c.id WHERE c.request_status IN"
+                                        + " ('pending', 'accepted') AND p.left_at IS NOT NULL AND"
+                                        + " c.request_recipient_id IS NOT NULL"))
+                .isZero();
+        // An accepted request was answered, and the answer quotes the request.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c WHERE c.request_status ="
+                                        + " 'accepted' AND c.request_recipient_id IS NOT NULL AND"
+                                        + " NOT EXISTS (SELECT 1 FROM messages m JOIN messages q ON"
+                                        + " q.id = m.reply_to_id WHERE m.conversation_id = c.id AND"
+                                        + " m.sender_id = c.request_recipient_id)"))
+                .isZero();
+        // A hidden request is hidden for a reason the recipient's rules explain: a personal or
+        // platform word in the message, or an active limit.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN messages m ON"
+                                        + " m.conversation_id = c.id WHERE c.request_hidden AND NOT"
+                                        + " EXISTS (SELECT 1 FROM user_hidden_words w WHERE w.user_id"
+                                        + " = c.request_recipient_id AND lower(m.content) LIKE '%' ||"
+                                        + " w.normalized_phrase || '%') AND NOT EXISTS (SELECT 1 FROM"
+                                        + " interaction_limits l WHERE l.user_id ="
+                                        + " c.request_recipient_id AND l.expires_at > ?)"
+                                        + " AND NOT EXISTS (SELECT 1 FROM hidden_words h WHERE"
+                                        + " lower(m.content) LIKE '%' || h.normalized_phrase ||"
+                                        + " '%')",
+                                java.sql.Timestamp.from(REFERENCE_NOW)))
+                .isZero();
+        // Nothing reads as a message from the future.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM messages WHERE created_at > ?",
+                                java.sql.Timestamp.from(REFERENCE_NOW)))
+                .isZero();
+    }
+
+    // Reply quotes point inside their own conversation, and reactions are one per participant per
+    // message, never dated before the message, and include some on a message that was deleted or
+    // removed by moderation.
+    private void assertRepliesAndReactions() {
+        assertThat(count("SELECT COUNT(*) FROM messages WHERE reply_to_id IS NOT NULL"))
+                .isGreaterThanOrEqualTo(12 + 5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM messages m JOIN messages q ON q.id ="
+                                        + " m.reply_to_id WHERE q.conversation_id <>"
+                                        + " m.conversation_id OR q.created_at > m.created_at"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM messages m JOIN messages q ON q.id ="
+                                        + " m.reply_to_id WHERE q.is_deleted OR q.admin_removed_at IS"
+                                        + " NOT NULL"))
+                .isGreaterThanOrEqualTo(3);
+        assertThat(count("SELECT COUNT(*) FROM message_reactions")).isGreaterThanOrEqualTo(30);
+        assertThat(count("SELECT COUNT(DISTINCT emoji) FROM message_reactions"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM message_reactions r JOIN messages m ON m.id ="
+                                        + " r.message_id WHERE m.is_deleted OR m.admin_removed_at IS"
+                                        + " NOT NULL"))
+                .isGreaterThanOrEqualTo(1);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM message_reactions r JOIN messages m ON m.id ="
+                                        + " r.message_id WHERE r.reacted_at < m.created_at OR"
+                                        + " r.reacted_at > ?",
+                                java.sql.Timestamp.from(REFERENCE_NOW)))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM message_reactions r JOIN messages m ON m.id ="
+                                        + " r.message_id WHERE NOT EXISTS (SELECT 1 FROM"
+                                        + " conversation_participants p WHERE p.conversation_id ="
+                                        + " m.conversation_id AND p.user_id = r.user_id)"))
+                .isZero();
     }
 
     // Hidden Words filter at write time, so each comment hidden for that reason really contains an
@@ -225,7 +389,7 @@ class DomainWritersSeedWriterIT {
 
         Integer conversationCount =
                 jdbcTemplate.queryForObject("SELECT COUNT(*) FROM conversations", Integer.class);
-        assertThat(conversationCount).isEqualTo(85);
+        assertThat(conversationCount).isEqualTo(AUTHORED_CONVERSATIONS + MESSAGE_REQUESTS);
 
         Integer messageCount =
                 jdbcTemplate.queryForObject("SELECT COUNT(*) FROM messages", Integer.class);
@@ -238,7 +402,7 @@ class DomainWritersSeedWriterIT {
         Integer directPairKeyCount =
                 jdbcTemplate.queryForObject(
                         "SELECT COUNT(DISTINCT direct_pair_key) FROM conversations", Integer.class);
-        assertThat(directPairKeyCount).isEqualTo(85);
+        assertThat(directPairKeyCount).isEqualTo(AUTHORED_CONVERSATIONS + MESSAGE_REQUESTS);
     }
 
     private void assertNotificationCreatedAtWritten() {
@@ -380,8 +544,8 @@ class DomainWritersSeedWriterIT {
                 .isTrue();
     }
 
-    private int count(String sql) {
-        Integer value = jdbcTemplate.queryForObject(sql, Integer.class);
+    private int count(String sql, Object... args) {
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class, args);
         return value == null ? 0 : value;
     }
 

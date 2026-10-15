@@ -118,7 +118,8 @@ class SeedRunnerIT {
     }
 
     @Test
-    void assertEnumCoverage_emptyDatabase_namesEveryValueOfTheMessagePermissionColumn() {
+    void
+            assertEnumCoverage_emptyDatabase_namesEveryValueOfTheMessagePermissionAndRequestStatusColumns() {
         SeedRunner seedRunner =
                 new SeedRunner(
                         jdbcTemplate,
@@ -144,7 +145,9 @@ class SeedRunnerIT {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("user_settings.message_permission='everyone'")
                 .hasMessageContaining("user_settings.message_permission='following'")
-                .hasMessageContaining("user_settings.message_permission='nobody'");
+                .hasMessageContaining("user_settings.message_permission='nobody'")
+                .hasMessageContaining("conversations.request_status='pending'")
+                .hasMessageContaining("conversations.request_status='declined'");
     }
 
     private void insertHashtags(String status, int count) {
