@@ -285,6 +285,7 @@ class DomainSignalMappingsTest {
                                 "messageId", messageId.toString(),
                                 "userId", actor.toString(),
                                 "emoji", family,
+                                "reactionId", UUID.randomUUID().toString(),
                                 "reactedAt", OCCURRED_AT.toString()));
 
         assertThat(signal.userId()).isEqualTo(actor);
@@ -292,6 +293,7 @@ class DomainSignalMappingsTest {
         assertThat(signal.entityType()).isEqualTo("message");
         assertThat(signal.entityId()).isEqualTo(messageId);
         assertThat(json(signal.metadata()).get("emoji").asString()).isEqualTo(family);
+        assertThat(json(signal.metadata()).has("reactionId")).isFalse();
     }
 
     @Test
@@ -301,6 +303,7 @@ class DomainSignalMappingsTest {
         data.put("conversationId", UUID.randomUUID().toString());
         data.put("messageId", messageId.toString());
         data.put("userId", actor.toString());
+        data.put("reactionId", UUID.randomUUID().toString());
 
         ResolvedSignal signal = resolve(MessageEventTypes.MESSAGE_REACTION_CHANGED_V1, data);
 

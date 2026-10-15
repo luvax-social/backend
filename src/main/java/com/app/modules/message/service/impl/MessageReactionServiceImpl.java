@@ -81,7 +81,8 @@ public class MessageReactionServiceImpl implements MessageReactionService {
                         .orElseThrow(() -> new AppException(ApiErrorCode.INTERNAL_ERROR));
         // A reaction an administrator removed stays hidden, so changing its emoji is not news.
         if (changed > 0 && stored.getAdminRemovedAt() == null) {
-            enqueueChanged(conversation, messageId, actorId, emoji, stored.getReactedAt());
+            enqueueChanged(
+                    conversation, messageId, stored.getId(), actorId, emoji, stored.getReactedAt());
         }
         return mapper.toReactionResponse(stored);
     }
@@ -107,6 +108,7 @@ public class MessageReactionServiceImpl implements MessageReactionService {
                                 enqueueChanged(
                                         conversation,
                                         messageId,
+                                        removed.getId(),
                                         actorId,
                                         null,
                                         OffsetDateTime.now(ZoneOffset.UTC)));
@@ -151,10 +153,13 @@ public class MessageReactionServiceImpl implements MessageReactionService {
     // A removal omits the emoji key because the outbox payload map rejects null values; consumers
     // read an absent emoji as no reaction. The inbox audience is decided here so the live consumer
     // needs no lookup, and the consumer strips it before the event reaches the thread topic. No
-    // folder is carried: a reaction does not move a conversation between folders.
+    // folder is carried: a reaction does not move a conversation between folders. The reaction id
+    // lets a client attach the reaction's own identifier, the target of a report, to what it
+    // patches into its cache; a removal carries the id of the row that statement deleted.
     private void enqueueChanged(
             Conversation conversation,
             UUID messageId,
+            UUID reactionId,
             UUID userId,
             String emoji,
             OffsetDateTime reactedAt) {
@@ -167,6 +172,7 @@ public class MessageReactionServiceImpl implements MessageReactionService {
                         .toList());
         data.put("conversationId", conversationId.toString());
         data.put("messageId", messageId.toString());
+        data.put("reactionId", reactionId.toString());
         data.put("userId", userId.toString());
         if (emoji != null) {
             data.put("emoji", emoji);

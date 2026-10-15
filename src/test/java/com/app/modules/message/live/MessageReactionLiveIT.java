@@ -179,7 +179,13 @@ class MessageReactionLiveIT {
         assertThat(put(alice, THUMBS_UP).getStatusCode()).isEqualTo(HttpStatus.OK);
         String set = awaitFrameContaining(received, MessageEventTypes.MESSAGE_REACTION_CHANGED_V1);
 
+        UUID storedId =
+                jdbcTemplate.queryForObject(
+                        "SELECT id FROM message_reactions WHERE message_id = ?",
+                        UUID.class,
+                        message);
         assertThat(set)
+                .contains("\"reactionId\":\"" + storedId + "\"")
                 .contains("\"conversationId\":\"" + conversation + "\"")
                 .contains("\"messageId\":\"" + message + "\"")
                 .contains("\"userId\":\"" + alice + "\"")

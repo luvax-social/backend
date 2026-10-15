@@ -247,7 +247,10 @@ public interface MessageMapper {
      */
     default MessageReactionResponse toReactionResponse(MessageReaction reaction) {
         return new MessageReactionResponse(
-                reaction.getUserId(), reaction.getEmoji(), reaction.getReactedAt());
+                reaction.getId(),
+                reaction.getUserId(),
+                reaction.getEmoji(),
+                reaction.getReactedAt());
     }
 
     /**

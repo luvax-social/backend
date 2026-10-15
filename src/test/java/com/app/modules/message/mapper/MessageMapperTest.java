@@ -11,9 +11,11 @@ import org.junit.jupiter.api.Test;
 
 import com.app.modules.media.enums.MediaType;
 import com.app.modules.message.dto.response.MessageMediaResponse;
+import com.app.modules.message.dto.response.MessageReactionResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.ReplyPreviewResponse;
 import com.app.modules.message.entity.Message;
+import com.app.modules.message.entity.MessageReaction;
 import com.app.modules.message.enums.MessageType;
 
 class MessageMapperTest {
@@ -33,6 +35,24 @@ class MessageMapperTest {
         assertThat(response.sharedPostId()).isEqualTo(message.getSharedPostId());
         assertThat(response.isDeleted()).isFalse();
         assertThat(response.deletedAt()).isNull();
+    }
+
+    @Test
+    void toReactionResponse_carriesTheReactionsOwnId() {
+        MessageReaction reaction =
+                MessageReaction.builder()
+                        .id(UUID.randomUUID())
+                        .messageId(UUID.randomUUID())
+                        .userId(UUID.randomUUID())
+                        .emoji("❤️")
+                        .reactedAt(OffsetDateTime.now(ZoneOffset.UTC))
+                        .build();
+
+        MessageReactionResponse response = mapper.toReactionResponse(reaction);
+
+        assertThat(response.id()).isEqualTo(reaction.getId());
+        assertThat(response.userId()).isEqualTo(reaction.getUserId());
+        assertThat(response.emoji()).isEqualTo(reaction.getEmoji());
     }
 
     @Test

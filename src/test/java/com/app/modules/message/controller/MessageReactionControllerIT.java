@@ -98,9 +98,14 @@ class MessageReactionControllerIT {
         Map<?, ?> data = (Map<?, ?>) put.getBody().get("data");
         assertThat(data.get("userId")).isEqualTo(chat.alice().id().toString());
         assertThat(data.get("emoji")).isEqualTo(THUMBS_UP);
+        UUID storedId = storedReactionId(message);
+        assertThat(data.get("id")).isEqualTo(storedId.toString());
         assertThat(reactionsOf(chat.bob(), chat.id(), message))
                 .extracting(r -> r.get("emoji"))
                 .containsExactly(THUMBS_UP);
+        assertThat(reactionsOf(chat.bob(), chat.id(), message))
+                .extracting(r -> r.get("id"))
+                .containsExactly(storedId.toString());
         String firstReactedAt =
                 (String) reactionsOf(chat.bob(), chat.id(), message).get(0).get("reactedAt");
 
@@ -108,6 +113,7 @@ class MessageReactionControllerIT {
                 .isEqualTo(HttpStatus.OK);
         List<Map<String, Object>> changed = reactionsOf(chat.bob(), chat.id(), message);
         assertThat(changed).extracting(r -> r.get("emoji")).containsExactly(HEART);
+        assertThat(changed).extracting(r -> r.get("id")).containsExactly(storedId.toString());
         assertThat(reactionRows(message)).isEqualTo(1);
         assertThat(
                         jdbc.queryForObject(
@@ -123,6 +129,30 @@ class MessageReactionControllerIT {
         assertThat(reactionsOf(chat.bob(), chat.id(), message)).isEmpty();
         assertThat(delete(chat.alice(), chat.id(), message).getStatusCode())
                 .isEqualTo(HttpStatus.NO_CONTENT);
+
+        put(chat.alice(), chat.id(), message, HEART);
+        assertThat(storedReactionId(message)).isNotEqualTo(storedId);
+    }
+
+    @Test
+    void react_liveEventCarriesTheStoredReactionId() {
+        Chat chat = openAcceptedChat("rx_event_id");
+        UUID message = sendId(chat.bob(), chat.id(), "which reaction is this");
+
+        put(chat.alice(), chat.id(), message, THUMBS_UP);
+        put(chat.alice(), chat.id(), message, HEART);
+
+        UUID storedId = storedReactionId(message);
+        List<String> payloads =
+                jdbc.queryForList(
+                        "SELECT payload::text FROM outbox_events WHERE event_type ="
+                                + " 'message.reaction.changed.v1' AND aggregate_id = ? ORDER BY"
+                                + " created_at",
+                        String.class,
+                        message);
+        assertThat(payloads).hasSize(2);
+        assertThat(payloads).allSatisfy(p -> assertThat(p).contains(storedId.toString()));
+        assertThat(payloads).allSatisfy(p -> assertThat(p).contains("reactionId"));
     }
 
     @Test
@@ -161,7 +191,7 @@ class MessageReactionControllerIT {
         assertThat(payloads.get(0)).contains(THUMBS_UP);
         assertThat(payloads.get(1)).contains(HEART);
         assertThat(payloads.get(2)).doesNotContain("emoji");
-        assertThat(payloads.get(0)).doesNotContain("inboxRecipientIds");
+        assertThat(payloads.get(0)).contains("inboxRecipientIds");
     }
 
     @Test
@@ -393,6 +423,11 @@ class MessageReactionControllerIT {
                         .findFirst()
                         .orElseThrow();
         return (List<Map<String, Object>>) message.get("reactions");
+    }
+
+    private UUID storedReactionId(UUID messageId) {
+        return jdbc.queryForObject(
+                "SELECT id FROM message_reactions WHERE message_id = ?", UUID.class, messageId);
     }
 
     private int reactionRows(UUID messageId) {
