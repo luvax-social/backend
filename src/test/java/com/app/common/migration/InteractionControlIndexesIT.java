@@ -60,7 +60,7 @@ class InteractionControlIndexesIT {
         "idx_conversations_request_recipient, conversations",
         "idx_messages_conversation_created_id, messages",
         "idx_message_reactions_message, message_reactions",
-        "idx_message_reactions_reacted_at, message_reactions"
+        "idx_message_reactions_conversation_reacted, message_reactions"
     })
     void index_afterMigration_existsOnItsTableAndIsValid(String indexName, String tableName) {
         Map<String, Object> row =
@@ -79,6 +79,33 @@ class InteractionControlIndexesIT {
 
         assertThat(row.get("table_name")).isEqualTo(tableName);
         assertThat(row.get("valid")).isEqualTo(true);
+    }
+
+    @Test
+    void reactedAtIndex_afterTheConversationIndexReplacedIt_isGone() {
+        Integer remaining =
+                jdbcClient
+                        .sql(
+                                "SELECT COUNT(*) FROM pg_class WHERE relname ="
+                                        + " 'idx_message_reactions_reacted_at'")
+                        .query(Integer.class)
+                        .single();
+
+        assertThat(remaining).isZero();
+    }
+
+    @Test
+    void reactionConversationColumn_afterMigration_isRequired() {
+        String nullable =
+                jdbcClient
+                        .sql(
+                                "SELECT is_nullable FROM information_schema.columns WHERE"
+                                        + " table_name = 'message_reactions' AND column_name ="
+                                        + " 'conversation_id'")
+                        .query(String.class)
+                        .single();
+
+        assertThat(nullable).isEqualTo("NO");
     }
 
     @Test

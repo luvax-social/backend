@@ -309,10 +309,11 @@ class AdminReactionModerationIT {
                         peer.id());
         UUID reaction =
                 jdbcTemplate.queryForObject(
-                        "INSERT INTO message_reactions(message_id, user_id, emoji)"
-                                + " VALUES (?, ?, ?) RETURNING id",
+                        "INSERT INTO message_reactions(message_id, conversation_id, user_id, emoji)"
+                                + " VALUES (?, ?, ?, ?) RETURNING id",
                         UUID.class,
                         message,
+                        conversation,
                         reactor.id(),
                         THUMBS_UP);
         return new Fixture(reactor, peer, conversation, message, reaction);

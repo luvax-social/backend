@@ -34,8 +34,9 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
     @Query(
             value =
                     """
-					INSERT INTO message_reactions (message_id, user_id, emoji, reacted_at)
-					VALUES (:messageId, :userId, :emoji, NOW())
+					INSERT INTO message_reactions (message_id, conversation_id, user_id, emoji, reacted_at)
+					SELECT m.id, m.conversation_id, :userId, :emoji, NOW()
+					FROM messages m WHERE m.id = :messageId
 					ON CONFLICT (message_id, user_id) DO UPDATE
 					SET emoji = EXCLUDED.emoji, reacted_at = NOW()
 					WHERE message_reactions.emoji <> EXCLUDED.emoji
@@ -103,11 +104,11 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
      * only reactions newer than the conversation's last message.
      *
      * <p>The list shows a reaction only when it is the newest thing in the thread, so a reaction at
-     * or before {@code conversations.last_message_at} is never needed. Driving the read from {@code
-     * reacted_at} against that bound keeps the cost proportional to the reactions that arrived
-     * after the last message instead of every message of every listed conversation, and it is the
-     * reason the read joins {@code conversations}. Applies the same visibility rules as {@link
-     * #findVisibleForMessages}; one statement for the whole list avoids a query per row.
+     * or before {@code conversations.last_message_at} is never needed. A lateral lookup per listed
+     * conversation walks {@code idx_message_reactions_conversation_reacted} from the newest
+     * reaction and stops at the first visible one, so the cost follows the listed conversations
+     * instead of the reactions made anywhere on the platform. Applies the same visibility rules as
+     * {@link #findVisibleForMessages}; one statement for the whole list avoids a query per row.
      *
      * @param conversationIds the conversations being listed
      * @param viewerId the user reading the list
@@ -116,19 +117,25 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
     @Query(
             value =
                     """
-					SELECT DISTINCT ON (c.id) r.*
+					SELECT latest.*
 					FROM conversations c
-					JOIN message_reactions r ON r.reacted_at > c.last_message_at
-					JOIN messages m ON m.id = r.message_id AND m.conversation_id = c.id
+					CROSS JOIN LATERAL (
+						SELECT r.*
+						FROM message_reactions r
+						JOIN messages m ON m.id = r.message_id
+						WHERE r.conversation_id = c.id
+						AND r.reacted_at > c.last_message_at
+						AND r.admin_removed_at IS NULL
+						AND m.is_deleted = FALSE
+						AND m.admin_removed_at IS NULL
+						AND NOT EXISTS (
+							SELECT 1 FROM blocks b
+							WHERE (b.blocker_id = :viewerId AND b.blocked_id = r.user_id)
+								OR (b.blocker_id = r.user_id AND b.blocked_id = :viewerId))
+						ORDER BY r.reacted_at DESC, r.id DESC
+						LIMIT 1
+					) latest
 					WHERE c.id IN (:conversationIds)
-					AND r.admin_removed_at IS NULL
-					AND m.is_deleted = FALSE
-					AND m.admin_removed_at IS NULL
-					AND NOT EXISTS (
-						SELECT 1 FROM blocks b
-						WHERE (b.blocker_id = :viewerId AND b.blocked_id = r.user_id)
-							OR (b.blocker_id = r.user_id AND b.blocked_id = :viewerId))
-					ORDER BY c.id, r.reacted_at DESC, r.id DESC
 					""",
             nativeQuery = true)
     List<MessageReaction> findLatestVisiblePerConversation(

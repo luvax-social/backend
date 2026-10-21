@@ -83,8 +83,8 @@ public class MessageSeedWriter {
                     + " admin_removed_at, created_at, reply_to_id) VALUES (?, ?, ?, ?::message_type, ?, ?, ?, ?,"
                     + " ?, ?, ?, ?, ?)";
     private static final String INSERT_REACTION_SQL =
-            "INSERT INTO message_reactions (message_id, user_id, emoji, reacted_at) VALUES (?, ?, ?,"
-                    + " ?)";
+            "INSERT INTO message_reactions (message_id, conversation_id, user_id, emoji,"
+                    + " reacted_at) VALUES (?, ?, ?, ?, ?)";
     private static final String INSERT_REQUEST_CONVERSATION_SQL =
             "INSERT INTO conversations (id, direct_pair_key, created_by, last_message_at,"
                     + " created_at, updated_at, request_status, request_recipient_id, request_hidden,"
@@ -337,7 +337,11 @@ public class MessageSeedWriter {
                 }
                 reactionRows.add(
                         new Object[] {
-                            messageId, reactorId, reaction.emoji(), Timestamp.from(reactedAt)
+                            messageId,
+                            conversationId,
+                            reactorId,
+                            reaction.emoji(),
+                            Timestamp.from(reactedAt)
                         });
             }
 

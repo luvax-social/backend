@@ -113,6 +113,34 @@ class MessageReactionRepositoryIT {
     }
 
     @Test
+    void conversationColumn_followsTheMessageAndCascadesWithTheConversation() {
+        UUID user = insertUser("column_user");
+        UUID conversation = insertConversation();
+        UUID message = insertMessage(conversation, user, NOW, false, false);
+        insertReaction(message, user, "x", NOW.plusMinutes(1), false);
+
+        assertThat(
+                        jdbcClient
+                                .sql(
+                                        "SELECT conversation_id FROM message_reactions WHERE"
+                                                + " message_id = :m")
+                                .param("m", message)
+                                .query(UUID.class)
+                                .single())
+                .isEqualTo(conversation);
+
+        jdbcClient.sql("DELETE FROM conversations WHERE id = :c").param("c", conversation).update();
+
+        assertThat(
+                        jdbcClient
+                                .sql("SELECT COUNT(*) FROM message_reactions WHERE user_id = :u")
+                                .param("u", user)
+                                .query(Integer.class)
+                                .single())
+                .isZero();
+    }
+
+    @Test
     void deleteReaction_returnsTheRemovedRowIncludingItsModerationState() {
         UUID user = insertUser("delete_user");
         UUID conversation = insertConversation();
@@ -142,11 +170,12 @@ class MessageReactionRepositoryIT {
         return reactionRepository.findLatestVisiblePerConversation(List.of(conversation), viewer);
     }
 
-    // The statement is read from the repository's own @Query annotation. The read starts from the
-    // reactions newer than the conversation's last message, so the plan has to reach
-    // idx_message_reactions_reacted_at (V147) rather than walk every reaction of every message.
+    // The statement is read from the repository's own @Query annotation. The read looks up the
+    // newest visible reaction of each listed conversation, so the plan has to reach
+    // idx_message_reactions_conversation_reacted (V149) rather than walk the reactions of other
+    // conversations.
     @Test
-    void latestVisible_plan_usesTheReactedAtIndex() throws NoSuchMethodException {
+    void latestVisible_plan_usesTheConversationReactedIndex() throws NoSuchMethodException {
         UUID viewer = insertUser("latest_plan_viewer");
         UUID other = insertUser("latest_plan_other");
         UUID conversation = insertConversation();
@@ -156,6 +185,11 @@ class MessageReactionRepositoryIT {
             insertReaction(older, other, "a", NOW.minusHours(1 + i), false);
         }
         insertReaction(last, viewer, "newest", NOW.plusMinutes(1), false);
+        UUID noise = insertConversation();
+        for (int i = 0; i < 300; i++) {
+            UUID noisy = insertMessage(noise, other, NOW.minusHours(2 + i), false, false);
+            insertReaction(noisy, viewer, "n", NOW.plusMinutes(10 + i), false);
+        }
         jdbcClient.sql("ANALYZE message_reactions").update();
         jdbcClient.sql("ANALYZE messages").update();
         jdbcClient.sql("ANALYZE conversations").update();
@@ -179,7 +213,7 @@ class MessageReactionRepositoryIT {
                                 .query(String.class)
                                 .list());
 
-        assertThat(plan).contains("idx_message_reactions_reacted_at");
+        assertThat(plan).contains("idx_message_reactions_conversation_reacted");
     }
 
     private UUID insertUser(String username) {
@@ -233,10 +267,11 @@ class MessageReactionRepositoryIT {
         jdbcClient
                 .sql(
                         """
-						INSERT INTO message_reactions(message_id, user_id, emoji, reacted_at,
-							admin_removed_at)
-						VALUES (:message, :user, :emoji, :reactedAt,
-							CASE WHEN :adminRemoved THEN :reactedAt END)
+						INSERT INTO message_reactions(message_id, conversation_id, user_id, emoji,
+							reacted_at, admin_removed_at)
+						SELECT m.id, m.conversation_id, :user, :emoji, :reactedAt,
+							CASE WHEN :adminRemoved THEN :reactedAt END
+						FROM messages m WHERE m.id = :message
 						""")
                 .param("message", message)
                 .param("user", user)
