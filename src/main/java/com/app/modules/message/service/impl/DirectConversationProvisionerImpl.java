@@ -2,6 +2,7 @@ package com.app.modules.message.service.impl;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -56,7 +57,10 @@ public class DirectConversationProvisionerImpl implements DirectConversationProv
             ConversationRequestStatus status =
                     conversationRepository
                             .lockRequestStatus(current.getId())
-                            .map(value -> ConversationRequestStatus.valueOf(value.toUpperCase()))
+                            .map(
+                                    value ->
+                                            ConversationRequestStatus.valueOf(
+                                                    value.toUpperCase(Locale.ROOT)))
                             .orElse(ConversationRequestStatus.ACCEPTED);
             if (status == ConversationRequestStatus.PENDING) {
                 // A mutual follow is the strongest signal that the two want to talk, so it settles

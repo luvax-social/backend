@@ -606,6 +606,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- Settling a message request on a mutual follow no longer depends on the server's default locale when it reads the request status.
 - A requester's reactions on a message request that has not been accepted no longer reach the recipient's live inbox or replace the recipient's reaction preview in the conversation list, and a declined request behaves the same to its requester.
 - The conversation list now finds the newest reaction of each listed conversation through a per-conversation index on `message_reactions.conversation_id` (V148, V149) instead of scanning every reaction made on the platform since that conversation's last message.
 - A story reply to an account that does not follow the sender is again accepted as the one message of a message request, instead of being refused as a media message.
