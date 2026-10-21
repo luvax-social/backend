@@ -28,7 +28,7 @@ public interface MessageService {
      *     referenced media/post/story/reply does not exist; MESSAGE_IDEMPOTENCY_CONFLICT when the
      *     key is reused with a different payload; MESSAGE_REQUEST_AWAITING_ACCEPTANCE when the
      *     caller started a request the recipient has not accepted and has used the one text message
-     *     it allows, which a declined request answers identically
+     *     or story reply it allows, which a declined request answers identically
      */
     MessageResponse sendMessage(
             UUID actorId, UUID conversationId, SendMessageRequest request, String idempotencyKey);

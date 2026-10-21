@@ -19,10 +19,10 @@ package com.app.modules.social.policy;
  *       recipient does not follow into the recipient's requests. A requester's send into a pending
  *       conversation goes to the requests as well.
  *   <li>The pending-request rule, for a send: while a request is pending, the requester may send
- *       exactly one text message and nothing else; once it was declined, the requester may send
- *       nothing. Every refusal answers {@link InteractionReason#AWAITING_ACCEPTANCE}, so a declined
- *       request reads as a pending one. The recipient's own send is allowed, and the message module
- *       accepts the request on it.
+ *       exactly one text message or story reply and nothing else; once it was declined, the
+ *       requester may send nothing. Every refusal answers {@link
+ *       InteractionReason#AWAITING_ACCEPTANCE}, so a declined request reads as a pending one. The
+ *       recipient's own send is allowed, and the message module accepts the request on it.
  *   <li>Hidden Words: a comment, or a requester's first message, whose text matches the target's
  *       personal list (or the platform-wide list, unless the target turned it off) is hidden.
  * </ol>

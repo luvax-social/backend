@@ -137,7 +137,7 @@ While a limit is in force, an actor with no accepted follow of the target is hid
 Follows are read through `FollowRepository.findAcceptedAt`, which ignores a pending request, so an account still awaiting approval counts as a non-follower.
 The message permission rule denies a new conversation when the recipient chose `nobody`, denies it under `following` unless the recipient follows the actor, and routes it to the recipient's requests under `everyone` when the recipient does not follow the actor.
 A requester's send into a pending conversation goes to the requests, and to the hidden requests when the request is already filed there.
-The pending-request rule lets the requester send one text message while the request is pending, and refuses anything more with `AWAITING_ACCEPTANCE`.
+The pending-request rule lets the requester send one text message or one story reply while the request is pending, and refuses media and post shares, and refuses anything more with `AWAITING_ACCEPTANCE`.
 A declined request answers `AWAITING_ACCEPTANCE` as well, so the requester cannot tell a decline from a pending request.
 The recipient's own send is allowed, and the message module treats it as accepting the request.
 The recipient's explicit accept, delete and block of a request are not policy decisions: the message module applies them directly, and blocking reaches this module only through `SocialService.blockUser`.

@@ -119,6 +119,59 @@ class PendingRequestSendRulesIT {
     }
 
     @Test
+    void pendingRequester_firstStoryReplySucceeds_secondMessageRefused() {
+        TestUser alice = registerUser("sr_a");
+        TestUser bob = registerUser("sr_b");
+        UUID conversationId = createDirectOk(alice, bob.id());
+        UUID storyId = insertStory(bob.id());
+
+        ResponseEntity<Map> reply = sendStoryReply(alice, conversationId, storyId, "what a view");
+        ResponseEntity<Map> second = send(alice, conversationId, "and one more");
+
+        assertThat(reply.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(dataOf(reply).get("messageType")).isEqualTo("story_share");
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(second.getBody().get("code")).isEqualTo("MESSAGE_REQUEST_AWAITING_ACCEPTANCE");
+        assertThat(messageCount(conversationId)).isEqualTo(1);
+        assertThat(folderIds(bob, "requests")).containsExactly(conversationId);
+    }
+
+    @Test
+    void pendingRequester_firstStoryReplyAfterAText_refused() {
+        TestUser alice = registerUser("sr_a");
+        TestUser bob = registerUser("sr_b");
+        UUID conversationId = createDirectOk(alice, bob.id());
+        UUID storyId = insertStory(bob.id());
+        assertThat(send(alice, conversationId, "hello bob").getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+
+        ResponseEntity<Map> reply = sendStoryReply(alice, conversationId, storyId, "what a view");
+
+        assertThat(reply.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(reply.getBody().get("code")).isEqualTo("MESSAGE_REQUEST_AWAITING_ACCEPTANCE");
+        assertThat(messageCount(conversationId)).isEqualTo(1);
+    }
+
+    @Test
+    void pendingRequester_storyReplyMatchingRecipientList_marksRequestHidden() {
+        TestUser alice = registerUser("sr_a");
+        TestUser bob = registerUser("sr_b");
+        jdbc.update(
+                "INSERT INTO user_hidden_words(user_id, phrase, normalized_phrase)"
+                        + " VALUES (?, 'zorblax', 'zorblax')",
+                bob.id());
+        UUID conversationId = createDirectOk(alice, bob.id());
+        UUID storyId = insertStory(bob.id());
+
+        ResponseEntity<Map> reply =
+                sendStoryReply(alice, conversationId, storyId, "you are a Zorblax!");
+
+        assertThat(reply.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(conversationRow(conversationId).get("request_hidden")).isEqualTo(true);
+        assertThat(folderIds(bob, "hidden_requests")).containsExactly(conversationId);
+    }
+
+    @Test
     void pendingRequester_firstTextMatchingRecipientList_marksRequestHidden() {
         TestUser alice = registerUser("sr_a");
         TestUser bob = registerUser("sr_b");
@@ -285,6 +338,40 @@ class PendingRequestSendRulesIT {
 
     private static Map<?, ?> dataOf(ResponseEntity<Map> response) {
         return (Map<?, ?>) response.getBody().get("data");
+    }
+
+    private UUID insertStory(UUID ownerId) {
+        UUID mediaAssetId = UUID.randomUUID();
+        jdbc.update(
+                "INSERT INTO media_assets (id, user_id, storage_key, cdn_url, media_type,"
+                        + " mime_type, file_size) VALUES (?, ?, ?, ?, CAST('image' AS media_type),"
+                        + " 'image/jpeg', 1024)",
+                mediaAssetId,
+                ownerId,
+                "test/" + mediaAssetId,
+                "https://cdn.test/" + mediaAssetId);
+        UUID storyId = UUID.randomUUID();
+        jdbc.update(
+                "INSERT INTO stories (id, user_id, media_asset_id, story_type)"
+                        + " VALUES (?, ?, ?, CAST('image' AS story_type))",
+                storyId,
+                ownerId,
+                mediaAssetId);
+        return storyId;
+    }
+
+    private ResponseEntity<Map> sendStoryReply(
+            TestUser actor, UUID conversationId, UUID storyId, String content) {
+        return rest.exchange(
+                "/api/v1/conversations/" + conversationId + "/messages",
+                HttpMethod.POST,
+                new HttpEntity<>(
+                        Map.of(
+                                "messageType", "story_share",
+                                "content", content,
+                                "sharedStoryId", storyId),
+                        authHeaders(actor)),
+                Map.class);
     }
 
     private ResponseEntity<Map> send(TestUser actor, UUID conversationId, String content) {
