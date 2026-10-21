@@ -31,6 +31,7 @@ import com.app.common.response.UserListItemResponse;
 import com.app.common.response.UserSummaryResponse;
 import com.app.common.response.ViewerRelationshipResponse;
 import com.app.modules.message.service.DirectConversationProvisioner;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.report.enums.ReportType;
 import com.app.modules.report.service.ReportedTargetService;
 import com.app.modules.social.dto.response.FollowRequestResponse;
@@ -41,10 +42,13 @@ import com.app.modules.social.entity.BlockId;
 import com.app.modules.social.entity.Follow;
 import com.app.modules.social.entity.FollowId;
 import com.app.modules.social.enums.FollowStatus;
+import com.app.modules.social.repository.AccountShowFewerRepository;
 import com.app.modules.social.repository.BlockRepository;
 import com.app.modules.social.repository.FollowEdgeProjection;
 import com.app.modules.social.repository.FollowRepository;
 import com.app.modules.social.repository.SocialUserRepository;
+import com.app.modules.social.repository.UserMuteRepository;
+import com.app.modules.social.repository.ViewerPreferenceProjection;
 import com.app.modules.social.service.SocialEventService;
 import com.app.modules.social.service.SocialService;
 import com.app.modules.users.entity.User;
@@ -62,6 +66,8 @@ public class SocialServiceImpl implements SocialService {
     private final UserSummaryService userSummaryService;
     private final ReportedTargetService reportedTargetService;
     private final DirectConversationProvisioner directConversationProvisioner;
+    private final UserMuteRepository userMuteRepository;
+    private final AccountShowFewerRepository accountShowFewerRepository;
 
     public SocialServiceImpl(
             FollowRepository followRepository,
@@ -70,8 +76,12 @@ public class SocialServiceImpl implements SocialService {
             SocialEventService socialEventService,
             UserSummaryService userSummaryService,
             ReportedTargetService reportedTargetService,
-            DirectConversationProvisioner directConversationProvisioner) {
+            DirectConversationProvisioner directConversationProvisioner,
+            UserMuteRepository userMuteRepository,
+            AccountShowFewerRepository accountShowFewerRepository) {
         this.directConversationProvisioner = directConversationProvisioner;
+        this.userMuteRepository = userMuteRepository;
+        this.accountShowFewerRepository = accountShowFewerRepository;
         this.followRepository = followRepository;
         this.blockRepository = blockRepository;
         this.socialUserRepository = socialUserRepository;
@@ -271,6 +281,11 @@ public class SocialServiceImpl implements SocialService {
 
         FollowId followIdReverse = new FollowId(targetUserId, currentUserId);
         followRepository.findById(followIdReverse).ifPresent(followRepository::delete);
+
+        // A block supersedes the softer controls, in both directions: a mute or a show-fewer
+        // request left behind would resurface as stale state the moment the block is lifted.
+        userMuteRepository.deleteBetween(currentUserId, targetUserId);
+        accountShowFewerRepository.deleteBetween(currentUserId, targetUserId);
 
         // Blocking destroys both follow edges above, so the pair is no longer mutual. An empty
         // conversation provisioned by that relationship goes with it; one with messages stays and
@@ -655,6 +670,23 @@ public class SocialServiceImpl implements SocialService {
                 new HashSet<>(blockRepository.findOutgoingBlockedIds(viewerId, distinct));
         Set<UUID> reported =
                 reportedTargetService.loadReportedEntityIds(viewerId, ReportType.USER, distinct);
+        // One batched query reads both the viewer's mutes and show-fewer requests. A mute row and a
+        // show-fewer row for the same account arrive separately, so the flags are merged here.
+        Set<UUID> mutingPosts = new HashSet<>();
+        Set<UUID> mutingStories = new HashSet<>();
+        Set<UUID> showingFewer = new HashSet<>();
+        for (ViewerPreferenceProjection preference :
+                userMuteRepository.findViewerPreferences(viewerId, distinct)) {
+            if (preference.getMutePosts()) {
+                mutingPosts.add(preference.getOtherId());
+            }
+            if (preference.getMuteStories()) {
+                mutingStories.add(preference.getOtherId());
+            }
+            if (preference.getShowFewer()) {
+                showingFewer.add(preference.getOtherId());
+            }
+        }
         Map<UUID, ViewerRelationshipResponse> result = new HashMap<>(distinct.size());
         for (UUID id : distinct) {
             result.put(
@@ -664,7 +696,10 @@ public class SocialServiceImpl implements SocialService {
                             requested.getOrDefault(id, false),
                             followedBy.getOrDefault(id, false),
                             blocking.contains(id),
-                            reported.contains(id)));
+                            reported.contains(id),
+                            mutingPosts.contains(id),
+                            mutingStories.contains(id),
+                            showingFewer.contains(id)));
         }
         return result;
     }
@@ -673,6 +708,30 @@ public class SocialServiceImpl implements SocialService {
     @Transactional(readOnly = true)
     public Set<UUID> findBlockedEitherDirection(UUID viewerId) {
         return new HashSet<>(blockRepository.findBlockedCounterpartyIds(viewerId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findFeedSuppressedAuthors(
+            UUID viewerId, Collection<UUID> candidateAuthorIds, FeedSurface surface) {
+        if (candidateAuthorIds == null || candidateAuthorIds.isEmpty()) {
+            return Set.of();
+        }
+        // The viewer's own preference rows are read whole and intersected with the candidates,
+        // not matched against them in SQL: the viewer's rows are few, while the candidate list of
+        // a following feed can hold thousands of ids.
+        Set<UUID> suppressed =
+                new HashSet<>(
+                        userMuteRepository.findFeedSuppressedAuthorIds(
+                                viewerId, surface.appliesShowFewer()));
+        suppressed.retainAll(new HashSet<>(candidateAuthorIds));
+        return suppressed;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findStoryMutedAuthors(UUID viewerId) {
+        return new HashSet<>(userMuteRepository.findStoryMutedAuthorIds(viewerId));
     }
 
     private void checkCanViewSocialGraph(UUID currentUserId, UUID targetUserId, User targetUser) {

@@ -31,6 +31,7 @@ import com.app.modules.post.dto.response.FeedPostResponse;
 import com.app.modules.post.dto.response.PostEditHistoryResponse;
 import com.app.modules.post.dto.response.PostResponse;
 import com.app.modules.post.dto.response.PostViewResponse;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.service.PostSearchService;
 import com.app.modules.post.service.PostService;
 import com.app.modules.post.service.PostViewService;
@@ -117,7 +118,8 @@ public class PostController extends BaseController implements PostApi {
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "limit", defaultValue = "20") int limit) {
         CursorPageResponse<FeedPostResponse> body =
-                postService.getFeed(SecurityUtils.getCurrentUserId(), cursor, limit);
+                postService.getFeed(
+                        SecurityUtils.getCurrentUserId(), cursor, limit, FeedSurface.FOLLOWING);
         return ResponseEntity.ok(ApiResponse.success(ApiSuccessCode.OK, body));
     }
 

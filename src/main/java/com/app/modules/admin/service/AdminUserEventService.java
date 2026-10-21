@@ -28,14 +28,16 @@ public interface AdminUserEventService {
      * @param from inclusive lower bound; required
      * @param to exclusive upper bound; required, strictly after {@code from}, and no more than
      *     {@link #MAX_WINDOW_DAYS} days later
-     * @param eventType restrict to one event type, or null for all of them
+     * @param eventType restrict to one event type, or null for all that may be shown; a private
+     *     preference signal is refused
      * @param cursor opaque cursor from a previous page of this endpoint; null for the first page
      * @param limit requested page size
-     * @return events newest first
+     * @return events newest first, never including a private preference signal
      * @throws com.app.common.exception.AppException {@code BAD_REQUEST} when either bound is
-     *     absent, when {@code to} is not after {@code from}, or when the window exceeds {@link
-     *     #MAX_WINDOW_DAYS} days; {@code INVALID_CURSOR} for a cursor this endpoint did not issue;
-     *     {@code ANALYTICS_UNAVAILABLE} (503) when ClickHouse cannot serve the read
+     *     absent, when {@code to} is not after {@code from}, when the window exceeds {@link
+     *     #MAX_WINDOW_DAYS} days, or when {@code eventType} names a private preference signal;
+     *     {@code INVALID_CURSOR} for a cursor this endpoint did not issue; {@code
+     *     ANALYTICS_UNAVAILABLE} (503) when ClickHouse cannot serve the read
      */
     CursorPageResponse<UserEventResponse> listUserEvents(
             UUID actorId,

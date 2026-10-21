@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
+import com.app.common.text.Snippets;
 import com.app.modules.admin.dto.response.AdminReportTargetResponse;
 import com.app.modules.report.enums.ReportType;
 
@@ -47,6 +48,7 @@ public class AdminReportTargetRepository {
             case USER -> findUser(entityId);
             case STORY -> findStory(entityId);
             case MESSAGE -> findMessage(entityId);
+            case MESSAGE_REACTION -> findMessageReaction(entityId);
         };
     }
 
@@ -72,7 +74,8 @@ public class AdminReportTargetRepository {
                                         rs.getString("caption"),
                                         findPostMediaUrls(entityId),
                                         rs.getObject("deleted_at") != null,
-                                        rs.getObject("created_at", java.time.OffsetDateTime.class)))
+                                        rs.getObject("created_at", java.time.OffsetDateTime.class),
+                                        null))
                 .optional();
     }
 
@@ -114,7 +117,8 @@ public class AdminReportTargetRepository {
                                         rs.getString("content"),
                                         List.of(),
                                         rs.getBoolean("deleted"),
-                                        rs.getObject("created_at", java.time.OffsetDateTime.class)))
+                                        rs.getObject("created_at", java.time.OffsetDateTime.class),
+                                        null))
                 .optional();
     }
 
@@ -140,7 +144,8 @@ public class AdminReportTargetRepository {
                                     rs.getString("bio"),
                                     avatarUrl == null ? List.of() : List.of(avatarUrl),
                                     rs.getObject("deleted_at") != null,
-                                    rs.getObject("created_at", java.time.OffsetDateTime.class));
+                                    rs.getObject("created_at", java.time.OffsetDateTime.class),
+                                    null);
                         })
                 .optional();
     }
@@ -170,7 +175,8 @@ public class AdminReportTargetRepository {
                                     rs.getString("caption"),
                                     cdnUrl == null ? List.of() : List.of(cdnUrl),
                                     rs.getBoolean("deleted"),
-                                    rs.getObject("created_at", java.time.OffsetDateTime.class));
+                                    rs.getObject("created_at", java.time.OffsetDateTime.class),
+                                    null);
                         })
                 .optional();
     }
@@ -200,8 +206,42 @@ public class AdminReportTargetRepository {
                                     rs.getString("content"),
                                     cdnUrl == null ? List.of() : List.of(cdnUrl),
                                     rs.getBoolean("deleted"),
-                                    rs.getObject("created_at", java.time.OffsetDateTime.class));
+                                    rs.getObject("created_at", java.time.OffsetDateTime.class),
+                                    null);
                         })
+                .optional();
+    }
+
+    // The reactor is the owner, so the review shows who reacted; the snippet is of the message the
+    // reaction sits on, which is the context a moderator needs to judge it. A message its sender
+    // deleted has no content left to quote, and the reaction reads as removed alongside it.
+    private Optional<AdminReportTargetResponse> findMessageReaction(UUID entityId) {
+        return jdbcClient
+                .sql(
+                        """
+						SELECT r.id, r.user_id, u.username, r.emoji, r.reacted_at,
+							CASE WHEN msg.is_deleted THEN NULL ELSE msg.content END AS content,
+							r.admin_removed_at IS NOT NULL OR msg.is_deleted
+								OR msg.admin_removed_at IS NOT NULL AS removed
+						FROM message_reactions r
+						JOIN messages msg ON msg.id = r.message_id
+						LEFT JOIN users u ON u.id = r.user_id
+						WHERE r.id = :entityId
+						""")
+                .param("entityId", entityId)
+                .query(
+                        (rs, row) ->
+                                new AdminReportTargetResponse(
+                                        ReportType.MESSAGE_REACTION,
+                                        rs.getObject("id", UUID.class),
+                                        rs.getObject("user_id", UUID.class),
+                                        rs.getString("username"),
+                                        null,
+                                        Snippets.of(rs.getString("content")),
+                                        List.of(),
+                                        rs.getBoolean("removed"),
+                                        rs.getObject("reacted_at", java.time.OffsetDateTime.class),
+                                        rs.getString("emoji")))
                 .optional();
     }
 }

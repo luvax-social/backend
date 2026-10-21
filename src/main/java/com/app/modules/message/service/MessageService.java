@@ -26,7 +26,9 @@ public interface MessageService {
      *     CONVERSATION_FORBIDDEN when the caller is not an active participant;
      *     MESSAGE_INVALID_PAYLOAD when the payload does not match {@code messageType} or a
      *     referenced media/post/story/reply does not exist; MESSAGE_IDEMPOTENCY_CONFLICT when the
-     *     key is reused with a different payload
+     *     key is reused with a different payload; MESSAGE_REQUEST_AWAITING_ACCEPTANCE when the
+     *     caller started a request the recipient has not accepted and has used the one text message
+     *     or story reply it allows, which a declined request answers identically
      */
     MessageResponse sendMessage(
             UUID actorId, UUID conversationId, SendMessageRequest request, String idempotencyKey);
@@ -82,10 +84,20 @@ public interface MessageService {
     void markUnread(UUID actorId, UUID conversationId);
 
     /**
-     * Returns the caller's total unread message count across every active conversation.
+     * Returns the caller's total unread message count across every active conversation, leaving out
+     * incoming message requests, which {@link #getRequestCount} reports instead.
      *
      * @param actorId the authenticated caller
      * @return total unread count
      */
     long getUnreadCount(UUID actorId);
+
+    /**
+     * Returns how many message requests are waiting for the caller: incoming, pending, not filed as
+     * hidden, and carrying at least one message.
+     *
+     * @param actorId the authenticated caller
+     * @return the request count behind the requests badge
+     */
+    long getRequestCount(UUID actorId);
 }

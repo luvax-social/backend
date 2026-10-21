@@ -23,10 +23,12 @@ import com.app.common.config.openapi.MalformedBodyErrorResponses;
 import com.app.common.response.ApiResponse;
 import com.app.common.response.CursorPageResponse;
 import com.app.modules.message.dto.request.CreateDirectConversationRequest;
+import com.app.modules.message.dto.request.MessageReactionRequest;
 import com.app.modules.message.dto.request.SendMessageRequest;
 import com.app.modules.message.dto.request.SetNicknameRequest;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
+import com.app.modules.message.dto.response.MessageReactionResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.UnreadCountResponse;
 
@@ -86,6 +88,12 @@ public interface MessageApi {
     @GetMapping(ApiConstants.Messages.ROOT)
     ResponseEntity<ApiResponse<CursorPageResponse<ConversationSummaryResponse>>>
             listMyConversations(
+                    @Parameter(
+                                    description =
+                                            "Folder to list: primary (default), requests or"
+                                                    + " hidden_requests")
+                            @RequestParam(value = "folder", defaultValue = "primary")
+                            String folder,
                     @Parameter(description = "Opaque cursor from the previous page")
                             @RequestParam(value = "cursor", required = false)
                             String cursor,
@@ -175,7 +183,9 @@ public interface MessageApi {
                                 schema = @Schema(implementation = ApiResponse.class))),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
                 responseCode = "409",
-                description = "Idempotency key reused with a different payload",
+                description =
+                        "Idempotency key reused with a different payload, or the sender of an"
+                                + " unaccepted message request has already used the one message it allows",
                 content =
                         @Content(
                                 mediaType = "application/json",
@@ -425,4 +435,146 @@ public interface MessageApi {
     ResponseEntity<ApiResponse<Void>> setNickname(
             @PathVariable("conversationId") UUID conversationId,
             @Valid @RequestBody SetNicknameRequest request);
+
+    @Operation(
+            summary = "Accept a message request",
+            description =
+                    "Accepts a message request the caller received, which moves the conversation"
+                            + " into their primary folder. Requires authentication as the"
+                            + " recipient of a pending request that carries a message.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "The accepted conversation"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "CONVERSATION_NOT_FOUND: no such request for the caller",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @PostMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.ACCEPT)
+    ResponseEntity<ApiResponse<ConversationResponse>> acceptRequest(
+            @PathVariable("conversationId") UUID conversationId);
+
+    @Operation(
+            summary = "Delete a message request",
+            description =
+                    "Declines a message request the caller received and removes it from their"
+                            + " inbox. The sender keeps seeing a request that was never answered."
+                            + " Requires authentication as the recipient of a pending request that"
+                            + " carries a message.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "204",
+                description = "Request deleted"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "CONVERSATION_NOT_FOUND: no such request for the caller",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @DeleteMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.REQUEST)
+    ResponseEntity<Void> deleteRequest(@PathVariable("conversationId") UUID conversationId);
+
+    @Operation(
+            summary = "Delete a message request and block its sender",
+            description =
+                    "Declines a message request the caller received and blocks its sender in one"
+                            + " transaction. Requires authentication as the recipient of a"
+                            + " pending request that carries a message.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "204",
+                description = "Request deleted and sender blocked"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "CONVERSATION_NOT_FOUND: no such request for the caller",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @PostMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.BLOCK)
+    ResponseEntity<Void> blockRequester(@PathVariable("conversationId") UUID conversationId);
+
+    @Operation(
+            summary = "React to a message",
+            description =
+                    "Sets or changes the caller's single emoji reaction to a message. Reacting with"
+                            + " the emoji already set changes nothing. A participant of a pending"
+                            + " message request may react. Requires authentication as an active"
+                            + " participant.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "The caller's reaction"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "400",
+                description = "MESSAGE_REACTION_INVALID_EMOJI: not exactly one emoji",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "403",
+                description = "Caller is not an active participant",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description =
+                        "CONVERSATION_NOT_FOUND (missing, or blocked) or MESSAGE_NOT_FOUND"
+                                + " (missing, deleted by its sender or removed by an administrator)",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @MalformedBodyErrorResponses
+    @AuthenticationRequiredResponse
+    @PutMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.REACTION)
+    ResponseEntity<ApiResponse<MessageReactionResponse>> reactToMessage(
+            @PathVariable("conversationId") UUID conversationId,
+            @PathVariable("messageId") UUID messageId,
+            @RequestBody MessageReactionRequest request);
+
+    @Operation(
+            summary = "Remove the caller's reaction to a message",
+            description =
+                    "Removes the caller's reaction. Removing a reaction that does not exist, or one"
+                            + " on a message that is no longer shown, succeeds without effect."
+                            + " Requires authentication as an active participant.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "204",
+                description = "Reaction removed or already absent"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "403",
+                description = "Caller is not an active participant",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "CONVERSATION_NOT_FOUND (missing, or blocked) or MESSAGE_NOT_FOUND",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @DeleteMapping(ApiConstants.Messages.ROOT + ApiConstants.Messages.REACTION)
+    ResponseEntity<Void> removeMessageReaction(
+            @PathVariable("conversationId") UUID conversationId,
+            @PathVariable("messageId") UUID messageId);
 }

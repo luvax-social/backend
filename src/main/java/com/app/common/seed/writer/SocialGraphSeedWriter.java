@@ -3,6 +3,7 @@ package com.app.common.seed.writer;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,15 +20,24 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import com.app.common.seed.loader.SeedContent;
+import com.app.common.seed.model.HiddenWordSeed;
+import com.app.common.seed.model.InteractionControlSeed;
+import com.app.common.seed.model.InteractionLimitSeed;
+import com.app.common.seed.model.MuteSeed;
+import com.app.common.seed.model.ShowFewerSeed;
 import com.app.common.seed.model.UserSeed;
+import com.app.common.seed.outbox.SeedOutboxBatchWriter.UserEventImport;
 import com.app.common.seed.time.SeedTimeline;
+import com.app.common.text.TextMatchNormalizer;
+import com.app.modules.recommendation.enums.UserEventType;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Seeds the follow graph ({@code follows}) and block list ({@code blocks}) across the 90 accounts
- * from {@code users.json}.
+ * Seeds the follow graph ({@code follows}), the block list ({@code blocks}) and the interaction
+ * preferences that sit on top of them - mutes, show-fewer marks, interaction limits and Hidden
+ * Words - across the accounts from {@code users.json}.
  *
  * <p>Neither table has a source JSON file - {@code users.json} carries only each account's {@code
  * is_private} flag, not a scripted social graph - so this writer generates the topology itself with
@@ -62,6 +72,20 @@ import lombok.extern.slf4j.Slf4j;
  * minimum number of inbound pending requests ("pending follow requests inbound" per its note), and
  * {@code user_power} always receives a large explicit batch of accepted followers ("high follower
  * count" per its note).
+ *
+ * <p><b>Interaction control.</b> {@code safety/interaction_control.json} names pairs of accounts
+ * whose relationship its other content depends on. The generator treats those pairs as constraints
+ * rather than correcting them afterwards: a pair that a mute, a filtered comment or a seeded
+ * message request relies on is never blocked, an account that must read as a stranger never follows
+ * the account it is a stranger to, and whoever mutes or shows fewer of an account follows it.
+ *
+ * <p><b>Approval dates.</b> {@code follows.accepted_at} is stamped by a trigger, so every follow
+ * this writer inserts would otherwise look approved at the moment of the seed run and fall inside
+ * every account's recent-follower window. Once the ordinary graph is in, the column is set back to
+ * {@code created_at}, which is what the V134 backfill did for the follows that existed before the
+ * column. The few follows an interaction limit names as recent followers are inserted after that
+ * step with an old {@code created_at}, so the trigger leaves them approved just now: an old request
+ * that was accepted recently.
  */
 @Slf4j
 @Service
@@ -92,6 +116,10 @@ public class SocialGraphSeedWriter {
     // preferential attachment creates end up with symmetric following counts, which is the flat
     // distribution this model exists to avoid.
     private static final int HUB_FOLLOWER_THRESHOLD = 45;
+    // A recent follower's request is this many days old plus a spread per follower, so the dates of
+    // the requests differ while every approval is the seed run itself.
+    private static final int RECENT_FOLLOW_REQUEST_AGE_DAYS = 40;
+    private static final int RECENT_FOLLOW_REQUEST_SPREAD_DAYS = 9;
 
     // Affinity clusters by persona. A persona in two clusters bridges them, which is what keeps
     // the graph connected rather than splitting it into disjoint communities.
@@ -141,8 +169,27 @@ public class SocialGraphSeedWriter {
                     + " ?::follow_status, ?)";
     private static final String INSERT_BLOCK_SQL =
             "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)";
+    private static final String NORMALISE_ACCEPTED_AT_SQL =
+            "UPDATE follows SET accepted_at = created_at WHERE status = 'accepted'";
+    private static final String INSERT_MUTE_SQL =
+            "INSERT INTO user_mutes (user_id, muted_user_id, mute_posts, mute_stories, created_at,"
+                    + " updated_at) VALUES (?, ?, ?, ?, ?, ?)";
+    private static final String INSERT_SHOW_FEWER_SQL =
+            "INSERT INTO account_show_fewer (user_id, author_id, created_at) VALUES (?, ?, ?)";
+    private static final String INSERT_INTERACTION_LIMIT_SQL =
+            "INSERT INTO interaction_limits (user_id, limit_non_followers, limit_recent_followers,"
+                    + " expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)";
+    private static final String INSERT_PERSONAL_HIDDEN_WORD_SQL =
+            "INSERT INTO user_hidden_words (user_id, phrase, normalized_phrase, created_at)"
+                    + " VALUES (?, ?, ?, ?)";
+    private static final String INSERT_PLATFORM_HIDDEN_WORD_SQL =
+            "INSERT INTO hidden_words (phrase, normalized_phrase, created_by, created_at,"
+                    + " updated_at) VALUES (?, ?, ?, ?, ?)";
+
+    private static final int UNDO_AFTER_DAYS = 2;
 
     private final JdbcTemplate jdbc;
+    private final InteractionSignalLedger signalLedger;
 
     /**
      * Inserts the seeded {@code follows} (~{@value #TOTAL_FOLLOWS_TARGET} rows, with up to {@value
@@ -151,7 +198,9 @@ public class SocialGraphSeedWriter {
      *
      * <p>Never writes {@code users.follower_count}/{@code following_count} - both are
      * trigger-maintained from {@code follows}, and a {@code pending} row correctly leaves them
-     * unchanged (see {@code docs/modules/social/DATA_RULES.md}).
+     * unchanged (see {@code docs/modules/social/DATA_RULES.md}). Also writes the mutes, show-fewer
+     * marks, interaction limits and Hidden Words entries of {@code
+     * safety/interaction_control.json}.
      *
      * @param usersByUsername username-to-id map produced by {@link UserSeedWriter#write}
      */
@@ -165,6 +214,7 @@ public class SocialGraphSeedWriter {
         Map<UUID, Instant> createdAtByUserId = fetchCreatedAtByUserId();
 
         Random random = new Random(GRAPH_RANDOM_SEED);
+        Set<String> protectedPairs = InteractionControlConstraints.protectedPairs(content);
         List<Object[]> blockRows = new ArrayList<>();
         Set<String> blockedUnorderedPairs = new HashSet<>();
         Set<String> blockedDirectedPairs = new HashSet<>();
@@ -176,7 +226,11 @@ public class SocialGraphSeedWriter {
                 random,
                 blockRows,
                 blockedUnorderedPairs,
-                blockedDirectedPairs);
+                blockedDirectedPairs,
+                protectedPairs);
+        // A forbidden follow is excluded from every selection below exactly like a block is, which
+        // is the existing mechanism for "these two accounts must not follow".
+        blockedDirectedPairs.addAll(InteractionControlConstraints.forbiddenFollows(content));
 
         List<Object[]> followRows = new ArrayList<>();
         Set<String> followPairs = new HashSet<>();
@@ -228,9 +282,18 @@ public class SocialGraphSeedWriter {
                 followPairs,
                 blockedDirectedPairs,
                 pendingCount);
+        addRequiredFollows(
+                content, usersByUsername, createdAtByUserId, timeline, followRows, followPairs);
+        List<Object[]> recentFollowRows =
+                buildRecentFollowRows(
+                        content, usersByUsername, createdAtByUserId, timeline, followRows);
 
         jdbc.batchUpdate(INSERT_FOLLOW_SQL, followRows, followRows.size(), this::bindFollowRow);
+        jdbc.update(NORMALISE_ACCEPTED_AT_SQL);
+        jdbc.batchUpdate(
+                INSERT_FOLLOW_SQL, recentFollowRows, recentFollowRows.size(), this::bindFollowRow);
         jdbc.batchUpdate(INSERT_BLOCK_SQL, blockRows, blockRows.size(), this::bindBlockRow);
+        writeInteractionPreferences(content, usersByUsername, timeline.referenceNow());
 
         log.info(
                 "[seed] follows: {} rows written ({} pending), blocks: {} rows written",
@@ -263,7 +326,8 @@ public class SocialGraphSeedWriter {
             Random random,
             List<Object[]> blockRows,
             Set<String> blockedUnorderedPairs,
-            Set<String> blockedDirectedPairs) {
+            Set<String> blockedDirectedPairs,
+            Set<String> protectedPairs) {
         int attempts = 0;
         int maxAttempts = TOTAL_BLOCKS_TARGET * 50;
         while (blockRows.size() < TOTAL_BLOCKS_TARGET && attempts < maxAttempts) {
@@ -274,7 +338,7 @@ public class SocialGraphSeedWriter {
                 continue;
             }
             String unorderedKey = unorderedPairKey(blocker.username(), blocked.username());
-            if (!blockedUnorderedPairs.add(unorderedKey)) {
+            if (protectedPairs.contains(unorderedKey) || !blockedUnorderedPairs.add(unorderedKey)) {
                 continue;
             }
             UUID blockerId = usersByUsername.get(blocker.username());
@@ -646,6 +710,228 @@ public class SocialGraphSeedWriter {
                 timeline.followCreatedAt(
                         createdAtByUserId.get(followerId), createdAtByUserId.get(followingId));
         followRows.add(new Object[] {followerId, followingId, status, Timestamp.from(createdAt)});
+    }
+
+    // Mutes and show-fewer marks are controls over content the viewer sees, so the viewer follows
+    // the account; a pair the random graph already produced is left alone.
+    private void addRequiredFollows(
+            SeedContent content,
+            Map<String, UUID> usersByUsername,
+            Map<UUID, Instant> createdAtByUserId,
+            SeedTimeline timeline,
+            List<Object[]> followRows,
+            Set<String> followPairs) {
+        for (String[] pair : InteractionControlConstraints.requiredFollows(content)) {
+            addFollow(
+                    pair[0],
+                    pair[1],
+                    "accepted",
+                    usersByUsername,
+                    createdAtByUserId,
+                    timeline,
+                    followRows,
+                    followPairs);
+        }
+    }
+
+    // A recent follower of an interaction limit replaces whatever edge the random graph drew for
+    // the
+    // pair. Its request is old and, because it is inserted after accepted_at was set back to
+    // created_at, the trigger stamps its approval with the moment of the seed run.
+    private List<Object[]> buildRecentFollowRows(
+            SeedContent content,
+            Map<String, UUID> usersByUsername,
+            Map<UUID, Instant> createdAtByUserId,
+            SeedTimeline timeline,
+            List<Object[]> followRows) {
+        List<Object[]> rows = new ArrayList<>();
+        int index = 0;
+        for (InteractionLimitSeed limit : content.interactionControl().interactionLimits()) {
+            UUID ownerId = requireUser(usersByUsername, limit.owner());
+            for (String follower : limit.recentFollowers()) {
+                UUID followerId = requireUser(usersByUsername, follower);
+                followRows.removeIf(row -> followerId.equals(row[0]) && ownerId.equals(row[1]));
+                Instant earliest =
+                        createdAtByUserId.get(followerId).isAfter(createdAtByUserId.get(ownerId))
+                                ? createdAtByUserId.get(followerId)
+                                : createdAtByUserId.get(ownerId);
+                Instant requested =
+                        timeline.referenceNow()
+                                .minus(
+                                        Duration.ofDays(
+                                                RECENT_FOLLOW_REQUEST_AGE_DAYS
+                                                        + (long) RECENT_FOLLOW_REQUEST_SPREAD_DAYS
+                                                                * index++));
+                Instant floor = earliest.plus(Duration.ofDays(1));
+                rows.add(
+                        new Object[] {
+                            followerId,
+                            ownerId,
+                            "accepted",
+                            Timestamp.from(requested.isBefore(floor) ? floor : requested)
+                        });
+            }
+        }
+        return rows;
+    }
+
+    private void writeInteractionPreferences(
+            SeedContent content, Map<String, UUID> usersByUsername, Instant referenceNow) {
+        InteractionControlSeed seed = content.interactionControl();
+
+        List<Object[]> mutes = new ArrayList<>();
+        for (MuteSeed mute : seed.mutes()) {
+            UUID viewerId = requireUser(usersByUsername, mute.viewer());
+            UUID targetId = requireUser(usersByUsername, mute.target());
+            Instant mutedAt = referenceNow.minus(Duration.ofDays(mute.daysAgo()));
+            String key = mute.viewer() + "->" + mute.target();
+            signalLedger.record(
+                    new UserEventImport(
+                            InteractionSignalLedger.signalId("mute", key),
+                            viewerId,
+                            UserEventType.ACCOUNT_MUTE,
+                            "user",
+                            targetId,
+                            "{\"posts\":"
+                                    + mute.mutePosts()
+                                    + ",\"stories\":"
+                                    + mute.muteStories()
+                                    + "}",
+                            mutedAt));
+            if (mute.undone()) {
+                signalLedger.record(
+                        new UserEventImport(
+                                InteractionSignalLedger.signalId("unmute", key),
+                                viewerId,
+                                UserEventType.ACCOUNT_UNMUTE,
+                                "user",
+                                targetId,
+                                mutedAt.plus(Duration.ofDays(UNDO_AFTER_DAYS))));
+                continue;
+            }
+            Timestamp at = Timestamp.from(mutedAt);
+            mutes.add(
+                    new Object[] {
+                        viewerId, targetId, mute.mutePosts(), mute.muteStories(), at, at
+                    });
+        }
+        jdbc.batchUpdate(INSERT_MUTE_SQL, mutes);
+
+        List<Object[]> showFewer = new ArrayList<>();
+        for (ShowFewerSeed entry : seed.showFewer()) {
+            UUID viewerId = requireUser(usersByUsername, entry.viewer());
+            UUID authorId = requireUser(usersByUsername, entry.author());
+            Instant markedAt = referenceNow.minus(Duration.ofDays(entry.daysAgo()));
+            String key = entry.viewer() + "->" + entry.author();
+            signalLedger.record(
+                    new UserEventImport(
+                            InteractionSignalLedger.signalId("show_fewer", key),
+                            viewerId,
+                            UserEventType.ACCOUNT_SHOW_FEWER,
+                            "user",
+                            authorId,
+                            markedAt));
+            if (entry.undone()) {
+                signalLedger.record(
+                        new UserEventImport(
+                                InteractionSignalLedger.signalId("show_fewer_undo", key),
+                                viewerId,
+                                UserEventType.ACCOUNT_SHOW_FEWER_UNDO,
+                                "user",
+                                authorId,
+                                markedAt.plus(Duration.ofDays(UNDO_AFTER_DAYS))));
+                continue;
+            }
+            showFewer.add(new Object[] {viewerId, authorId, Timestamp.from(markedAt)});
+        }
+        jdbc.batchUpdate(INSERT_SHOW_FEWER_SQL, showFewer);
+
+        List<Object[]> limits = new ArrayList<>();
+        for (InteractionLimitSeed limit : seed.interactionLimits()) {
+            Instant startedAt = referenceNow.minus(Duration.ofDays(limit.startedDaysAgo()));
+            UUID ownerId = requireUser(usersByUsername, limit.owner());
+            signalLedger.record(
+                    new UserEventImport(
+                            InteractionSignalLedger.signalId("interaction_limit", limit.owner()),
+                            ownerId,
+                            UserEventType.INTERACTION_LIMIT_CHANGE,
+                            "user",
+                            ownerId,
+                            "{\"nonFollowers\":"
+                                    + limit.limitNonFollowers()
+                                    + ",\"recentFollowers\":"
+                                    + limit.limitRecentFollowers()
+                                    + ",\"active\":true}",
+                            startedAt));
+            limits.add(
+                    new Object[] {
+                        ownerId,
+                        limit.limitNonFollowers(),
+                        limit.limitRecentFollowers(),
+                        Timestamp.from(startedAt.plus(Duration.ofDays(limit.durationDays()))),
+                        Timestamp.from(startedAt),
+                        Timestamp.from(startedAt)
+                    });
+        }
+        jdbc.batchUpdate(INSERT_INTERACTION_LIMIT_SQL, limits);
+
+        writeHiddenWords(seed, usersByUsername, referenceNow);
+        log.info(
+                "[seed] interaction control: {} mutes, {} show-fewer marks, {} limits written",
+                mutes.size(),
+                showFewer.size(),
+                limits.size());
+    }
+
+    // A deleted platform entry leaves no row; its audit history is ModerationSeedWriter's. An
+    // edited
+    // one is stored with its current phrase and an updated_at that falls on the day of the edit.
+    private void writeHiddenWords(
+            InteractionControlSeed seed, Map<String, UUID> usersByUsername, Instant referenceNow) {
+        List<Object[]> personal = new ArrayList<>();
+        List<Object[]> platform = new ArrayList<>();
+        for (HiddenWordSeed word : seed.hiddenWords()) {
+            Instant createdAt = referenceNow.minus(Duration.ofDays(word.daysAgo()));
+            String normalized = TextMatchNormalizer.normalizePhrase(word.phrase());
+            if (word.owner() != null) {
+                personal.add(
+                        new Object[] {
+                            requireUser(usersByUsername, word.owner()),
+                            word.phrase(),
+                            normalized,
+                            Timestamp.from(createdAt)
+                        });
+            } else if (!word.deleted()) {
+                Instant updatedAt =
+                        word.previousPhrase() == null
+                                ? createdAt
+                                : createdAt.plus(
+                                        Duration.ofDays(
+                                                InteractionControlConstraints
+                                                        .PLATFORM_WORD_CHANGE_DELAY_DAYS));
+                platform.add(
+                        new Object[] {
+                            word.phrase(),
+                            normalized,
+                            requireUser(usersByUsername, word.admin()),
+                            Timestamp.from(createdAt),
+                            Timestamp.from(updatedAt)
+                        });
+            }
+        }
+        jdbc.batchUpdate(INSERT_PERSONAL_HIDDEN_WORD_SQL, personal);
+        jdbc.batchUpdate(INSERT_PLATFORM_HIDDEN_WORD_SQL, platform);
+    }
+
+    private UUID requireUser(Map<String, UUID> usersByUsername, String username) {
+        UUID userId = usersByUsername.get(username);
+        if (userId == null) {
+            throw new IllegalStateException(
+                    "SocialGraphSeedWriter: interaction control content names '"
+                            + username
+                            + "' which does not exist in users.json");
+        }
+        return userId;
     }
 
     private String unorderedPairKey(String usernameA, String usernameB) {

@@ -56,7 +56,7 @@ These tables cannot be rebuilt from any other source if lost.
 
 | Rule | Enforced By |
 |------|-------------|
-| `type` is one of the 19 values of `notification_type` | enum |
+| `type` is one of the 20 values of `notification_type` | enum |
 | `category` is one of the 7 values of `notification_category` | enum (V115) |
 | At most one open group per recipient and key | partial unique index `uq_notifications_open_group (recipient_id, aggregation_key) WHERE is_group_open AND deleted_at IS NULL` |
 | An actor appears in a row at most once | primary key of `notification_actors` |
@@ -95,9 +95,11 @@ Every write goes through `NotificationService.create(NotificationDraft)`, which 
 | `post_removed`, `post_restored` | `AdminServiceImpl`, synchronously | none | `post` | post | reason | audit row |
 | `report_post_removed` | `AdminServiceImpl` | none | `report` | post | - | audit row |
 | `report_dismissed` | `AdminServiceImpl` | none | `report` | - | reason | audit row |
-| `comment_removed`, `story_removed`, `message_removed` | `AdminServiceImpl` | none | `admin_action` | - | reason | audit row |
+| `comment_removed`, `story_removed`, `message_removed`, `reaction_removed` | `AdminServiceImpl` | none | `admin_action` | - | reason | audit row |
 | `support_ticket_update` | `SupportTicketServiceImpl`, `VerificationServiceImpl`, synchronously | none | `support_ticket` or `verification_request` | - | - | - |
 | `message` | none since the overhaul | - | - | - | - | - |
+
+`reaction_removed` is an enforcement notice like the other removal notices: it has no `user_settings` toggle (`NotificationServiceImpl.recipientAllows` returns true), it belongs to the `system` category, and it carries the same moderation target and appeal route.
 
 Direct messages left the feed.
 `message.notification.queue`, its DLQ and bindings are retired; `RetiredQueueCleaner` deletes both queues from the broker at startup, idempotently.

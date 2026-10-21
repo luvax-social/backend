@@ -69,7 +69,11 @@ public class Comment {
     private String moderationStatus;
 
     /**
-     * Why the comment is {@code hidden}: {@code hidden_words} or {@code limited_interaction}.
+     * Why the comment is {@code hidden}: {@code hidden_words}, {@code limited_interaction} or
+     * {@code hidden_parent}.
+     *
+     * <p>{@code hidden_parent} marks a reply hidden only because the comment it answers is hidden;
+     * an edit that the policy hides in its own right replaces it with the policy reason.
      *
      * <p>Set exactly when {@code moderation_status} is {@code hidden}, which a database CHECK
      * enforces (V143). A hidden comment is persisted but counted by neither comment counter.

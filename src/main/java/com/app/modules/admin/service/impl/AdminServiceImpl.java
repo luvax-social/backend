@@ -33,6 +33,7 @@ import com.app.modules.admin.service.AdminActionRecorder;
 import com.app.modules.admin.service.AdminAuthorizationService;
 import com.app.modules.admin.service.AdminService;
 import com.app.modules.comment.repository.CommentRepository;
+import com.app.modules.message.repository.MessageReactionRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.notification.entity.enums.NotificationType;
 import com.app.modules.notification.service.NotificationDraft;
@@ -69,6 +70,7 @@ public class AdminServiceImpl implements AdminService {
     private final CommentRepository commentRepository;
     private final StoryRepository storyRepository;
     private final MessageRepository messageRepository;
+    private final MessageReactionRepository messageReactionRepository;
     private final ReportRepository reportRepository;
     private final AdminActionMapper adminActionMapper;
     private final AdminActionRecorder adminActionRecorder;
@@ -85,6 +87,7 @@ public class AdminServiceImpl implements AdminService {
             CommentRepository commentRepository,
             StoryRepository storyRepository,
             MessageRepository messageRepository,
+            MessageReactionRepository messageReactionRepository,
             ReportRepository reportRepository,
             AdminActionMapper adminActionMapper,
             AdminActionRecorder adminActionRecorder,
@@ -99,6 +102,7 @@ public class AdminServiceImpl implements AdminService {
         this.commentRepository = commentRepository;
         this.storyRepository = storyRepository;
         this.messageRepository = messageRepository;
+        this.messageReactionRepository = messageReactionRepository;
         this.reportRepository = reportRepository;
         this.adminActionMapper = adminActionMapper;
         this.adminActionRecorder = adminActionRecorder;
@@ -195,6 +199,22 @@ public class AdminServiceImpl implements AdminService {
     public AdminActionResponse restoreMessage(
             UUID actorId, UUID messageId, AdminActionRequest request) {
         return moderateMessage(actorId, messageId, AdminActionType.RESTORE_MESSAGE, request);
+    }
+
+    @Override
+    @Transactional
+    public AdminActionResponse removeMessageReaction(
+            UUID actorId, UUID reactionId, AdminActionRequest request) {
+        return moderateMessageReaction(
+                actorId, reactionId, AdminActionType.REMOVE_MESSAGE_REACTION, request);
+    }
+
+    @Override
+    @Transactional
+    public AdminActionResponse restoreMessageReaction(
+            UUID actorId, UUID reactionId, AdminActionRequest request) {
+        return moderateMessageReaction(
+                actorId, reactionId, AdminActionType.RESTORE_MESSAGE_REACTION, request);
     }
 
     @Override
@@ -565,6 +585,48 @@ public class AdminServiceImpl implements AdminService {
         if (!restore) {
             resolveLinkedReport(linkedReport, actorId, request.reason());
             notifyContentRemoved(senderId, NotificationType.MESSAGE_REMOVED, action, request);
+        }
+        return action;
+    }
+
+    // Shaped on moderateMessage. The reaction carries its own tombstone, so removing it never
+    // touches the message it sits on, and the audit row names the reactor as the target user and
+    // carries no metadata: the emoji and the message are reachable through the report, and the
+    // audit log is not a second place to read a participant's private conversation.
+    private AdminActionResponse moderateMessageReaction(
+            UUID actorId, UUID reactionId, AdminActionType actionType, AdminActionRequest request) {
+        boolean removed =
+                messageReactionRepository
+                        .isAdminRemoved(reactionId)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.MESSAGE_NOT_FOUND));
+        UUID reactorId =
+                messageReactionRepository.findReactorIdForModeration(reactionId).orElse(null);
+        boolean restore = actionType == AdminActionType.RESTORE_MESSAGE_REACTION;
+        if (restore != removed) {
+            throw new AppException(ApiErrorCode.ADMIN_INVALID_TRANSITION);
+        }
+        Report linkedReport =
+                findLinkedReport(
+                        request.reportId(),
+                        ReportType.MESSAGE_REACTION,
+                        reactionId,
+                        actorId,
+                        !restore);
+        messageReactionRepository.applyAdminModeration(
+                reactionId, restore ? null : OffsetDateTime.now());
+        AdminActionResponse action =
+                adminActionRecorder.record(
+                        actorId,
+                        actionType,
+                        reactorId,
+                        "message_reaction",
+                        reactionId,
+                        request.reportId(),
+                        request.reason(),
+                        null);
+        if (!restore) {
+            resolveLinkedReport(linkedReport, actorId, request.reason());
+            notifyContentRemoved(reactorId, NotificationType.REACTION_REMOVED, action, request);
         }
         return action;
     }

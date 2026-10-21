@@ -19,7 +19,8 @@ import com.app.modules.admin.service.ModerationNoticeService;
 @Service
 public class ModerationNoticeServiceImpl implements ModerationNoticeService {
 
-    private static final Set<String> CONTENT_KINDS = Set.of("post", "comment", "story", "message");
+    private static final Set<String> CONTENT_KINDS =
+            Set.of("post", "comment", "story", "message", "message_reaction");
 
     private final ModerationNoticeRepository moderationNoticeRepository;
 

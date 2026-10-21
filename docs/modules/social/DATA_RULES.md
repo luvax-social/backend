@@ -11,8 +11,8 @@ The only outstanding rule is transitioning pending follow requests to accepted w
 |-------|-------------|-------|
 | `follows` | `follower_id`, `following_id`, `status`, `created_at`, `accepted_at` | Unidirectional follow relationships have pending status for unapproved private-account requests and record the acceptance time in `accepted_at`, which is null while pending. |
 | `blocks` | `blocker_id`, `blocked_id`, `created_at` | Block relationships. Bidirectional in effect: blocked user cannot follow, message, or see the blocker's content. |
-| `user_mutes` | `user_id`, `muted_user_id`, `mute_posts`, `mute_stories`, `created_at`, `updated_at` | One row per muting user and muted account (V138). At least one of the two scopes is true; a row with both scopes off is an unmute and is deleted instead. A self-mute is rejected. `updated_at` is maintained by trigger `trg_user_mutes_updated_at`. |
-| `account_show_fewer` | `user_id`, `author_id`, `created_at` | A user asking to see less of one author in recommendations (V138). A self row is rejected. |
+| `user_mutes` | `user_id`, `muted_user_id`, `mute_posts`, `mute_stories`, `created_at`, `updated_at` | One row per muting user and muted account (V138). At least one of the two scopes is true; a row with both scopes off is an unmute and is deleted instead. A self-mute is rejected. `updated_at` is maintained by trigger `trg_user_mutes_updated_at`. Written only by `MuteServiceImpl`. |
+| `account_show_fewer` | `user_id`, `author_id`, `created_at` | A user asking to see less of one author in recommendations (V138). A self row is rejected. Written only by `FeedPreferenceServiceImpl`. |
 | `interaction_limits` | `user_id` (PK/FK), `limit_non_followers`, `limit_recent_followers`, `expires_at`, `created_at`, `updated_at` | At most one temporary interaction limit per user (V138). At least one toggle is true. A row past `expires_at` is inactive but may remain until replaced or removed. `updated_at` is maintained by trigger `trg_interaction_limits_updated_at`. |
 | `hidden_words` | `id`, `phrase`, `normalized_phrase`, `created_by`, `created_at`, `updated_at` | The platform-wide hidden word list that administrators maintain (V140). `normalized_phrase` is unique. `created_by` is set to null when the creating account is deleted. `updated_at` is maintained by trigger `trg_hidden_words_updated_at`. |
 | `user_hidden_words` | `id`, `user_id`, `phrase`, `normalized_phrase`, `created_at` | A user's personal hidden word list (V140). `(user_id, normalized_phrase)` is unique. `phrase` keeps the text as the user typed it and `normalized_phrase` is the output of `TextMatchNormalizer.normalizePhrase`, which is the only form ever compared. The per-user entry limit of 200 is enforced by the service. |
@@ -53,6 +53,7 @@ These tables cannot be rebuilt from any other source if lost.
 | Rule | Service / Component |
 |------|---------------------|
 | The blocked list returns the viewer's **outgoing** blocks only, newest first; incoming blocks are not exposed by any endpoint | `SocialServiceImpl.getBlockedUsers` |
+| V147 builds `idx_follows_following_accepted` (accepted follows of an account by `accepted_at`, for the limit rule's recent follower check), `idx_user_mutes_user_updated` (the mute list's `(updated_at, muted_user_id)` keyset) and `idx_user_hidden_words_user` (a personal list, newest first) `CONCURRENTLY` | `V147__add_interaction_control_indexes.sql`, `InteractionControlIndexesIT` |
 | The blocked list keysets on the `(created_at, blocked_id)` row-value tuple, served by `idx_blocks_blocker_created_blocked` (V40) | `BlockRepository.findFirstBlocked` / `findBlockedBefore` |
 | A blocked account since soft-deleted stays in the list as a placeholder rather than being dropped | `SocialServiceImpl.getBlockedUsers` via `UserSummaryService.loadSummaries` |
 | When target account has `is_private = TRUE`, a new follow row is created with `status = 'pending'` | `SocialServiceImpl.followUser` |
@@ -81,7 +82,18 @@ These tables cannot be rebuilt from any other source if lost.
 | The end of a limit is computed by the server as the request time plus a preset of 1, 3, 7, 14 or 28 days and is never taken from the client; both audiences off, or any other duration, answers `VALIDATION_ERROR` and writes nothing | `InteractionLimitServiceImpl.set` |
 | A limit is in force while `expires_at` is in the future; the read computes `active` at request time and no job expires rows, so an expired row reads inactive and stays until replaced or removed | `InteractionLimitServiceImpl.get` |
 | Turning a limit off removes its row and is idempotent; removing a row that does not exist succeeds and enqueues nothing | `InteractionLimitServiceImpl.clear` |
-| Every `PUT`, and every `DELETE` that removes a row, enqueues `user.interaction-limit.changed.v1` in the same transaction, carrying both toggles and `expiresAt`, which is absent once the limit is off; nothing binds that routing key yet, so with the mandatory flag on the publisher counts it as unroutable until its consumer is bound | `InteractionLimitServiceImpl.enqueueChange` |
+| `PUT /social/mutes/{targetUserId}` stores the pair's two scope flags in one upsert and answers with the stored scopes and the target's summary; sending both flags false deletes the row, because the table refuses a row that hides nothing | `MuteServiceImpl.setMute`, `UserMuteRepository.upsert` |
+| A mute of oneself answers `400 BAD_REQUEST`; a target that is missing, soft-deleted or in a block relationship with the caller in either direction answers the same `404 NOT_FOUND` body | `MuteServiceImpl.setMute` |
+| `user.muted.v1` (target and both flags) is enqueued only when the upsert created the row or changed a flag, and `user.unmuted.v1` (target) only when a row was deleted, so a repeated request enqueues nothing | `MuteServiceImpl`, `UserMuteRepository.upsert` and `deleteByUserAndMuted` |
+| `DELETE /social/mutes/{targetUserId}` is idempotent and does not look at the target's current state | `MuteServiceImpl.unmute` |
+| The mute list is the caller's own rows, most recently set first, keyset-paged on `(updated_at, muted_user_id)` with its own cursor scope; a muted account since soft-deleted stays as a placeholder | `MuteServiceImpl.listMutes`, `UserMuteRepository.findFirstMutes` / `findMutesBefore` |
+| `POST /social/show-fewer/{authorId}` inserts with `ON CONFLICT DO NOTHING`, and a request for oneself, a missing author or a blocked author answers one identical `404 NOT_FOUND` body | `FeedPreferenceServiceImpl.showFewer`, `AccountShowFewerRepository.insertIfAbsent` |
+| `user.show-fewer.v1` is enqueued only when the insert created the row, and `user.show-fewer-undone.v1` only when the delete removed one, both carrying the author id | `FeedPreferenceServiceImpl` |
+| Neither a mute nor a show-fewer request is ever told to the other account: no notification is created, and none of the four events is bound to a notification queue. Their only consumer is the import consumer, which records `account_mute`, `account_unmute`, `account_show_fewer` and `account_show_fewer_undo` rows for the acting account | `MuteServiceImpl`, `FeedPreferenceServiceImpl`, `DomainSignalMappings`, pinned by `RabbitMqTopologyConfigTest` |
+| Blocking deletes the mutes and the show-fewer requests between the pair in both directions, without enqueuing an unmute or an undo event, because a block supersedes them | `SocialServiceImpl.blockUser`, `UserMuteRepository.deleteBetween`, `AccountShowFewerRepository.deleteBetween` |
+| The relationship block gains `isMutingPosts`, `isMutingStories` and `isShowingFewer`, read from the viewer's own outgoing rows only through one extra batched query per `loadRelationships` call, so the other account never sees them | `SocialServiceImpl.loadRelationships`, `UserMuteRepository.findViewerPreferences` |
+| Mutes and show-fewer requests are applied by the application in every feed, the Explore feed, the story tray and story discovery, per surface; see section F | `SocialServiceImpl.findFeedSuppressedAuthors`, `SocialServiceImpl.findStoryMutedAuthors` and the discovery query |
+| Every `PUT`, and every `DELETE` that removes a row, enqueues `user.interaction-limit.changed.v1` in the same transaction, carrying both toggles and `expiresAt`, which is absent once the limit is off; the routing key is bound to `recommendation.user-event.import.queue`, where the import consumer records an `interaction_limit_change` row holding the two toggles and whether a limit is active, and never the end time | `InteractionLimitServiceImpl.enqueueChange`, `DomainSignalMappings` |
 
 **Block directionality**:
 - The `blocks` table stores a single directional row: `(blocker_id, blocked_id)`.
@@ -125,9 +137,10 @@ While a limit is in force, an actor with no accepted follow of the target is hid
 Follows are read through `FollowRepository.findAcceptedAt`, which ignores a pending request, so an account still awaiting approval counts as a non-follower.
 The message permission rule denies a new conversation when the recipient chose `nobody`, denies it under `following` unless the recipient follows the actor, and routes it to the recipient's requests under `everyone` when the recipient does not follow the actor.
 A requester's send into a pending conversation goes to the requests, and to the hidden requests when the request is already filed there.
-The pending-request rule lets the requester send one text message while the request is pending, and refuses anything more with `AWAITING_ACCEPTANCE`.
+The pending-request rule lets the requester send one text message or one story reply while the request is pending, and refuses media and post shares, and refuses anything more with `AWAITING_ACCEPTANCE`.
 A declined request answers `AWAITING_ACCEPTANCE` as well, so the requester cannot tell a decline from a pending request.
 The recipient's own send is allowed, and the message module treats it as accepting the request.
+The recipient's explicit accept, delete and block of a request are not policy decisions: the message module applies them directly, and blocking reaches this module only through `SocialService.blockUser`.
 The Hidden Words rule hides a comment, or a requester's first message, whose text matches the target's matcher from `HiddenWordService.matcherFor`.
 A send into an accepted conversation is subject to the block rule alone.
 The five outcomes are `ALLOW`, `ALLOW_HIDDEN`, `ROUTE_TO_REQUESTS`, `ROUTE_TO_HIDDEN_REQUESTS` and `DENY`.
@@ -137,6 +150,20 @@ An actor acting on themselves is allowed with reason `SELF` after a block check 
 `TAG`, `STORY_REPLY` and `STORY_RESPONSE` are reserved: no rule lists them, so `evaluate` refuses them with `IllegalArgumentException("interaction not enabled: <TYPE>")` until a later change adds them to the rules that should govern them.
 Every time comparison in one evaluation uses the same instant.
 The policy only reads; the comment and message modules act on its decision.
+
+### F. Feed and Story Suppression
+
+The stored mutes and show-fewer requests take effect through two reads on `SocialService`.
+`findFeedSuppressedAuthors(viewerId, candidateAuthorIds, surface)` returns the candidates a feed must drop.
+It always includes the authors whose posts the viewer muted.
+It adds the show-fewer authors for `FeedSurface.FOR_YOU` and `FeedSurface.FOR_YOU_FALLBACK` only.
+A show-fewer request therefore never removes an author from the Following tab, where the viewer chose the accounts.
+`findStoryMutedAuthors(viewerId)` returns the accounts whose stories the viewer muted.
+Both reads are one query over the viewer's own preference rows in `UserMuteRepository`, intersected with the candidates in memory, so the cost does not grow with the feed.
+A mute of stories alone never removes an author's posts, and a mute of posts alone never removes an author's stories.
+Profile pages, post search, hashtag pages, the saved list, comments and direct messages do not read these preferences and are unaffected.
+The filters only add exclusions.
+A block stays decided by the existing block checks, and a mute or show-fewer row written concurrently with a block can survive it, which is an accepted race.
 
 ---
 
@@ -150,3 +177,10 @@ The policy only reads; the comment and message modules act on its decision.
 | `post` | inbound | Post visibility (private account) is gated by `follows.status = 'accepted'` |
 | `users` | outbound | `HiddenWordServiceImpl` reads `hidden_words_system_enabled` and the interaction policy's message permission rule reads `message_permission`, both through `UserPrivacySettingsService`; the personal hidden words endpoints are served by the users module's `UserSafetyController` |
 | `message` | inbound | Messaging permissions depend on whether a block relationship exists |
+| `message` | inbound | `ConversationServiceImpl.blockRequester` calls `SocialService.blockUser` in the same transaction that declines a message request, so a failed block rolls the decline back |
+| `recommendation` | outbound | `user.muted.v1`, `user.unmuted.v1`, `user.show-fewer.v1`, `user.show-fewer-undone.v1` and `user.interaction-limit.changed.v1` are imported into the analytics tier as `user_events` rows by `UserEventImportConsumer`; see the recommendation module's interaction control signals section |
+| `post` | outbound | `PostVisibilityServiceImpl` and `PostLikeServiceImpl` call `SocialService.loadRelationships`, which carries the viewer's mute and show-fewer flags on every embedded relationship, and `PostFeedbackServiceImpl` owns the sibling not-interested mark |
+| `post` | inbound | `PostServiceImpl.getFeed` calls `SocialService.findFeedSuppressedAuthors` with a `FeedSurface`, which is why `social` imports that post enum |
+| `recommendation` | inbound | `RecommendationFeedServiceImpl` calls `SocialService.findFeedSuppressedAuthors` over each round's candidate owners, on the `FOR_YOU` surface |
+| `story` | inbound | `StoryServiceImpl.getStoryFeed` calls `SocialService.findStoryMutedAuthors`, and story discovery applies the mute inside `StoryRepository.findDiscoverableAuthors` |
+| `story` | outbound | No story class calls `loadRelationships`, so story responses embed no mute or show-fewer flags |

@@ -25,9 +25,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Seeds the 90 accounts declared in {@code users.json}: one {@code users} row, one {@code
+ * Seeds the accounts declared in {@code users.json}: one {@code users} row, one {@code
  * user_credentials} row, and one {@code user_settings} row per user, matching the invariant that
- * every account carries exactly one settings row from creation.
+ * every account carries exactly one settings row from creation. The settings row carries the
+ * account's {@code message_permission} and its {@code hidden_words_system_enabled} choice, which
+ * {@code users.json} lists only for the accounts that differ from the defaults.
  */
 @Slf4j
 @Service
@@ -45,7 +47,8 @@ public class UserSeedWriter {
                     + " email_verified_at, created_at) VALUES (?, ?, ?, ?, ?)";
 
     private static final String INSERT_SETTINGS_SQL =
-            "INSERT INTO user_settings (user_id, updated_at) VALUES (?, ?)";
+            "INSERT INTO user_settings (user_id, updated_at, message_permission,"
+                    + " hidden_words_system_enabled) VALUES (?, ?, ?::message_permission, ?)";
 
     private final JdbcTemplate jdbc;
     private final PasswordEncoder passwordEncoder;
@@ -56,7 +59,7 @@ public class UserSeedWriter {
      *
      * <p>Every seeded account shares the plaintext password {@code Password123!} (per {@code
      * users.json}'s {@code _password_note}), so the {@link PasswordEncoder#encode(CharSequence)}
-     * call happens exactly once and the resulting BCrypt hash is reused verbatim for all 90 rows;
+     * call happens exactly once and the resulting BCrypt hash is reused verbatim for every row;
      * {@code PasswordEncoder.matches()} re-derives the salt from the stored hash itself, so one
      * fixed hash verifies correctly against the shared plaintext for every row.
      *
@@ -109,7 +112,13 @@ public class UserSeedWriter {
                         user.emailVerified() ? Timestamp.from(createdAt) : null,
                         Timestamp.from(createdAt)
                     });
-            settingsRows.add(new Object[] {userId, Timestamp.from(createdAt)});
+            settingsRows.add(
+                    new Object[] {
+                        userId,
+                        Timestamp.from(createdAt),
+                        user.messagePermission(),
+                        user.hiddenWordsSystemEnabled()
+                    });
         }
 
         jdbc.batchUpdate(INSERT_USER_SQL, userRows, userRows.size(), this::bindUserRow);
@@ -171,5 +180,7 @@ public class UserSeedWriter {
     private void bindSettingsRow(PreparedStatement ps, Object[] row) throws SQLException {
         ps.setObject(1, row[0]);
         ps.setTimestamp(2, (Timestamp) row[1]);
+        ps.setString(3, (String) row[2]);
+        ps.setBoolean(4, (Boolean) row[3]);
     }
 }

@@ -1,6 +1,7 @@
 package com.app.modules.message.repository;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,22 +22,72 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     Optional<Message> findByIdAndConversationId(UUID id, UUID conversationId);
 
     /**
+     * Loads the messages a set of replies point at, whatever either tombstone says.
+     *
+     * <p>Native so the reply preview can report a deleted or removed parent as unavailable instead
+     * of losing it, and so it costs one statement per page rather than one per reply.
+     *
+     * <p>Limited to the conversations of the replies, so a reply can never preview a message from a
+     * thread its reader is not in, whatever its {@code reply_to_id} says.
+     *
+     * @param ids the replied-to message ids
+     * @param conversationIds the conversations the replies belong to
+     * @return the matching rows, tombstoned ones included
+     */
+    @Query(
+            value =
+                    "SELECT m.* FROM messages m WHERE m.id IN (:ids)"
+                            + " AND m.conversation_id IN (:conversationIds)",
+            nativeQuery = true)
+    List<Message> findReplyParents(
+            @Param("ids") Collection<UUID> ids,
+            @Param("conversationIds") Collection<UUID> conversationIds);
+
+    /**
+     * Counts every message a user has sent into a conversation, tombstoned ones included.
+     *
+     * <p>Deleted messages count on purpose: a requester who deletes the one message a pending
+     * request allows must not be handed a second.
+     */
+    long countByConversationIdAndSenderId(UUID conversationId, UUID senderId);
+
+    /**
      * First page of a conversation's history, newest first. Deleted (tombstoned) messages are
      * included so clients can render a "message deleted" placeholder in place.
+     *
+     * <p>Ties on {@code created_at} are broken by {@code id}, so the order is total and the cursor
+     * of {@link #findByConversationBefore} can resume exactly where this page stopped.
      */
     @Query(
             "SELECT m FROM Message m WHERE m.conversationId = :conversationId "
-                    + "ORDER BY m.createdAt DESC")
+                    + "ORDER BY m.createdAt DESC, m.id DESC")
     List<Message> findFirstByConversation(
             @Param("conversationId") UUID conversationId, Pageable pageable);
 
-    /** Keyset page of a conversation's history older than the cursor, newest first. */
+    /**
+     * Keyset page of a conversation's history strictly after the {@code (created_at, id)} cursor in
+     * newest-first order.
+     *
+     * <p>The id breaks ties between messages sharing a timestamp, so a tie group that straddles a
+     * page boundary is neither skipped nor repeated. The {@code created_at <=} bound in front of
+     * the tie-break group is redundant for correctness and present so the planner can turn it into
+     * an index range on {@code (conversation_id, created_at DESC)}; the bare OR group alone cannot
+     * be used to seek, and a deep page would walk every newer message of the conversation.
+     */
     @Query(
-            "SELECT m FROM Message m WHERE m.conversationId = :conversationId "
-                    + "AND m.createdAt < :cursor ORDER BY m.createdAt DESC")
+            value =
+                    """
+					SELECT m.* FROM messages m
+					WHERE m.conversation_id = :conversationId
+					AND m.created_at <= :cursorTime
+					AND (m.created_at < :cursorTime OR m.id < :cursorId)
+					ORDER BY m.created_at DESC, m.id DESC
+					""",
+            nativeQuery = true)
     List<Message> findByConversationBefore(
             @Param("conversationId") UUID conversationId,
-            @Param("cursor") OffsetDateTime cursor,
+            @Param("cursorTime") OffsetDateTime cursorTime,
+            @Param("cursorId") UUID cursorId,
             Pageable pageable);
 
     /**
@@ -48,7 +99,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
                     """
 					SELECT DISTINCT ON (m.conversation_id) m.* FROM messages m
 					WHERE m.conversation_id IN (:conversationIds)
-					ORDER BY m.conversation_id, m.created_at DESC
+					ORDER BY m.conversation_id, m.created_at DESC, m.id DESC
 					""",
             nativeQuery = true)
     List<Message> findLastMessagePerConversation(
@@ -86,6 +137,10 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     /**
      * Total unread-message count across every active conversation for the given user; same counting
      * rule as {@link #countUnreadPerConversation} without the per-conversation breakdown.
+     *
+     * <p>A message request the user received is not counted, whether pending or declined: it is
+     * surfaced by {@link #countPendingRequests} instead, so a stranger's first message never
+     * inflates the badge on the regular inbox.
      */
     @Query(
             value =
@@ -96,13 +151,47 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
 						ON p.conversation_id = m.conversation_id
 						AND p.user_id = :userId
 						AND p.left_at IS NULL
+					JOIN conversations c ON c.id = m.conversation_id
 					WHERE m.is_deleted = FALSE
 					AND m.admin_removed_at IS NULL
 					AND m.sender_id IS DISTINCT FROM :userId
+					AND (c.request_status = 'accepted' OR c.request_recipient_id <> :userId)
 					AND (p.last_read_at IS NULL OR m.created_at > p.last_read_at)
 					""",
             nativeQuery = true)
     long countTotalUnreadForUser(@Param("userId") UUID userId);
+
+    /**
+     * Counts the user's incoming message requests that are pending, not filed as hidden, and carry
+     * at least one message; the figure behind the requests badge.
+     *
+     * <p>A request nobody has written to yet is not counted, because the requests folder does not
+     * list it either, and a hidden request is not counted because the recipient chose not to be
+     * told about that folder's contents.
+     *
+     * @param userId the recipient
+     * @return the number of visible incoming requests
+     */
+    @Query(
+            value =
+                    """
+					SELECT COUNT(*)
+					FROM conversations c
+					JOIN conversation_participants p
+						ON p.conversation_id = c.id AND p.user_id = :userId AND p.left_at IS NULL
+					WHERE c.request_status = 'pending'
+					AND c.request_recipient_id = :userId
+					AND NOT c.request_hidden
+					AND c.last_message_at IS NOT NULL
+					AND NOT EXISTS (
+						SELECT 1 FROM blocks b
+						JOIN conversation_participants op
+							ON op.conversation_id = c.id AND op.user_id <> :userId
+						WHERE (b.blocker_id = :userId AND b.blocked_id = op.user_id)
+							OR (b.blocker_id = op.user_id AND b.blocked_id = :userId))
+					""",
+            nativeQuery = true)
+    long countPendingRequests(@Param("userId") UUID userId);
 
     /**
      * Reads a message's sender whatever either tombstone says, for the moderation path.

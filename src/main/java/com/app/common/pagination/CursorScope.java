@@ -38,6 +38,7 @@ public final class CursorScope {
     public static final String COMMENTS_TOP_LEVEL = "cmt";
     public static final String COMMENTS_TOP_LEVEL_NEWEST = "cmtn";
     public static final String COMMENT_REPLIES = "rpl";
+    public static final String COMMENTS_HIDDEN = "cmh";
     public static final String CONVERSATIONS = "cnv";
     public static final String NOTIFICATIONS = "ntf";
     public static final String POST_USER_POSTS = "pst";
@@ -58,6 +59,7 @@ public final class CursorScope {
     public static final String SOCIAL_FOLLOWERS = "flw";
     public static final String SOCIAL_FOLLOWING = "flg";
     public static final String SOCIAL_BLOCKED = "blk";
+    public static final String SOCIAL_MUTES = "mut";
     public static final String SOCIAL_PENDING_REQUESTS = "frq";
     public static final String STORY_VIEWERS = "stv";
 }

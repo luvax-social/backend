@@ -362,6 +362,41 @@ class GorseRebuildServiceIT {
     }
 
     @Test
+    void execute_notInterested_sendsTheStandingPreferenceAndNotTheUndoneOne() {
+        // ClickHouse keeps both rows for good; only the first preference still has its
+        // PostgreSQL row, which is what the rebuild treats as the truth.
+        engagement(
+                firstUser,
+                UserEventType.POST_NOT_INTERESTED,
+                publishedPlain,
+                "not_interested",
+                1.0);
+        jdbc.update(
+                "INSERT INTO post_not_interested (user_id, post_id) VALUES (?, ?)",
+                firstUser,
+                publishedPlain);
+        engagement(
+                secondUser,
+                UserEventType.POST_NOT_INTERESTED,
+                publishedWithTag,
+                "not_interested",
+                1.0);
+        GorseRebuildRun run = newRun();
+
+        service.execute(run);
+
+        GorseRebuildRun finished = runs.findByToken(run.getToken()).orElseThrow();
+        assertThat(finished.getStatus()).isEqualTo(GorseRebuildStatus.DONE);
+        assertThat(finished.getFeedbackSent()).isEqualTo(4);
+        assertThat(finished.getFeedbackSkipped()).isEqualTo(2);
+        assertThat(heldFeedback("not_interested", firstUser, publishedPlain))
+                .get()
+                .extracting(GorseFeedback::value)
+                .isEqualTo(1.0);
+        assertThat(heldFeedback("not_interested", secondUser, publishedWithTag)).isEmpty();
+    }
+
+    @Test
     void execute_cutOffInFeedback_resumesFromTheCheckpointAndEndsIdentical() {
         plantDriftInGorse();
         AtomicInteger feedbackCalls = new AtomicInteger();

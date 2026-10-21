@@ -22,5 +22,26 @@ public final class SocialEventTypes {
     public static final String USER_INTERACTION_LIMIT_CHANGED_V1 =
             "user.interaction-limit.changed.v1";
 
+    /**
+     * An account asked to see less of one author in recommendations; carries the author only.
+     *
+     * <p>Private to the account that made the request: it is never bound to a notification queue.
+     */
+    public static final String USER_SHOW_FEWER_V1 = "user.show-fewer.v1";
+
+    /** An account took back its show-fewer request; carries the author only. */
+    public static final String USER_SHOW_FEWER_UNDONE_V1 = "user.show-fewer-undone.v1";
+
+    /**
+     * An account muted another account's posts, stories or both, or changed which of the two.
+     *
+     * <p>The payload carries the muted account and both scope flags. The muted account is never
+     * notified, so the event is never bound to a notification queue.
+     */
+    public static final String USER_MUTED_V1 = "user.muted.v1";
+
+    /** An account removed its mute of another account; carries the formerly muted account only. */
+    public static final String USER_UNMUTED_V1 = "user.unmuted.v1";
+
     private SocialEventTypes() {}
 }

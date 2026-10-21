@@ -26,6 +26,7 @@ public enum ModerationMailTemplate {
     COMMENT_REMOVED         ("mail/moderation/content-removed-comment",  "Your comment was removed",                  true),
     STORY_REMOVED           ("mail/moderation/content-removed-story",    "Your story was removed",                    true),
     MESSAGE_REMOVED         ("mail/moderation/content-removed-message",  "Your message was removed",                  true),
+    REACTION_REMOVED        ("mail/moderation/content-removed-reaction", "Your reaction was removed",                 true),
     SUPPORT_TICKET_ANSWERED ("mail/moderation/support-ticket-answered",  "We have replied to your support request",   false),
     SUPPORT_TICKET_REJECTED ("mail/moderation/support-ticket-rejected",  "An update on your support request",         false),
     VERIFICATION_GRANTED    ("mail/moderation/verification-granted",     "Your account is now verified",              false),

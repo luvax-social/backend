@@ -383,6 +383,94 @@ class CommentPolicyWriteIT {
         assertThat(editedVisibility(commentId)).isEqualTo("visible");
     }
 
+    @Test
+    void create_cleanComment_enqueuesNoHiddenEvent() {
+        TestUser owner = registerUser("pw_hev_clean_owner");
+        TestUser actor = registerUser("pw_hev_clean_actor");
+        UUID postId = createImagePost(owner, "no hidden event post");
+
+        UUID commentId = idOf(postComment(actor, postId, null, "a friendly remark"));
+
+        assertThat(hiddenEventReasons(commentId)).isEmpty();
+    }
+
+    @Test
+    void create_hiddenWord_enqueuesOneHiddenEventNamingTheReasonAndTheCommenter() {
+        TestUser owner = registerUser("pw_hev_word_owner");
+        TestUser actor = registerUser("pw_hev_word_actor");
+        UUID postId = createImagePost(owner, "hidden event post");
+        addHiddenWord(owner, "badword");
+
+        UUID commentId = idOf(postComment(actor, postId, null, "this has a badword in it"));
+
+        assertThat(hiddenEventReasons(commentId)).containsExactly("hidden_words");
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "SELECT payload->>'actorId' FROM outbox_events WHERE aggregate_id = ? AND"
+                                        + " event_type = 'comment.hidden.v1'",
+                                String.class,
+                                commentId))
+                .isEqualTo(actor.id().toString());
+    }
+
+    @Test
+    void create_limitedNonFollower_enqueuesTheLimitedInteractionReason() {
+        TestUser owner = registerUser("pw_hev_lim_owner");
+        TestUser actor = registerUser("pw_hev_lim_actor");
+        UUID postId = createImagePost(owner, "limited hidden event post");
+        limitInteractions(owner, true, false);
+
+        UUID commentId = idOf(postComment(actor, postId, null, "hello there"));
+
+        assertThat(hiddenEventReasons(commentId)).containsExactly("limited_interaction");
+    }
+
+    @Test
+    void edit_newlyHidingEdit_enqueuesOneHiddenEvent() {
+        TestUser owner = registerUser("pw_hev_edit_owner");
+        TestUser actor = registerUser("pw_hev_edit_actor");
+        UUID postId = createImagePost(owner, "edit hidden event post");
+        addHiddenWord(owner, "badword");
+        UUID commentId = idOf(postComment(actor, postId, null, "perfectly fine"));
+
+        editComment(actor, commentId, "now a badword sneaks in");
+
+        assertThat(hiddenEventReasons(commentId)).containsExactly("hidden_words");
+    }
+
+    @Test
+    void edit_ofAnAlreadyHiddenComment_addsNoSecondHiddenEvent() {
+        TestUser owner = registerUser("pw_hev_again_owner");
+        TestUser actor = registerUser("pw_hev_again_actor");
+        UUID postId = createImagePost(owner, "edit again hidden event post");
+        addHiddenWord(owner, "badword");
+        UUID commentId = idOf(postComment(actor, postId, null, "a badword here"));
+
+        editComment(actor, commentId, "still a badword here");
+
+        assertThat(hiddenEventReasons(commentId)).containsExactly("hidden_words");
+    }
+
+    @Test
+    void edit_ofAVisibleComment_enqueuesNoHiddenEvent() {
+        TestUser owner = registerUser("pw_hev_vis_owner");
+        TestUser actor = registerUser("pw_hev_vis_actor");
+        UUID postId = createImagePost(owner, "edit visible hidden event post");
+        UUID commentId = idOf(postComment(actor, postId, null, "perfectly fine"));
+
+        editComment(actor, commentId, "still perfectly fine");
+
+        assertThat(hiddenEventReasons(commentId)).isEmpty();
+    }
+
+    private List<String> hiddenEventReasons(UUID commentId) {
+        return jdbcTemplate.queryForList(
+                "SELECT payload->'data'->>'reason' FROM outbox_events WHERE aggregate_id = ? AND"
+                        + " event_type = 'comment.hidden.v1' ORDER BY created_at",
+                String.class,
+                commentId);
+    }
+
     private String editedVisibility(UUID commentId) {
         return jdbcTemplate.queryForObject(
                 "SELECT payload->'data'->>'visibility' FROM outbox_events WHERE aggregate_id = ?"

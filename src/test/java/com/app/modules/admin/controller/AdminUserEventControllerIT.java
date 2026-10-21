@@ -175,6 +175,44 @@ class AdminUserEventControllerIT {
     }
 
     @Test
+    void listUserEvents_privatePreferenceSignals_neverAppearInTheLog() {
+        TestUser admin = createUser("evt_private_admin", "admin");
+        TestUser subject = createUser("evt_private_subject", "user");
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        insertEvent(subject.id(), "session_start", now.minusDays(2));
+        for (String type :
+                List.of(
+                        "account_mute",
+                        "account_unmute",
+                        "account_show_fewer",
+                        "account_show_fewer_undo",
+                        "post_not_interested",
+                        "post_not_interested_undo",
+                        "interaction_limit_change")) {
+            insertEvent(subject.id(), type, now.minusDays(1));
+        }
+
+        ResponseEntity<Map> response =
+                query(admin, window(now.minusDays(7), now) + "&userId=" + subject.id());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(eventTypesOf(response)).containsExactly("session_start");
+    }
+
+    @Test
+    void listUserEvents_filterNamingAPrivatePreferenceSignal_isRejected() {
+        TestUser admin = createUser("evt_private_filter_admin", "admin");
+        TestUser subject = createUser("evt_private_filter_subject", "user");
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        insertEvent(subject.id(), "account_mute", now.minusDays(1));
+
+        ResponseEntity<Map> response =
+                query(admin, window(now.minusDays(7), now) + "&eventType=account_mute");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void listUserEvents_searchMetadata_comesBackAsTheMapTheResponseExposes() {
         TestUser admin = createUser("evt_meta_admin", "admin");
         TestUser subject = createUser("evt_meta_subject", "user");

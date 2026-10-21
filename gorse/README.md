@@ -55,7 +55,14 @@ Multi-source candidate merging needs the FM ranker; cold users are served by `[r
 Passing a file path fails startup with `unable to open database file: out of memory (14)`.
 3. A Redis `cache_store` requires the RediSearch module (`FT.*` commands) - plain `redis:7-alpine` fails with `ERR unknown command 'FT._LIST'`.
 This deployment uses Postgres for the cache store instead of adding a Redis Stack container.
-4. `negative_feedback_types` does not exist as a config key in the v0.5.11 sample; omit it.
+4. `negative_feedback_types` is accepted by v0.5.11 under `[recommend.data_source]`, next to `positive_feedback_types` and `read_feedback_types`.
+An earlier version of this file said the key did not exist; that was wrong.
+The behaviour of the exact image `zhenghaoz/gorse-in-one:0.5.11` was observed on 2026-10-10 in throwaway containers whose config set `negative_feedback_types = ["not_interested"]`:
+   - The startup log reports `load dataset ... negative_feedback_types:["not_interested"]`, so the validator takes the key.
+   - After a model fit, an item the user had marked with a `not_interested` feedback was absent from `GET /api/recommend/{user}` for that user.
+   - `DELETE /api/feedback/not_interested/{user}/{item}` answered `200` with `{"RowAffected":1}`, and the item came back in that user's list after the next ranking pass.
+   The exclusion applies to Gorse's personalized list only: the trending top-up and the popularity and chronological fallbacks do not pass through it, so the application filter in `RecommendationFeedServiceImpl` stays the authority.
+   Re-run the check by starting a throwaway container from the same image tag with `negative_feedback_types = ["not_interested"]`, posting one feedback row with `POST /api/feedback`, waiting for a fit, and reading `GET /api/recommend/{user}` before and after the `DELETE` above.
 
 ## Feedback type mapping (app -> Gorse)
 
@@ -65,6 +72,8 @@ This deployment uses Postgres for the cache store instead of adding a Redis Stac
 | `post.saved.v1` | `save` | positive |
 | `comment.created.v1` | `comment` | positive |
 | `post.viewed.v1` | `read` | read |
+| `post.shared.v1` | `share` | positive |
+| `post.not-interested.v1` | `not_interested` | negative; sent with `POST /api/feedback`, taken back with `DELETE /api/feedback/not_interested/{user}/{item}` on `post.not-interested-undone.v1` |
 
 ## Seeding
 

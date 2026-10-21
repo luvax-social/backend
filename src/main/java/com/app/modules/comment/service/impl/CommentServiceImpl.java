@@ -12,8 +12,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -38,6 +40,7 @@ import com.app.modules.comment.dto.request.EditCommentRequest;
 import com.app.modules.comment.dto.response.CommentContextResponse;
 import com.app.modules.comment.dto.response.CommentDeletionScopeResponse;
 import com.app.modules.comment.dto.response.CommentResponse;
+import com.app.modules.comment.dto.response.HiddenCommentResponse;
 import com.app.modules.comment.entity.Comment;
 import com.app.modules.comment.entity.CommentLike;
 import com.app.modules.comment.entity.CommentLikeId;
@@ -216,10 +219,16 @@ public class CommentServiceImpl implements CommentService {
         }
         // A reply under a hidden parent is hidden with it. Only the parent's author can write one,
         // and a visible reply would otherwise be counted and broadcast with the hidden parent's id
-        // as its parentId, which tells every viewer that parent exists.
+        // as its parentId, which tells every viewer that parent exists. It is recorded as
+        // hidden_parent so releasing the parent releases it, unless the policy hides it for a
+        // reason of its own, which it keeps and which only the owner's unhide of that reply clears.
         boolean policyHidden = decision.outcome() == InteractionOutcome.ALLOW_HIDDEN;
         boolean parentHidden = parent != null && STATUS_HIDDEN.equals(parent.getModerationStatus());
         boolean hidden = policyHidden || parentHidden;
+        String hiddenReason =
+                policyHidden
+                        ? hiddenReasonOf(decision)
+                        : (parentHidden ? CommentHiddenReason.HIDDEN_PARENT.value() : null);
 
         // Reserve the idempotency key in the same transaction via ON CONFLICT DO NOTHING. A
         // duplicate key returns a clean replay/conflict instead of poisoning the transaction with a
@@ -246,10 +255,7 @@ public class CommentServiceImpl implements CommentService {
                                 .depth(depth)
                                 .content(content)
                                 .moderationStatus(hidden ? STATUS_HIDDEN : STATUS_APPROVED)
-                                .hiddenReason(
-                                        policyHidden
-                                                ? hiddenReasonOf(decision)
-                                                : (parentHidden ? parent.getHiddenReason() : null))
+                                .hiddenReason(hiddenReason)
                                 .build());
         MDC.put("commentId", saved.getId().toString());
 
@@ -271,6 +277,9 @@ public class CommentServiceImpl implements CommentService {
 
         List<String> mentionedUserIds = resolveMentions(content, actorId);
         enqueueCreated(post, saved, actorId, parentOwnerId, mentionedUserIds, response, hidden);
+        if (hidden) {
+            enqueueHidden(saved, actorId, hiddenReason);
+        }
         return response;
     }
 
@@ -340,6 +349,12 @@ public class CommentServiceImpl implements CommentService {
                     saved.getId(),
                     actorId,
                     data);
+            // Only the approved-to-hidden transition counts. A comment that was already hidden
+            // stays hidden through an edit, and a hidden_parent reply that takes a policy reason
+            // was hidden before the edit too, so neither is a new hiding.
+            if (!hiddenBeforeEdit && STATUS_HIDDEN.equals(saved.getModerationStatus())) {
+                enqueueHidden(saved, actorId, saved.getHiddenReason());
+            }
             return response;
         } finally {
             clearWriteMdc();
@@ -366,6 +381,12 @@ public class CommentServiceImpl implements CommentService {
             // carries only this number: the full count below would tell every viewer how many
             // hidden comments the subtree held.
             int visibleDeletedCount = commentRepository.countVisibleSubtree(commentId);
+            // The deleter is told how many comments they could see go, which is every row only
+            // for an administrator or the post owner; anyone else would learn of hidden replies
+            // by other users from a larger number.
+            boolean seesEveryRow = canSeeEveryComment(actorId, comment);
+            int deleterCount =
+                    seesEveryRow ? 0 : commentRepository.countSubtreeVisibleTo(commentId, actorId);
             // The statement's own affected-row count is the authoritative figure for how many
             // comments this delete removed; no second query can match it without a race.
             int deletedCommentCount =
@@ -392,7 +413,8 @@ public class CommentServiceImpl implements CommentService {
                     comment.getId(),
                     actorId,
                     data);
-            return new CommentDeletionScopeResponse(deletedCommentCount);
+            return new CommentDeletionScopeResponse(
+                    seesEveryRow ? deletedCommentCount : deleterCount);
         } finally {
             clearWriteMdc();
         }
@@ -415,7 +437,21 @@ public class CommentServiceImpl implements CommentService {
         if (!comment.getUserId().equals(actorId) && !isCurrentUserAdmin()) {
             throw new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
         }
-        return new CommentDeletionScopeResponse(commentRepository.countSubtree(commentId));
+        // The same definition the delete answers with, so the dialogue and the delete agree.
+        return new CommentDeletionScopeResponse(
+                canSeeEveryComment(actorId, comment)
+                        ? commentRepository.countSubtree(commentId)
+                        : commentRepository.countSubtreeVisibleTo(commentId, actorId));
+    }
+
+    // An administrator and the owner of the post both read hidden comments, so for them the
+    // deletion count may include every row.
+    private boolean canSeeEveryComment(UUID actorId, Comment comment) {
+        return isCurrentUserAdmin()
+                || postRepository
+                        .findById(comment.getPostId())
+                        .map(post -> post.getUserId().equals(actorId))
+                        .orElse(false);
     }
 
     @Override
@@ -592,6 +628,158 @@ public class CommentServiceImpl implements CommentService {
         Set<UUID> reported = commentViewerStateService.loadReportedCommentIds(viewerId, ids);
         return new CommentContextResponse(
                 postId, chain.stream().map(c -> toResponse(c, authors, liked, reported)).toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CursorPageResponse<HiddenCommentResponse> listHiddenComments(
+            UUID ownerId, UUID postId, String cursor, int limit) {
+        // A caller who does not own the post is answered as for a post that does not exist, so
+        // the list cannot be used to learn whether anyone has had a comment hidden.
+        postRepository
+                .findById(postId)
+                .filter(post -> post.getUserId().equals(ownerId))
+                .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
+        int pageSize = normalizeLimit(limit);
+        Cursor decoded = decodeCursor(cursor, CursorScope.COMMENTS_HIDDEN);
+        PageRequest page = PageRequest.of(0, pageSize + 1);
+        List<Comment> rows =
+                decoded == null
+                        ? commentRepository.findFirstHiddenForPost(postId, ownerId, page)
+                        : commentRepository.findHiddenForPostBefore(
+                                postId,
+                                ownerId,
+                                TimeCursors.fromMicros(decoded.sortValueMicros()),
+                                decoded.id(),
+                                page);
+        CursorPageResponse<CommentResponse> assembled =
+                toPage(ownerId, rows, pageSize, cursor, CursorScope.COMMENTS_HIDDEN);
+        Map<UUID, String> reasons = new HashMap<>();
+        rows.forEach(row -> reasons.put(row.getId(), row.getHiddenReason()));
+        return CursorPageResponse.of(
+                assembled.getContent().stream()
+                        .map(
+                                comment ->
+                                        HiddenCommentResponse.of(
+                                                comment, reasons.get(comment.id())))
+                        .toList(),
+                assembled.getPageInfo().isHasNextPage(),
+                assembled.getPageInfo().getStartCursor(),
+                assembled.getPageInfo().getEndCursor(),
+                assembled.getPageInfo().isHasPreviousPage());
+    }
+
+    @Override
+    @Transactional
+    public CommentResponse unhideComment(UUID ownerId, UUID commentId) {
+        putWriteMdc(commentId, ownerId);
+        try {
+            Comment comment =
+                    commentRepository
+                            .findByIdAndDeletedAtIsNull(commentId)
+                            .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
+            Post post =
+                    postRepository
+                            .findById(comment.getPostId())
+                            .orElseThrow(() -> new AppException(ApiErrorCode.COMMENT_NOT_FOUND));
+            // Every reason to refuse before the conflict answers as a missing comment, a tombstone
+            // included, so a removed comment never reveals through a 409 that it has a hidden
+            // parent. Only the post owner may act on a hidden comment at all, and a comment by an
+            // account in a block with the owner is one the owner cannot see in the review list
+            // either.
+            if (!ownerId.equals(post.getUserId())
+                    || comment.getDeletedAt() != null
+                    || comment.getAdminRemovedAt() != null
+                    || !STATUS_HIDDEN.equals(comment.getModerationStatus())
+                    || blockRepository.existsBetween(ownerId, comment.getUserId())) {
+                throw new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
+            }
+            MDC.put("postId", comment.getPostId().toString());
+            assertParentReleased(comment);
+            // The conditional update is the arbiter: of two concurrent unhides exactly one matches
+            // the still-hidden row, so exactly one releases the replies and emits the events.
+            if (commentRepository.approveHiddenForPostOwner(commentId, ownerId) == 0) {
+                throw new AppException(ApiErrorCode.COMMENT_NOT_FOUND);
+            }
+            List<UUID> releasedIds = new ArrayList<>();
+            releasedIds.add(commentId);
+            releasedIds.addAll(commentRepository.approveHiddenParentReplies(commentId));
+            Map<UUID, Comment> released =
+                    commentRepository.findAllById(releasedIds).stream()
+                            .collect(Collectors.toMap(Comment::getId, Function.identity()));
+            Map<UUID, UserSummaryResponse> authors =
+                    userSummaryService.loadSummaries(
+                            released.values().stream().map(Comment::getUserId).toList());
+            // The target goes first and its replies follow in thread order, so a client that
+            // renders each frame as it arrives never shows a reply before the comment it answers.
+            Comment target = released.get(commentId);
+            enqueueUnhidden(target, ownerId, authors);
+            releasedIds.stream()
+                    .skip(1)
+                    .map(released::get)
+                    .sorted(
+                            java.util.Comparator.comparing(Comment::getDepth)
+                                    .thenComparing(Comment::getCreatedAt))
+                    .forEach(reply -> enqueueUnhidden(reply, ownerId, authors));
+            return mapper.toResponse(
+                    target,
+                    authors.get(target.getUserId()),
+                    loadIsLiked(ownerId, commentId),
+                    commentViewerStateService
+                            .loadReportedCommentIds(ownerId, List.of(commentId))
+                            .contains(commentId));
+        } finally {
+            clearWriteMdc();
+        }
+    }
+
+    // A comment cannot be approved beneath a hidden parent: it would be counted and broadcast with
+    // that parent's id, which tells every viewer the parent exists. The owner releases the parent
+    // first, and a reply hidden only because of that parent is then released with it.
+    private void assertParentReleased(Comment comment) {
+        if (comment.getParentId() == null) {
+            return;
+        }
+        boolean parentHidden =
+                commentRepository
+                        .findByIdAndDeletedAtIsNull(comment.getParentId())
+                        .map(parent -> STATUS_HIDDEN.equals(parent.getModerationStatus()))
+                        .orElse(false);
+        if (parentHidden) {
+            throw new AppException(ApiErrorCode.COMMENT_PARENT_STILL_HIDDEN);
+        }
+    }
+
+    // No notification consumer is bound to this event: the author was never told the comment was
+    // hidden and is not told it was released, and the people it mentions or answers were never
+    // told of it. Only the live tier renders it, as it would a created comment.
+    private void enqueueUnhidden(
+            Comment comment, UUID actorId, Map<UUID, UserSummaryResponse> authors) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("postId", comment.getPostId().toString());
+        data.put("commentId", comment.getId().toString());
+        data.put("commentOwnerId", comment.getUserId().toString());
+        data.put("depth", (int) comment.getDepth());
+        if (comment.getParentId() != null) {
+            data.put("parentId", comment.getParentId().toString());
+        }
+        if (comment.getRootId() != null) {
+            data.put("rootId", comment.getRootId().toString());
+        }
+        // Broadcast projection: the payload reaches every subscriber, so no viewer's like or report
+        // state may ride along.
+        data.put(
+                "comment",
+                mapper.toBroadcastResponse(
+                        mapper.toResponse(
+                                comment, authors.get(comment.getUserId()), false, false)));
+        outboxService.enqueue(
+                CommentEventTypes.COMMENT_UNHIDDEN_V1,
+                CommentEventTypes.COMMENT_UNHIDDEN_V1,
+                AGGREGATE_TYPE,
+                comment.getId(),
+                actorId,
+                data);
     }
 
     // The same predicate the reply and top-level list queries apply, so the context endpoint shows
@@ -790,6 +978,25 @@ public class CommentServiceImpl implements CommentService {
                 data);
     }
 
+    // An internal analytics signal: the live tier ignores it and no notification queue is bound to
+    // it, because the author is deliberately never told a comment was hidden. The payload names
+    // the reason and nothing of the text, the Hidden Words entry that matched, or the post owner.
+    private void enqueueHidden(Comment comment, UUID actorId, String reason) {
+        outboxService.enqueue(
+                CommentEventTypes.COMMENT_HIDDEN_V1,
+                CommentEventTypes.COMMENT_HIDDEN_V1,
+                AGGREGATE_TYPE,
+                comment.getId(),
+                actorId,
+                Map.of(
+                        "postId",
+                        comment.getPostId().toString(),
+                        "commentId",
+                        comment.getId().toString(),
+                        "reason",
+                        reason));
+    }
+
     // A mention the interaction policy does not allow resolves to nothing, whether it is denied by
     // a block in either direction or hidden by the mentioned account's interaction limit: the
     // mentioned user must not receive a notification (the harassment channel the stealth block
@@ -839,8 +1046,11 @@ public class CommentServiceImpl implements CommentService {
 
     // The policy runs for every edit, hidden comment or not, so an author the post owner blocked
     // after the comment was hidden cannot push new text into the owner's hidden review list. Its
-    // answer can only move an approved comment to hidden: a hidden comment stays hidden through an
-    // edit, so the post owner's unhide is the single way back to approved.
+    // answer can only move a comment towards hidden: a hidden comment stays hidden through an
+    // edit, so the post owner's unhide is the single way back to approved. A reply recorded as
+    // hidden_parent is the one reason an edit may replace: if the new text is filtered in its own
+    // right, releasing the parent must not release it unreviewed, so it takes the policy's reason.
+    // Any other recorded reason is kept.
     private void applyInteractionPolicyToEdit(UUID actorId, Comment comment, String content) {
         Post post =
                 postRepository
@@ -865,8 +1075,11 @@ public class CommentServiceImpl implements CommentService {
         if (decision.denied()) {
             throw refusalFor(actorId, post);
         }
-        if (decision.outcome() == InteractionOutcome.ALLOW_HIDDEN
-                && STATUS_APPROVED.equals(comment.getModerationStatus())) {
+        if (decision.outcome() != InteractionOutcome.ALLOW_HIDDEN) {
+            return;
+        }
+        if (STATUS_APPROVED.equals(comment.getModerationStatus())
+                || CommentHiddenReason.HIDDEN_PARENT.value().equals(comment.getHiddenReason())) {
             comment.setModerationStatus(STATUS_HIDDEN);
             comment.setHiddenReason(hiddenReasonOf(decision));
         }

@@ -27,6 +27,7 @@ import com.app.modules.comment.dto.request.EditCommentRequest;
 import com.app.modules.comment.dto.response.CommentContextResponse;
 import com.app.modules.comment.dto.response.CommentDeletionScopeResponse;
 import com.app.modules.comment.dto.response.CommentResponse;
+import com.app.modules.comment.dto.response.HiddenCommentResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -397,4 +398,77 @@ public interface CommentApi {
     @AuthenticationRequiredResponse
     @DeleteMapping(ApiConstants.Comments.ROOT + ApiConstants.Comments.LIKE)
     ResponseEntity<ApiResponse<Void>> unlikeComment(@PathVariable("commentId") UUID commentId);
+
+    @Operation(
+            summary = "List the hidden comments of a post",
+            description =
+                    "Cursor-paginated hidden comments of a post the caller owns, newest first,"
+                            + " every hidden reason included. Each row is a comment plus"
+                            + " `hiddenReason`: `hidden_words` or `limited_interaction` when the"
+                            + " comment was filtered at write time, or `hidden_parent` when it is"
+                            + " hidden only because the comment it answers is hidden. Only the"
+                            + " post owner may list them; anyone else is answered as for a post"
+                            + " that does not exist.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Cursor page of hidden comments"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "POST_NOT_FOUND: no such post, or the caller does not own it",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @CursorErrorResponses
+    @AuthenticationRequiredResponse
+    @GetMapping(ApiConstants.Posts.ROOT + ApiConstants.Posts.HIDDEN_COMMENTS)
+    ResponseEntity<ApiResponse<CursorPageResponse<HiddenCommentResponse>>> listHiddenComments(
+            @PathVariable("postId") UUID postId,
+            @Parameter(description = "Opaque cursor from the previous page")
+                    @RequestParam(value = "cursor", required = false)
+                    String cursor,
+            @Parameter(description = "Page size (1-100, default 20)")
+                    @RequestParam(value = "limit", defaultValue = "20")
+                    @Min(1)
+                    @Max(100)
+                    int limit);
+
+    @Operation(
+            summary = "Unhide a comment",
+            description =
+                    "Approves a hidden comment on a post the caller owns and releases the replies"
+                            + " that are hidden only because of it. A reply hidden for its own"
+                            + " reason, and everything beneath it, stays hidden. The comment is"
+                            + " counted again by the post and by its parent. Its author and the"
+                            + " accounts it mentions are not notified. Moderators and"
+                            + " administrators use the moderation endpoints instead.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "The comment, now approved"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description =
+                        "COMMENT_NOT_FOUND: the comment is not hidden, is deleted or removed, is on"
+                                + " a post the caller does not own, or was already unhidden",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "409",
+                description =
+                        "COMMENT_PARENT_STILL_HIDDEN: the comment it answers is hidden and must be"
+                                + " unhidden first",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @AuthenticationRequiredResponse
+    @PostMapping(ApiConstants.Comments.ROOT + ApiConstants.Comments.UNHIDE)
+    ResponseEntity<ApiResponse<CommentResponse>> unhideComment(
+            @PathVariable("commentId") UUID commentId);
 }

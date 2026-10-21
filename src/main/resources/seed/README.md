@@ -22,7 +22,7 @@ before reseeding.
 | Media assets (Pexels-sourced, R2-hosted) | 631 (536 images, 70 videos, 25 banners) |
 | Avatars (randomuser.me, externally hosted) | 140, one per user, never uploaded to R2 |
 | Comment pool entries | 1,020 across 25 topic pools |
-| Conversations / messages | 85 conversations, ~1,600 messages |
+| Conversations / messages | 110 conversations (85 authored, 25 message requests), ~1,650 messages |
 | Moderation cases (full narrative) | 6 |
 | Reports | ~180 (narrative + standalone) |
 | Warnings / strikes | 27 / 14 |
@@ -110,12 +110,14 @@ What happens on that run:
    Every one of the 4,320 half-hour statistics buckets is one `admin.platform-stats.collected.v1` event.
    Every one of the roughly 10,000 behavioural events is one `recommendation.user-event.imported.v1` event.
    The three analytics consumers stay enabled during the run, and they are the only path into ClickHouse.
-4. The run asserts every value of 15 mandatory enum-typed columns (`user_status`, `post_type`,
+4. The run asserts every value of the mandatory enum-typed columns (`user_status`, `post_type`,
    `admin_action_type`, and so on) is represented on at least 5 rows, and fails loudly
    if any value falls short.
    Behavioural event types are asserted on the generated set before it is enqueued, because the
    PostgreSQL `user_events` table that used to be counted no longer exists.
-   Every event type except `post_view` must appear at least 5 times.
+   Every event type except the ones in `AnalyticsSeedWriter.UNSEEDED_TYPES` must appear at least 5 times.
+   `post_view` arrives from `post.viewed.v1`, and `post_not_interested` with its undo arrive from the `post.not-interested` events `SeedOutboxEmitter` replays, because the feedback consumer sends those to Gorse as well.
+   The other eleven interaction control types (mutes, show fewer, reactions, request decisions, hidden and released comments, limit changes) are imported from signals each writer records for the rows it wrote, so no signal describes something that has no row behind it.
 
 ## Analytics after a seed run
 
@@ -128,7 +130,7 @@ Wait until `outbox_events` has no `PENDING` row and the four analytics queues ar
 SELECT count() FROM admin_actions FINAL;
 -- 4,320, plus any bucket the statistics job collected since
 SELECT uniqExact(bucket_start) FROM platform_stats;
--- at least 5 of every event type except post_view, which arrives from post.viewed.v1
+-- at least 5 of every seeded event type; post_view, post_not_interested and post_not_interested_undo arrive from the recommendation consumer draining post.viewed.v1 and the replayed post.not-interested events
 SELECT event_type, count() FROM user_events FINAL GROUP BY event_type;
 ```
 
@@ -250,6 +252,48 @@ approved. Five tickets are still undecided, on five distinct accounts, because V
 `uq_support_tickets_one_open_verification_per_user` admits one open verification request per
 account.
 
+## Interaction control scenarios
+
+`safety/interaction_control.json` and the three settings columns in `users.json` seed the interaction control features.
+Every account named below is an existing seed account, and each shape appears at least five times so a list never looks like a single special case.
+Entries marked undone write no row, because undoing a preference deletes it; they exist only as the history that precedes the undo.
+
+| Scenario | Accounts to use | What to see |
+|---|---|---|
+| Who may message me, `following` | `james.carter.dev`, `lily.uxui`, `hunter.finance`, `yuna.study`, `kellan.newgrad25`, `nadia.gymlife` | Settings show "following"; a stranger cannot start a conversation |
+| Who may message me, `nobody` | `kevin.backend`, `tessa.liftheavy`, `phoebe.accounting`, `keith.finance`, `kyle.uni21`, `hailey.10k` | Settings show "nobody"; nobody can start a conversation |
+| Platform word list switched off | `derek.freelancedev`, `tyler.sysadmin`, `leo.embedded`, `sam.dataeng`, `peter.qa`, `phil.senior4` | The toggle in hidden words settings is off; only their own list applies |
+| Mute posts only | `user_public` muting `shop.mimidress`; `lily.uxui` muting `kane.runs` | The muted account's posts leave the feed; its stories stay |
+| Mute stories only | `user_public` muting `victor.marathon`; `lily.uxui` muting `dean.lensman` | Its stories leave the tray; its posts stay |
+| Mute both | `user_public` muting `grandma.roses`; `lily.uxui` muting `maya.visualdesign` | Neither posts nor stories appear |
+| Show fewer | `user_public` for `kane.runs` and `user_power`; `hunter.finance` for `sophieg.design` | The author's posts rank lower in the feed |
+| Not interested | `user_public` on three posts by `kane.runs`, `user_power`, `derekshoots`; `hunter.finance` on two posts | Those posts no longer appear for the viewer |
+| Limit active, non-followers | `closet.by.hana`, `tucker.trailrunner`, `shop.mimidress` | A stranger's comment is hidden from everyone but its author |
+| Limit active, recent followers | `streetwear.atx1`, `quinn.familyonly`, `sean.privateacc` | Followers approved in the last seven days are limited; older followers are not |
+| Limit expired | `tyler.sysadmin`, `yolanda.filmphoto`, `nadia.gymlife`, `hunter.finance`, `lauren.t02`, `kimberly.captures` | The limit reads as off and filters nothing |
+| Personal hidden words | `user_power`, `user_public`, `derekshoots`, `sophieg.design`, `kane.runs`, `closet.by.hana` | The settings list shows their phrases |
+| Platform hidden words | Log in as `admin` | The registry lists eight phrases, five of them edited from an earlier wording |
+| Filtered comments | Open the first posts of `user_power`, `user_public`, `derekshoots`, `sophieg.design`, `kane.runs`, `closet.by.hana` as the owner | The hidden comments page shows the comments filtered by words, the replies hidden with their parent, and the comments a limit filtered |
+| Unhidden comments | The same owners, further down their timelines | Comments that match a word but were released by the owner read as ordinary comments |
+| Message requests, pending | Recipients `user_public` (from `nora.reads`, `owen.quiet`), `user_power` (from `thea.scrolls`, `marcus.lurks`), `derekshoots` (from `elena.watcher`, `rory.nopost`) | Each request shows in the requests folder and the request count; the sender can send nothing further |
+| Message requests, hidden | `user_power` (from `saskia.quiet2`, `devon.reader`), `user_public` (from `ingrid.silent`), `derekshoots` (from `caleb.browses`), `sophieg.design` (from `yasmin.quiet3`), `kane.runs` (from `bruno.observer`), `closet.by.hana` (from `leonie.reads2`) | Each sits in the hidden requests folder, because the message contains one of the recipient's hidden words or the recipient has an active limit |
+| Message requests, declined | Senders `hugo.lurker`, `jonas.silent3`, `rania.quiet5`, `tobin.reads3`, `keiko.observer2`, `andres.nopost3` | The sender sees a pending request and cannot send again; the recipient no longer has the conversation |
+| Message requests, accepted | `lidia.reads4` and `user_public`, `kasper.quiet6` and `user_power`, `juno.comments` and `derekshoots`, `silas.replies` and `kane.runs`, `nadia.chimesin` and `sophieg.design`, `garrett.rarely` and `victor.marathon` | An ordinary conversation whose first reply quotes the request |
+| Reply quotes | `conv_024` (`yuna.study`, `dean.lensman`), `conv_025` (`derekshoots`, `victor.marathon`), `conv_028` (`closet.by.hana`, `corner.sandwich3`) | A message shows the quoted message above it |
+| Reply to an unavailable message | `conv_014` (`recovered.user1`, `tyson.videographer`) quotes a deleted message; `conv_013` (`streetwear.atx1`, `user_public`) and `conv_015` (`derek.freelancedev`, `aaron.codes`) quote a message a moderator removed | The quote reads as unavailable |
+| Reactions | The conversations above and `conv_031`, `conv_033`, `conv_036`, `conv_039`, `conv_042`, `conv_043` | Ten different emoji across the thread and conversation list |
+| Reaction reports, removed and restored | `phil.senior4` reporting `sophieg.design` (`conv_009`), `quinn.familyonly` reporting `vivian.frontend` (`conv_016`), `user_power` reporting `nadia.gymlife` (`conv_020`), `brian.noposts` reporting `hope.quietacc` (`conv_021`), `victor.marathon` reporting `derekshoots` (`conv_025`) | Log in as `admin`: each report is resolved, the reaction was removed and later restored, and the audit log holds both actions |
+| Reaction report, removal stands | `user_private` reporting `james.carter.dev` (`conv_027`) | The report is resolved, the reaction stays hidden from both participants, and `james.carter.dev` has a reaction removed notice |
+| Reaction reports, dismissed | `corner.sandwich3` reporting `closet.by.hana` (`conv_028`), `chloe.productdesign` reporting `tyler.sysadmin` (`conv_031`) | The reaction is untouched and the reporter has a dismissed notice |
+| Reaction reports, open | `dean.lensman` reporting `yasmin.brandmarketing` (`conv_043`, pending), `yasmin.brandmarketing` reporting `lily.uxui` (`conv_048`, under review by `mod.laura`) | The reports wait in the moderation queue |
+| Reaction removed notices | The reactors of the six removed reactions: `sophieg.design`, `vivian.frontend`, `nadia.gymlife`, `hope.quietacc`, `derekshoots`, `james.carter.dev` | Each has a `reaction_removed` notification, even where the reaction was restored afterwards, as for a removed message |
+| Hidden Words audit history | Log in as `admin` or `rachel.admin` | Thirteen platform phrases were created, five of them reworded and five deleted ten days later, so the audit log holds `create_hidden_word`, `edit_hidden_word` and `delete_hidden_word` rows whose metadata keeps each phrase |
+| Reaction on a removed message | `conv_014`, `conv_013`, `conv_015`, `conv_026` (`quinn.familyonly`, `ryan.walsh94`), `conv_admin_014` (`admin`, `shop.mimidress`) | The reaction is hidden while the message is deleted or removed |
+
+Recent followers are accounts whose follow request is months old and whose approval is the seed run itself.
+Every other accepted follow carries the approval date of its request, which is why a limit on recent followers hides some commenters and not others.
+The graph generator keeps these accounts consistent with each other: an account that is hidden because it is a stranger never follows the owner, a muter follows the muted account, and none of these pairs is blocked.
+
 ## File map
 
 Files used across nearly every writer stay at the top level; everything else is grouped by what it
@@ -258,7 +302,7 @@ describes.
 | File | Holds | Consumed by |
 |------|-------|-------------|
 | `personas.json` | 10 persona archetypes referenced by users, posts, and comments; each `voice` describes an English writing style | `UserSeedWriter`, `PostSeedWriter`, `CommentSeedWriter` |
-| `users.json` | The 90 seed users, including the 8 fixed QA accounts | `UserSeedWriter`, and read by nearly every other writer |
+| `users.json` | The 140 seed users, including the 8 fixed QA accounts, and the message permission and platform word toggle of the accounts that differ from the defaults | `UserSeedWriter`, and read by nearly every other writer |
 | `content/posts.json` | 722 authored posts (image/video/carousel/text) | `PostSeedWriter` |
 | `content/hashtags.json` | The hashtag catalog posts reference | `PostSeedWriter` |
 | `content/comment_pools.json` | 900 pooled comment lines across 22 topics, plus scripted comment chains | `CommentSeedWriter` |
@@ -266,6 +310,7 @@ describes.
 | `moderation/moderation_cases.json` | 6 narrative moderation cases plus supplementary actions and reports | `ModerationSeedWriter` |
 | `media/media_manifest.json` | 631 Pexels-sourced media entries already uploaded to R2 (avatars are not in this file - see "Avatars" below) | `MediaSeedWriter`, `UserSeedWriter` (banner `cdn_url` lookup) |
 | `support/support_ticket_pools.json` | Pooled support-ticket request, response and escalation prose | `SupportSeedWriter` |
+| `safety/interaction_control.json` | Mutes, show-fewer and not-interested marks, interaction limits, Hidden Words entries, filtered comments, message requests, reply quotes and reactions | `SocialGraphSeedWriter`, `EngagementSeedWriter`, `CommentSeedWriter`, `MessageSeedWriter` |
 | `verification/badges.json` | 16 verification requests bound to named accounts, 12 legacy grants and 5 revocations | `SupportSeedWriter` (the request lane), `VerificationSeedWriter` |
 
 ## Java package map
@@ -274,7 +319,7 @@ describes.
 |---------|-------|
 | `com.app.common.seed` | `SeedRunner` (orchestration entry point) and `SeedProperties` |
 | `com.app.common.seed.loader` | `SeedDataLoader` (reads and validates all seed JSON) and `SeedContent` (the loaded, typed result) |
-| `com.app.common.seed.model` | The 20 content record types the JSON files deserialize into |
+| `com.app.common.seed.model` | The content record types the JSON files deserialize into |
 | `com.app.common.seed.time` | `SeedTimeline`, the deterministic timestamp generator |
 | `com.app.common.seed.reset` | `SeedResetService`, the pre-run truncation of PostgreSQL, the broker, Elasticsearch, Gorse and, through `AnalyticsStoreTruncator`, ClickHouse |
 | `com.app.common.seed.writer` | The 13 domain writers, one per subsystem |

@@ -1,6 +1,7 @@
 package com.app.modules.message.dto.response;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import com.app.modules.message.enums.MessageType;
@@ -35,6 +36,12 @@ public record MessageResponse(
         @Schema(description = "Message this one replies to, or null.") UUID replyToId,
         @Schema(
                         description =
+                                "Server-resolved preview of the replied-to message; null when this"
+                                        + " message is not a reply or is itself no longer shown.",
+                        nullable = true)
+                ReplyPreviewResponse replyTo,
+        @Schema(
+                        description =
                                 "True if this message is no longer shown: either its sender deleted it"
                                         + " or an administrator removed it. The two are not distinguished"
                                         + " on the wire, because both render the same placeholder.")
@@ -46,4 +53,14 @@ public record MessageResponse(
                                         + " because that is the timestamp the participants were already"
                                         + " shown.")
                 OffsetDateTime deletedAt,
-        @Schema(description = "Creation timestamp.") OffsetDateTime createdAt) {}
+        @Schema(description = "Creation timestamp.") OffsetDateTime createdAt,
+        @Schema(
+                        description =
+                                "Reactions the caller may see, oldest first; empty for a message that"
+                                        + " is no longer shown, because a restore brings them back.")
+                List<MessageReactionResponse> reactions) {
+
+    public MessageResponse {
+        reactions = reactions == null ? List.of() : List.copyOf(reactions);
+    }
+}

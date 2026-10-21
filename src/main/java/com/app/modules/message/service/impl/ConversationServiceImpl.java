@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.app.common.enums.ApiErrorCode;
 import com.app.common.exception.AppException;
+import com.app.common.outbox.service.OutboxService;
 import com.app.common.pagination.Cursor;
 import com.app.common.pagination.CursorCodec;
 import com.app.common.pagination.CursorScope;
@@ -33,6 +35,7 @@ import com.app.modules.media.entity.MediaAsset;
 import com.app.modules.message.dto.request.CreateDirectConversationRequest;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
+import com.app.modules.message.dto.response.LastReactionPreviewResponse;
 import com.app.modules.message.dto.response.MessageMediaResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.ParticipantResponse;
@@ -40,18 +43,28 @@ import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.ConversationParticipantId;
 import com.app.modules.message.entity.Message;
+import com.app.modules.message.entity.MessageReaction;
+import com.app.modules.message.enums.ConversationFolder;
+import com.app.modules.message.enums.ConversationRequestStatus;
 import com.app.modules.message.mapper.MessageMapper;
+import com.app.modules.message.messaging.MessageEventTypes;
 import com.app.modules.message.repository.ConversationParticipantRepository;
 import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.message.repository.ConversationUnreadCount;
 import com.app.modules.message.repository.MessageMediaAssetRepository;
+import com.app.modules.message.repository.MessageReactionRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.message.repository.MessageUserRepository;
-import com.app.modules.message.repository.MessageUserSettingsRepository;
 import com.app.modules.message.service.ConversationService;
+import com.app.modules.social.policy.ConversationContext;
+import com.app.modules.social.policy.ConversationRequestState;
+import com.app.modules.social.policy.InteractionDecision;
+import com.app.modules.social.policy.InteractionPolicyService;
+import com.app.modules.social.policy.InteractionReason;
+import com.app.modules.social.policy.InteractionRequest;
+import com.app.modules.social.policy.InteractionType;
 import com.app.modules.social.service.SocialService;
 import com.app.modules.users.entity.User;
-import com.app.modules.users.enums.MessagePermission;
 
 @Service
 public class ConversationServiceImpl implements ConversationService {
@@ -60,35 +73,42 @@ public class ConversationServiceImpl implements ConversationService {
 
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
+    private static final String AGGREGATE_TYPE = "message";
 
     private final ConversationRepository conversationRepository;
     private final ConversationParticipantRepository participantRepository;
     private final MessageRepository messageRepository;
     private final MessageUserRepository userRepository;
-    private final MessageUserSettingsRepository userSettingsRepository;
-    private final SocialService socialService;
+    private final InteractionPolicyService interactionPolicy;
     private final MessageMapper mapper;
     // Read-only view of the media module, mirroring MessageServiceImpl. The conversation list
     // renders the newest message, which may be an attachment.
     private final MessageMediaAssetRepository mediaAssetRepository;
+    private final SocialService socialService;
+    private final OutboxService outboxService;
+    private final MessageReactionRepository reactionRepository;
 
     public ConversationServiceImpl(
             ConversationRepository conversationRepository,
             ConversationParticipantRepository participantRepository,
             MessageRepository messageRepository,
             MessageUserRepository userRepository,
-            MessageUserSettingsRepository userSettingsRepository,
-            SocialService socialService,
+            InteractionPolicyService interactionPolicy,
             MessageMapper mapper,
-            MessageMediaAssetRepository mediaAssetRepository) {
+            MessageMediaAssetRepository mediaAssetRepository,
+            SocialService socialService,
+            OutboxService outboxService,
+            MessageReactionRepository reactionRepository) {
         this.conversationRepository = conversationRepository;
         this.participantRepository = participantRepository;
         this.messageRepository = messageRepository;
         this.userRepository = userRepository;
-        this.userSettingsRepository = userSettingsRepository;
-        this.socialService = socialService;
+        this.interactionPolicy = interactionPolicy;
         this.mapper = mapper;
         this.mediaAssetRepository = mediaAssetRepository;
+        this.socialService = socialService;
+        this.outboxService = outboxService;
+        this.reactionRepository = reactionRepository;
     }
 
     /**
@@ -107,6 +127,39 @@ public class ConversationServiceImpl implements ConversationService {
         return assetId == null ? null : media.get(assetId);
     }
 
+    // The query already returns only reactions newer than the conversation's last message, the
+    // only ones the row shows, so a reaction never competes with the last-message preview. A
+    // reaction leaves last_message_at and the unread count alone, so it never moves the row.
+    private Map<UUID, LastReactionPreviewResponse> lastReactions(
+            UUID viewerId, List<UUID> conversationIds) {
+        List<MessageReaction> latest =
+                reactionRepository.findLatestVisiblePerConversation(conversationIds, viewerId);
+        if (latest.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, Message> reactedMessages =
+                messageRepository
+                        .findAllById(latest.stream().map(MessageReaction::getMessageId).toList())
+                        .stream()
+                        .collect(Collectors.toMap(Message::getId, Function.identity()));
+        Map<UUID, LastReactionPreviewResponse> previews = new HashMap<>();
+        for (MessageReaction reaction : latest) {
+            Message message = reactedMessages.get(reaction.getMessageId());
+            if (message == null) {
+                continue;
+            }
+            previews.put(
+                    message.getConversationId(),
+                    new LastReactionPreviewResponse(
+                            reaction.getUserId(),
+                            reaction.getEmoji(),
+                            message.getId(),
+                            reaction.getReactedAt(),
+                            viewerId.equals(message.getSenderId())));
+        }
+        return previews;
+    }
+
     @Override
     @Transactional
     public ConversationResponse createDirectConversation(
@@ -119,54 +172,109 @@ public class ConversationServiceImpl implements ConversationService {
         userRepository
                 .findByIdAndDeletedAtIsNull(targetId)
                 .orElseThrow(() -> new AppException(ApiErrorCode.USER_NOT_FOUND));
-        assertNotBlocked(actorId, targetId);
-        assertMessageRequestAllowed(actorId, targetId);
 
         // Serializes concurrent createDirectConversation calls for this pair so the
-        // check-then-create
-        // below cannot race into two conversations; the lock is released automatically at
-        // transaction
-        // end, and the returned key is reused on insert as a database-level uniqueness backstop.
+        // check-then-create below cannot race into two conversations; the lock is released
+        // automatically at transaction end, and the returned key is reused on insert as a
+        // database-level uniqueness backstop.
         String pairKey = conversationRepository.lockDirectConversationPair(actorId, targetId);
 
         Optional<Conversation> existing =
                 conversationRepository.findDirectConversationBetween(actorId, targetId);
         Conversation conversation;
-        if (existing.isPresent()) {
-            conversation = existing.get();
-            // Reactivate the caller's own membership if they had previously left; the other
-            // participant's state is untouched.
-            ConversationParticipant actorParticipant =
-                    participantRepository
-                            .findByIdConversationIdAndIdUserId(conversation.getId(), actorId)
-                            .orElseThrow(
-                                    () -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
-            if (actorParticipant.getLeftAt() != null) {
-                actorParticipant.setLeftAt(null);
-                participantRepository.save(actorParticipant);
-            }
+        if (existing.isPresent() && !declinedByActor(existing.get(), actorId)) {
+            conversation = reuseExisting(existing.get(), actorId, targetId);
         } else {
-            conversation = Conversation.builder().createdBy(actorId).directPairKey(pairKey).build();
-            conversationRepository.saveAndFlush(conversation);
-            participantRepository.save(newParticipant(conversation.getId(), actorId));
-            participantRepository.save(newParticipant(conversation.getId(), targetId));
-            log.info("Direct conversation created: conversationId={}", conversation.getId());
+            // The recipient who declined is now starting their own conversation. The declined one
+            // stays as the old sender saw it; only its claim on the pair is released, so the new
+            // conversation can take the pair key.
+            existing.ifPresent(
+                    declined -> conversationRepository.retireDirectPairKey(declined.getId()));
+            conversation = startConversation(actorId, targetId, pairKey);
         }
         return assembleDetail(conversation, actorId);
+    }
+
+    private static boolean declinedByActor(Conversation conversation, UUID actorId) {
+        return conversation.getRequestStatus() == ConversationRequestStatus.DECLINED
+                && actorId.equals(conversation.getRequestRecipientId());
+    }
+
+    // An existing conversation is reused without asking for message permission again, so an
+    // accepted one survives the recipient unfollowing, tightening their settings or blocking and
+    // later unblocking. A pending or declined one is reused unchanged for its sender, which keeps a
+    // decline invisible, and a recipient opening a pending request simply gets it back.
+    private Conversation reuseExisting(Conversation conversation, UUID actorId, UUID targetId) {
+        assertNotBlocked(actorId, targetId);
+        // Reactivate the caller's own membership if they had previously left; the other
+        // participant's state is untouched.
+        ConversationParticipant actorParticipant =
+                participantRepository
+                        .findByIdConversationIdAndIdUserId(conversation.getId(), actorId)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
+        if (actorParticipant.getLeftAt() != null) {
+            actorParticipant.setLeftAt(null);
+            participantRepository.save(actorParticipant);
+        }
+        return conversation;
+    }
+
+    private Conversation startConversation(UUID actorId, UUID targetId, String pairKey) {
+        InteractionDecision decision =
+                interactionPolicy.evaluate(
+                        new InteractionRequest(
+                                actorId,
+                                targetId,
+                                InteractionType.MESSAGE_INITIATE,
+                                null,
+                                null,
+                                null));
+        if (decision.denied()) {
+            throw refusal(decision);
+        }
+        Conversation.ConversationBuilder builder =
+                Conversation.builder().createdBy(actorId).directPairKey(pairKey);
+        switch (decision.outcome()) {
+            case ALLOW -> builder.requestStatus(ConversationRequestStatus.ACCEPTED);
+            case ROUTE_TO_REQUESTS ->
+                    builder.requestStatus(ConversationRequestStatus.PENDING)
+                            .requestRecipientId(targetId);
+            case ROUTE_TO_HIDDEN_REQUESTS ->
+                    builder.requestStatus(ConversationRequestStatus.PENDING)
+                            .requestRecipientId(targetId)
+                            .requestHidden(true);
+            default ->
+                    throw new IllegalStateException(
+                            "unexpected initiation outcome " + decision.outcome());
+        }
+        Conversation conversation = builder.build();
+        conversationRepository.saveAndFlush(conversation);
+        participantRepository.save(newParticipant(conversation.getId(), actorId));
+        participantRepository.save(newParticipant(conversation.getId(), targetId));
+        log.info(
+                "Direct conversation created: conversationId={}, requestStatus={}",
+                conversation.getId(),
+                conversation.getRequestStatus());
+        return conversation;
     }
 
     @Override
     @Transactional(readOnly = true)
     public CursorPageResponse<ConversationSummaryResponse> listMyConversations(
-            UUID actorId, String cursor, int limit) {
+            UUID actorId, ConversationFolder folder, String cursor, int limit) {
         int pageSize = normalizeLimit(limit);
         ConversationCursor decoded = decodeCursor(cursor);
         PageRequest page = PageRequest.of(0, pageSize + 1);
         List<Conversation> conversations =
                 decoded.isEmpty()
-                        ? conversationRepository.findFirstMyConversations(actorId, page)
+                        ? conversationRepository.findFirstMyConversations(
+                                actorId, folder.sqlName(), page)
                         : conversationRepository.findMyConversationsBefore(
-                                actorId, decoded.lastMessageAt(), decoded.conversationId(), page);
+                                actorId,
+                                folder.sqlName(),
+                                decoded.lastMessageAt(),
+                                decoded.conversationId(),
+                                page);
         boolean hasNextPage = conversations.size() > pageSize;
         if (hasNextPage) {
             conversations = conversations.subList(0, pageSize);
@@ -181,9 +289,9 @@ public class ConversationServiceImpl implements ConversationService {
                         : encodeCursor(conversations.get(conversations.size() - 1));
 
         // Pinned conversations bypass keyset pagination entirely and are shown ahead of the first
-        // page only; see ConversationRepository.findMyPinnedConversations.
+        // page of the primary folder only; see ConversationRepository.findMyPinnedConversations.
         List<Conversation> pinned =
-                decoded.isEmpty()
+                decoded.isEmpty() && folder == ConversationFolder.PRIMARY
                         ? conversationRepository.findMyPinnedConversations(actorId)
                         : List.of();
         List<Conversation> allConversations =
@@ -200,6 +308,7 @@ public class ConversationServiceImpl implements ConversationService {
                 participantRepository.findByIdConversationIdInAndLeftAtIsNull(conversationIds);
         Map<UUID, List<ParticipantResponse>> participantsByConversation =
                 groupParticipantResponses(activeParticipants);
+        restoreDeclinedRecipients(allConversations, actorId, participantsByConversation);
         Map<UUID, ConversationParticipant> myParticipantByConversation =
                 activeParticipants.stream()
                         .filter(p -> p.getId().getUserId().equals(actorId))
@@ -228,6 +337,7 @@ public class ConversationServiceImpl implements ConversationService {
                                 .collect(
                                         Collectors.toMap(
                                                 MediaAsset::getId, mapper::toMediaResponse));
+        Map<UUID, Message> lastMessageParents = ReplyParents.load(messageRepository, lastMessages);
         Map<UUID, MessageResponse> lastMessageByConversation =
                 lastMessages.stream()
                         .collect(
@@ -235,8 +345,12 @@ public class ConversationServiceImpl implements ConversationService {
                                         Message::getConversationId,
                                         m ->
                                                 mapper.toMessageResponse(
-                                                        m, mediaFor(lastMessageMedia, m))));
+                                                        m,
+                                                        mediaFor(lastMessageMedia, m),
+                                                        lastMessageParents)));
 
+        Map<UUID, LastReactionPreviewResponse> lastReactionByConversation =
+                lastReactions(actorId, conversationIds);
         List<ConversationSummaryResponse> content =
                 allConversations.stream()
                         .map(
@@ -247,6 +361,7 @@ public class ConversationServiceImpl implements ConversationService {
                                     boolean isMuted = mine != null && mine.isMuted();
                                     boolean isManuallyUnread =
                                             mine != null && mine.isManuallyUnread();
+                                    boolean recipient = isUnacceptedRecipient(c, actorId);
                                     return mapper.toSummaryResponse(
                                             c,
                                             participantsByConversation.getOrDefault(
@@ -255,7 +370,12 @@ public class ConversationServiceImpl implements ConversationService {
                                             lastMessageByConversation.get(c.getId()),
                                             isPinned,
                                             isMuted,
-                                            isManuallyUnread);
+                                            isManuallyUnread,
+                                            requestStatusLabel(c),
+                                            recipient,
+                                            recipient && c.isRequestHidden(),
+                                            sendRestrictionLabel(c, recipient),
+                                            lastReactionByConversation.get(c.getId()));
                                 })
                         .toList();
         return CursorPageResponse.of(content, hasNextPage, startCursor, endCursor, cursor != null);
@@ -272,7 +392,14 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     @Transactional
     public void leaveConversation(UUID actorId, UUID conversationId) {
-        fetchConversation(conversationId);
+        Conversation conversation = fetchConversation(conversationId);
+        // Deleting a request from the inbox is declining it. A plain departure would leave the
+        // request pending with the recipient gone, which the sender could tell from silence.
+        if (conversation.getRequestStatus() == ConversationRequestStatus.PENDING
+                && actorId.equals(conversation.getRequestRecipientId())) {
+            deleteRequest(actorId, conversationId);
+            return;
+        }
         ConversationParticipant participant =
                 participantRepository
                         .findByIdConversationIdAndIdUserId(conversationId, actorId)
@@ -322,6 +449,117 @@ public class ConversationServiceImpl implements ConversationService {
         participantRepository.save(participant);
     }
 
+    @Override
+    @Transactional
+    public ConversationResponse acceptRequest(UUID actorId, UUID conversationId) {
+        OpenRequest request = lockOpenRequest(actorId, conversationId);
+        Conversation conversation = request.conversation();
+        // Accepting is interacting, so a block in either direction wins and answers as a missing
+        // request. Declining stays possible under a block: it only ends the recipient's side.
+        if (blockedBetween(actorId, request.requesterId())) {
+            throw new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND);
+        }
+        conversation.setRequestStatus(ConversationRequestStatus.ACCEPTED);
+        conversation.setRequestHidden(false);
+        conversation.setRequestResolvedAt(OffsetDateTime.now(ZoneOffset.UTC));
+        conversationRepository.save(conversation);
+        enqueueResolved(conversationId, actorId, "accepted");
+        return assembleDetail(conversation, actorId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteRequest(UUID actorId, UUID conversationId) {
+        decline(lockOpenRequest(actorId, conversationId).conversation(), actorId, "deleted");
+    }
+
+    @Override
+    @Transactional
+    public void blockRequester(UUID actorId, UUID conversationId) {
+        OpenRequest request = lockOpenRequest(actorId, conversationId);
+        decline(request.conversation(), actorId, "blocked");
+        // Same transaction as the decline: a block that cannot be created leaves the request
+        // pending rather than declined and unblocked. When the recipient had already blocked the
+        // sender there is nothing to create, and the decline still has to resolve the request.
+        if (!conversationRepository.existsBlock(actorId, request.requesterId())) {
+            socialService.blockUser(actorId, request.requesterId());
+        }
+    }
+
+    // The sender keeps reading the request as pending, so nothing about the decline is written to
+    // anything the sender can see: only the recipient's own membership ends and the row records
+    // when it was resolved.
+    private void decline(Conversation conversation, UUID actorId, String resolution) {
+        conversation.setRequestStatus(ConversationRequestStatus.DECLINED);
+        conversation.setRequestResolvedAt(OffsetDateTime.now(ZoneOffset.UTC));
+        conversationRepository.save(conversation);
+        ConversationParticipant recipient =
+                participantRepository
+                        .findByIdConversationIdAndIdUserId(conversation.getId(), actorId)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
+        recipient.setLeftAt(OffsetDateTime.now(ZoneOffset.UTC));
+        participantRepository.save(recipient);
+        enqueueResolved(conversation.getId(), actorId, resolution);
+    }
+
+    private record OpenRequest(Conversation conversation, UUID requesterId) {}
+
+    // Takes the pair lock before the row lock, the order every other writer of a pair's
+    // conversation uses, so a decision cannot deadlock with or be overwritten by the mutual follow
+    // provisioner. A request with no message yet is not listed to its recipient, so acting on it
+    // answers as if it did not exist; declining one would also leave a state the sender could tell
+    // from a pending one.
+    private OpenRequest lockOpenRequest(UUID actorId, UUID conversationId) {
+        UUID requesterId =
+                participantRepository
+                        .findByIdConversationIdOrderByJoinedAtAsc(conversationId)
+                        .stream()
+                        .map(p -> p.getId().getUserId())
+                        .filter(userId -> !userId.equals(actorId))
+                        .findFirst()
+                        .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
+        conversationRepository.lockDirectConversationPair(actorId, requesterId);
+        Conversation conversation =
+                conversationRepository
+                        .lockById(conversationId)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND));
+        boolean open =
+                conversation.getRequestStatus() == ConversationRequestStatus.PENDING
+                        && actorId.equals(conversation.getRequestRecipientId())
+                        && conversation.getLastMessageAt() != null
+                        && participantRepository.existsByIdConversationIdAndIdUserIdAndLeftAtIsNull(
+                                conversationId, actorId);
+        if (!open) {
+            throw new AppException(ApiErrorCode.CONVERSATION_NOT_FOUND);
+        }
+        return new OpenRequest(conversation, requesterId);
+    }
+
+    // The policy's block rule alone, asked through a send into an accepted conversation.
+    private boolean blockedBetween(UUID actorId, UUID otherId) {
+        InteractionDecision decision =
+                interactionPolicy.evaluate(
+                        new InteractionRequest(
+                                actorId,
+                                otherId,
+                                InteractionType.MESSAGE_SEND,
+                                null,
+                                null,
+                                new ConversationContext(
+                                        ConversationRequestState.ACCEPTED, true, 0, "text")));
+        return decision.denied() && decision.reason() == InteractionReason.BLOCKED;
+    }
+
+    private void enqueueResolved(UUID conversationId, UUID actorId, String resolution) {
+        outboxService.enqueue(
+                MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
+                MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
+                AGGREGATE_TYPE,
+                conversationId,
+                actorId,
+                Map.of("conversationId", conversationId.toString(), "resolution", resolution));
+    }
+
     private ConversationParticipant fetchActiveParticipant(UUID conversationId, UUID actorId) {
         fetchConversation(conversationId);
         return participantRepository
@@ -330,34 +568,32 @@ public class ConversationServiceImpl implements ConversationService {
                 .orElseThrow(() -> new AppException(ApiErrorCode.CONVERSATION_FORBIDDEN));
     }
 
-    // Stealth block model: matches assemblePublicProfile's reference behaviour - a block in
-    // either direction must be indistinguishable from userB not existing, not a status that
-    // confirms a block relationship. Shared by direct-conversation creation, group creation, and
-    // adding a participant, so a blocked target looks the same across all three.
-    private void assertNotBlocked(UUID userA, UUID userB) {
-        if (socialService.isBlockedBetween(userA, userB)) {
-            throw new AppException(ApiErrorCode.NOT_FOUND, "Target user not found");
+    // A send evaluated against an accepted conversation runs only the block rule, which makes it
+    // the policy's way to ask "may these two interact at all" without applying a message
+    // permission to a conversation that already exists.
+    private void assertNotBlocked(UUID actorId, UUID targetId) {
+        InteractionDecision decision =
+                interactionPolicy.evaluate(
+                        new InteractionRequest(
+                                actorId,
+                                targetId,
+                                InteractionType.MESSAGE_SEND,
+                                null,
+                                null,
+                                new ConversationContext(
+                                        ConversationRequestState.ACCEPTED, true, 0, "text")));
+        if (decision.denied()) {
+            throw refusal(decision);
         }
     }
 
-    /**
-     * A target that is not set to {@code EVERYONE} only accepts new conversations from users they
-     * already follow back; this is the "non-follower" gate the setting is meant to enforce.
-     */
-    private void assertMessageRequestAllowed(UUID actorId, UUID targetId) {
-        // Only EVERYONE lets a non-followed account start a conversation; FOLLOWING and NOBODY
-        // both require the target to follow the actor back.
-        boolean allowRequests =
-                userSettingsRepository
-                        .findById(targetId)
-                        .map(
-                                settings ->
-                                        settings.getMessagePermission()
-                                                == MessagePermission.EVERYONE)
-                        .orElse(true);
-        if (!allowRequests && !socialService.hasAcceptedFollow(targetId, actorId)) {
-            throw new AppException(ApiErrorCode.MESSAGE_REQUEST_NOT_ALLOWED);
+    // Stealth block model: a block in either direction must be indistinguishable from the target
+    // not existing, not a status that confirms a block relationship.
+    private static AppException refusal(InteractionDecision decision) {
+        if (decision.reason() == InteractionReason.BLOCKED) {
+            return new AppException(ApiErrorCode.NOT_FOUND, "Target user not found");
         }
+        return new AppException(ApiErrorCode.MESSAGE_REQUEST_NOT_ALLOWED);
     }
 
     private Conversation fetchConversation(UUID conversationId) {
@@ -386,17 +622,118 @@ public class ConversationServiceImpl implements ConversationService {
                         .orElse(null);
         boolean pinned = mine != null && mine.getPinnedAt() != null;
         boolean muted = mine != null && mine.isMuted();
+        boolean recipient = isUnacceptedRecipient(conversation, actorId);
         return mapper.toConversationResponse(
-                conversation, assembleParticipants(conversation.getId()), pinned, muted);
+                conversation,
+                assembleParticipants(conversation, actorId),
+                pinned,
+                muted,
+                requestStatusLabel(conversation),
+                recipient,
+                sendRestrictionLabel(conversation, recipient));
     }
 
-    private List<ParticipantResponse> assembleParticipants(UUID conversationId) {
+    private static boolean isUnacceptedRecipient(Conversation conversation, UUID actorId) {
+        return conversation.getRequestStatus() != ConversationRequestStatus.ACCEPTED
+                && actorId.equals(conversation.getRequestRecipientId());
+    }
+
+    // A declined request reads as pending: the sender must not be able to tell the two apart.
+    private static String requestStatusLabel(Conversation conversation) {
+        return conversation.getRequestStatus() == ConversationRequestStatus.ACCEPTED
+                ? "accepted"
+                : "pending";
+    }
+
+    // While a request is open its sender may write once, and only the sender can have written, so a
+    // last message means the one allowed message is spent. A declined request allows none.
+    private static String sendRestrictionLabel(Conversation conversation, boolean recipient) {
+        boolean awaiting =
+                !recipient
+                        && (conversation.getRequestStatus() == ConversationRequestStatus.DECLINED
+                                || (conversation.getRequestStatus()
+                                                == ConversationRequestStatus.PENDING
+                                        && conversation.getLastMessageAt() != null));
+        return awaiting ? "awaiting_acceptance" : "none";
+    }
+
+    private List<ParticipantResponse> assembleParticipants(
+            Conversation conversation, UUID actorId) {
         List<ConversationParticipant> participants =
-                participantRepository.findByIdConversationIdOrderByJoinedAtAsc(conversationId);
+                participantRepository.findByIdConversationIdOrderByJoinedAtAsc(
+                        conversation.getId());
         Map<UUID, User> users = hydrateUsers(participants);
         return participants.stream()
-                .map(p -> mapper.toParticipantResponse(p, users.get(p.getId().getUserId())))
+                .map(
+                        p -> {
+                            ParticipantResponse response =
+                                    mapper.toParticipantResponse(
+                                            p, users.get(p.getId().getUserId()));
+                            return hidesDecline(conversation, actorId)
+                                            && p.getId()
+                                                    .getUserId()
+                                                    .equals(conversation.getRequestRecipientId())
+                                    ? withoutLeftAt(response)
+                                    : response;
+                        })
                 .toList();
+    }
+
+    // The recipient of an unaccepted request may have left it, which would show on their
+    // participant row. The sender must see the row an untouched pending request has, so the
+    // departure is not reported to them.
+    private static boolean hidesDecline(Conversation conversation, UUID actorId) {
+        return conversation.getRequestStatus() != ConversationRequestStatus.ACCEPTED
+                && !actorId.equals(conversation.getRequestRecipientId());
+    }
+
+    private static ParticipantResponse withoutLeftAt(ParticipantResponse response) {
+        return new ParticipantResponse(
+                response.userId(),
+                response.username(),
+                response.isVerified(),
+                response.verifiedCategory(),
+                response.displayName(),
+                response.avatarUrl(),
+                response.joinedAt(),
+                null,
+                response.nickname());
+    }
+
+    // The list reads only active participants, so the recipient who left an unaccepted request
+    // would drop out of the sender's row. They are put back, as a pending request still shows them.
+    private void restoreDeclinedRecipients(
+            List<Conversation> conversations,
+            UUID actorId,
+            Map<UUID, List<ParticipantResponse>> participantsByConversation) {
+        for (Conversation conversation : conversations) {
+            if (!hidesDecline(conversation, actorId)) {
+                continue;
+            }
+            List<ConversationParticipant> departed =
+                    participantRepository
+                            .findByIdConversationIdOrderByJoinedAtAsc(conversation.getId())
+                            .stream()
+                            .filter(p -> p.getLeftAt() != null)
+                            .filter(
+                                    p ->
+                                            p.getId()
+                                                    .getUserId()
+                                                    .equals(conversation.getRequestRecipientId()))
+                            .toList();
+            Map<UUID, User> users = hydrateUsers(departed);
+            List<ParticipantResponse> restored =
+                    new ArrayList<>(
+                            participantsByConversation.getOrDefault(
+                                    conversation.getId(), List.of()));
+            for (ConversationParticipant participant : departed) {
+                restored.add(
+                        withoutLeftAt(
+                                mapper.toParticipantResponse(
+                                        participant, users.get(participant.getId().getUserId()))));
+            }
+            participantsByConversation.put(conversation.getId(), restored);
+        }
     }
 
     private Map<UUID, List<ParticipantResponse>> groupParticipantResponses(

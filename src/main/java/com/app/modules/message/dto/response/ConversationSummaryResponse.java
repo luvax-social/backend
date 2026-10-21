@@ -28,4 +28,29 @@ public record ConversationSummaryResponse(
                         description =
                                 "Whether the caller manually flagged this conversation unread,"
                                         + " independent of unreadCount.")
-                boolean manuallyUnread) {}
+                boolean manuallyUnread,
+        @Schema(
+                        description =
+                                "accepted, or pending while the recipient has not accepted. A"
+                                        + " declined request reads as pending to its sender.")
+                String requestStatus,
+        @Schema(description = "Whether the caller is the one asked to accept this request.")
+                boolean isRequestRecipient,
+        @Schema(
+                        description =
+                                "Whether a pending request is filed in the hidden requests folder;"
+                                        + " always false for the sender.")
+                boolean requestHidden,
+        @Schema(
+                        description =
+                                "awaiting_acceptance when the caller is the sender of an"
+                                        + " unaccepted request and may not send another message;"
+                                        + " otherwise none.")
+                String sendRestriction,
+        @Schema(
+                        description =
+                                "Newest reaction the caller may see, present only when it is newer"
+                                        + " than the last message; it never changes the row order or the"
+                                        + " unread count.",
+                        nullable = true)
+                LastReactionPreviewResponse lastReaction) {}

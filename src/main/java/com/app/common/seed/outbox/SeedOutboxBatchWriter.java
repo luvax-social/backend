@@ -17,6 +17,7 @@ import com.app.modules.admin.messaging.AdminEventTypes;
 import com.app.modules.admin.messaging.PlatformStatsCollectedEvent;
 import com.app.modules.comment.consumer.CommentNotificationConsumer;
 import com.app.modules.post.consumer.PostNotificationConsumer;
+import com.app.modules.post.messaging.PostEventTypes;
 import com.app.modules.recommendation.enums.UserEventType;
 import com.app.modules.recommendation.messaging.RecommendationEventTypes;
 import com.app.modules.recommendation.messaging.UserEventImportedEvent;
@@ -108,6 +109,11 @@ public class SeedOutboxBatchWriter {
         batch.forEach(this::enqueueShare);
     }
 
+    @Transactional
+    void emitNotInterestedBatch(List<SeedOutboxEmitter.NotInterestedRow> batch) {
+        batch.forEach(this::enqueueNotInterested);
+    }
+
     /**
      * One behavioural event to import, with the identifier it keeps for its whole life.
      *
@@ -116,6 +122,7 @@ public class SeedOutboxBatchWriter {
      * @param eventType what happened
      * @param entityType kind of thing acted on, null when none
      * @param entityId thing acted on, null when none
+     * @param metadata JSON text describing the event, null when none
      * @param createdAt when the event happened
      */
     public record UserEventImport(
@@ -124,7 +131,20 @@ public class SeedOutboxBatchWriter {
             UserEventType eventType,
             String entityType,
             UUID entityId,
-            Instant createdAt) {}
+            String metadata,
+            Instant createdAt) {
+
+        /** An event with no metadata. */
+        public UserEventImport(
+                UUID eventId,
+                UUID userId,
+                UserEventType eventType,
+                String entityType,
+                UUID entityId,
+                Instant createdAt) {
+            this(eventId, userId, eventType, entityType, entityId, null, createdAt);
+        }
+    }
 
     /**
      * Enqueues one import event per behavioural event, in a single transaction, under the event's
@@ -150,7 +170,7 @@ public class SeedOutboxBatchWriter {
                                     row.eventType(),
                                     row.entityType(),
                                     row.entityId(),
-                                    null,
+                                    row.metadata(),
                                     row.createdAt()));
             if (added) {
                 enqueued++;
@@ -202,6 +222,30 @@ public class SeedOutboxBatchWriter {
                         HALF_HOUR_SECONDS,
                         bucket.computedAt(),
                         bucket.rows()));
+    }
+
+    // Payload shapes mirror PostFeedbackServiceImpl. A mark the viewer took back is replayed as the
+    // mark and then its removal: the feedback consumer records both in ClickHouse and, because the
+    // preference no longer stands in PostgreSQL, skips the Gorse insert and deletes the tuple.
+    private void enqueueNotInterested(SeedOutboxEmitter.NotInterestedRow row) {
+        outboxService.enqueue(
+                PostEventTypes.POST_NOT_INTERESTED_V1,
+                PostEventTypes.POST_NOT_INTERESTED_V1,
+                AGGREGATE_TYPE_POST,
+                row.postId(),
+                row.userId(),
+                Map.of(
+                        "postId", row.postId().toString(),
+                        "authorId", row.authorId().toString()));
+        if (row.undone()) {
+            outboxService.enqueue(
+                    PostEventTypes.POST_NOT_INTERESTED_UNDONE_V1,
+                    PostEventTypes.POST_NOT_INTERESTED_UNDONE_V1,
+                    AGGREGATE_TYPE_POST,
+                    row.postId(),
+                    row.userId(),
+                    Map.of("postId", row.postId().toString()));
+        }
     }
 
     // Payload shape mirrors MessageServiceImpl's own post.shared.v1 enqueue: the aggregate is the
@@ -312,6 +356,7 @@ public class SeedOutboxBatchWriter {
         data.put("commentOwnerId", row.userId().toString());
         data.put("depth", row.depth());
         data.put("mentionedUserIds", List.of());
+        data.put("visibility", row.hidden() ? "hidden" : "visible");
         if (row.parentOwnerId() != null) {
             data.put("parentOwnerId", row.parentOwnerId().toString());
         }

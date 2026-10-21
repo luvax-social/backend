@@ -3,6 +3,7 @@ package com.app.common.seed.writer;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -18,6 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import com.app.common.seed.loader.SeedContent;
+import com.app.common.seed.model.NotInterestedSeed;
 import com.app.common.seed.model.PostSeed;
 import com.app.common.seed.model.UserSeed;
 import com.app.common.seed.time.SeedTimeline;
@@ -74,6 +76,9 @@ public class EngagementSeedWriter {
     private static final String INSERT_POST_SAVE_SQL =
             "INSERT INTO post_saves (user_id, post_id, created_at) VALUES (?, ?, ?) ON CONFLICT DO"
                     + " NOTHING";
+    private static final String INSERT_NOT_INTERESTED_SQL =
+            "INSERT INTO post_not_interested (user_id, post_id, created_at) VALUES (?, ?, ?) ON"
+                    + " CONFLICT DO NOTHING";
     private static final String INSERT_COMMENT_LIKE_SQL =
             "INSERT INTO comment_likes (user_id, comment_id, created_at) VALUES (?, ?, ?) ON"
                     + " CONFLICT DO NOTHING";
@@ -129,12 +134,53 @@ public class EngagementSeedWriter {
                         random,
                         timeline);
 
+        int notInterestedCount =
+                writeNotInterested(
+                        content, usersByUsername, postIdBySeedId, postCreatedAtById, timeline);
+
         log.info(
                 "[seed] post_likes: {} rows written, post_saves: {} rows written, comment_likes:"
-                        + " {} rows written",
+                        + " {} rows written, post_not_interested: {} rows written",
                 postLikeCount,
                 postSaveCount,
-                commentLikeCount);
+                commentLikeCount,
+                notInterestedCount);
+    }
+
+    // An undone mark leaves no row; SeedOutboxEmitter replays the mark and its removal for it. A
+    // mark is never dated before its post existed.
+    private int writeNotInterested(
+            SeedContent content,
+            Map<String, UUID> usersByUsername,
+            Map<String, UUID> postIdBySeedId,
+            Map<UUID, Instant> postCreatedAtById,
+            SeedTimeline timeline) {
+        List<Object[]> rows = new ArrayList<>();
+        for (NotInterestedSeed entry : content.interactionControl().notInterested()) {
+            if (entry.undone()) {
+                continue;
+            }
+            UUID userId = usersByUsername.get(entry.viewer());
+            UUID postId = postIdBySeedId.get(entry.postSeedId());
+            if (userId == null || postId == null) {
+                throw new IllegalStateException(
+                        "EngagementSeedWriter: not_interested entry '"
+                                + entry.viewer()
+                                + "' -> '"
+                                + entry.postSeedId()
+                                + "' names an account or post that was not written");
+            }
+            Instant markedAt = timeline.referenceNow().minus(Duration.ofDays(entry.daysAgo()));
+            Instant earliest = postCreatedAtById.get(postId).plus(Duration.ofHours(1));
+            rows.add(
+                    new Object[] {
+                        userId,
+                        postId,
+                        Timestamp.from(markedAt.isBefore(earliest) ? earliest : markedAt)
+                    });
+        }
+        jdbc.batchUpdate(INSERT_NOT_INTERESTED_SQL, rows);
+        return rows.size();
     }
 
     // Shared engine for all three junction tables: repeatedly draws a (user, target) pair via the
@@ -226,12 +272,13 @@ public class EngagementSeedWriter {
 
     // Soft-deleted comments are excluded: a like arriving after a comment was already deleted has
     // no realistic counterpart in the production write path, which requires the comment to be
-    // visible (deleted_at IS NULL) to be liked at all.
+    // visible (deleted_at IS NULL) to be liked at all. A hidden comment is visible to its author
+    // alone, so nobody else can like it either.
     private Map<UUID, Instant> fetchNonDeletedCommentCreatedAt(List<UUID> commentIds) {
         Map<UUID, Instant> createdAtById = new HashMap<>();
         jdbc.query(
                 "SELECT id, created_at FROM comments WHERE deleted_at IS NULL"
-                        + " AND admin_removed_at IS NULL",
+                        + " AND admin_removed_at IS NULL AND moderation_status = 'approved'",
                 rs -> {
                     UUID id = (UUID) rs.getObject("id");
                     Instant createdAt = rs.getTimestamp("created_at").toInstant();

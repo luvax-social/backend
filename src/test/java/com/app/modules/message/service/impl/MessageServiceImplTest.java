@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,6 +39,7 @@ import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.ConversationParticipantId;
 import com.app.modules.message.entity.Message;
 import com.app.modules.message.entity.MessageWriteIdempotency;
+import com.app.modules.message.enums.ConversationRequestStatus;
 import com.app.modules.message.enums.MessageType;
 import com.app.modules.message.mapper.MessageMapper;
 import com.app.modules.message.messaging.MessageEventTypes;
@@ -46,10 +48,15 @@ import com.app.modules.message.repository.ConversationRepository;
 import com.app.modules.message.repository.MessageIdempotencyRepository;
 import com.app.modules.message.repository.MessageMediaAssetRepository;
 import com.app.modules.message.repository.MessagePostRepository;
+import com.app.modules.message.repository.MessageReactionRepository;
 import com.app.modules.message.repository.MessageRepository;
 import com.app.modules.message.repository.MessageStoryRepository;
 import com.app.modules.post.enums.PostStatus;
-import com.app.modules.social.service.SocialService;
+import com.app.modules.social.policy.ConversationRequestState;
+import com.app.modules.social.policy.InteractionDecision;
+import com.app.modules.social.policy.InteractionOutcome;
+import com.app.modules.social.policy.InteractionPolicyService;
+import com.app.modules.social.policy.InteractionReason;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -63,10 +70,12 @@ class MessageServiceImplTest {
     @Mock private MessageMediaAssetRepository mediaAssetRepository;
     @Mock private MessagePostRepository postRepository;
     @Mock private MessageStoryRepository storyRepository;
-    @Mock private SocialService socialService;
+    @Mock private InteractionPolicyService interactionPolicy;
     @Mock private MessageMapper mapper;
     @Mock private OutboxService outboxService;
     @Mock private ObjectMapper objectMapper;
+    @Mock private MessageReactionRepository reactionRepository;
+    @Mock private MessageInboxAudience inboxAudience;
 
     private MessageServiceImpl service;
 
@@ -81,38 +90,46 @@ class MessageServiceImplTest {
                         mediaAssetRepository,
                         postRepository,
                         storyRepository,
-                        socialService,
+                        interactionPolicy,
                         mapper,
                         outboxService,
-                        objectMapper);
+                        objectMapper,
+                        reactionRepository,
+                        inboxAudience);
         lenient()
-                .when(mapper.toMessageResponse(any(), any()))
-                .thenAnswer(
-                        inv -> {
-                            Message m = inv.getArgument(0);
-                            MessageMediaResponse media = inv.getArgument(1);
-                            return new MessageResponse(
-                                    m.getId(),
-                                    m.getConversationId(),
-                                    m.getSenderId(),
-                                    m.getMessageType(),
-                                    m.getContent(),
-                                    m.getMediaAssetId(),
-                                    media,
-                                    m.getSharedPostId(),
-                                    m.getSharedStoryId(),
-                                    m.getReplyToId(),
-                                    m.isDeleted(),
-                                    m.getDeletedAt(),
-                                    m.getCreatedAt());
-                        });
+                .when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(InteractionOutcome.ALLOW, InteractionReason.NONE));
+        org.mockito.stubbing.Answer<MessageResponse> echo =
+                inv -> {
+                    Message m = inv.getArgument(0);
+                    MessageMediaResponse media = inv.getArgument(1);
+                    return new MessageResponse(
+                            m.getId(),
+                            m.getConversationId(),
+                            m.getSenderId(),
+                            m.getMessageType(),
+                            m.getContent(),
+                            m.getMediaAssetId(),
+                            media,
+                            m.getSharedPostId(),
+                            m.getSharedStoryId(),
+                            m.getReplyToId(),
+                            null,
+                            m.isDeleted(),
+                            m.getDeletedAt(),
+                            m.getCreatedAt(),
+                            null);
+                };
+        lenient().when(mapper.toMessageResponse(any(), any(), any())).thenAnswer(echo);
+        lenient().when(mapper.toMessageResponse(any(), any(), any(), any())).thenAnswer(echo);
     }
 
     @Test
     void sendMessage_conversationNotFound_throwsConversationNotFound() {
         UUID actorId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
-        when(conversationRepository.findById(conversationId)).thenReturn(Optional.empty());
+        when(conversationRepository.lockById(conversationId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(
                         () -> service.sendMessage(actorId, conversationId, textRequest("hi"), null))
@@ -125,7 +142,7 @@ class MessageServiceImplTest {
     void sendMessage_nonParticipant_throwsConversationForbidden() {
         UUID actorId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
-        when(conversationRepository.findById(conversationId))
+        when(conversationRepository.lockById(conversationId))
                 .thenReturn(Optional.of(directConversation(conversationId)));
         when(participantRepository.existsByIdConversationIdAndIdUserIdAndLeftAtIsNull(
                         conversationId, actorId))
@@ -143,7 +160,7 @@ class MessageServiceImplTest {
         UUID actorId = UUID.randomUUID();
         UUID otherId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
-        when(conversationRepository.findById(conversationId))
+        when(conversationRepository.lockById(conversationId))
                 .thenReturn(Optional.of(directConversation(conversationId)));
         when(participantRepository.existsByIdConversationIdAndIdUserIdAndLeftAtIsNull(
                         conversationId, actorId))
@@ -153,7 +170,10 @@ class MessageServiceImplTest {
                         List.of(
                                 participant(conversationId, actorId, null),
                                 participant(conversationId, otherId, null)));
-        when(socialService.isBlockedBetween(actorId, otherId)).thenReturn(true);
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.DENY, InteractionReason.BLOCKED));
 
         assertThatThrownBy(
                         () -> service.sendMessage(actorId, conversationId, textRequest("hi"), null))
@@ -308,13 +328,46 @@ class MessageServiceImplTest {
     }
 
     @Test
+    void sendMessage_success_carriesTheInboxAudienceAndFolderOnTheEvent() {
+        UUID actorId = UUID.randomUUID();
+        UUID otherId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        UUID messageId = UUID.randomUUID();
+        stubActiveGroupParticipant(conversationId, actorId);
+        when(inboxAudience.recipients(any(), eq(actorId))).thenReturn(List.of(otherId));
+        Message saved =
+                Message.builder()
+                        .id(messageId)
+                        .conversationId(conversationId)
+                        .senderId(actorId)
+                        .messageType(MessageType.TEXT)
+                        .content("hello")
+                        .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
+                        .build();
+        when(messageRepository.saveAndFlush(any())).thenReturn(saved);
+
+        service.sendMessage(actorId, conversationId, textRequest("hello"), null);
+
+        verify(outboxService)
+                .enqueue(
+                        eq(MessageEventTypes.MESSAGE_SENT_V1),
+                        eq(MessageEventTypes.MESSAGE_SENT_V1),
+                        eq("message"),
+                        eq(messageId),
+                        eq(actorId),
+                        argThat(
+                                data ->
+                                        List.of(otherId.toString())
+                                                        .equals(data.get("inboxRecipientIds"))
+                                                && "primary".equals(data.get("folder"))));
+    }
+
+    @Test
     void sendMessage_idempotencyReplay_returnsCachedResponse() {
         UUID actorId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
         stubActiveGroupParticipant(conversationId, actorId);
         String hash = sha256(conversationId + "|TEXT|hello|null|null|null|null");
-        when(idempotencyRepository.insertIfAbsent(eq(actorId), eq("key-1"), eq(hash)))
-                .thenReturn(0);
         MessageWriteIdempotency row =
                 MessageWriteIdempotency.builder()
                         .userId(actorId)
@@ -337,9 +390,11 @@ class MessageServiceImplTest {
                         null,
                         null,
                         null,
+                        null,
                         false,
                         null,
-                        OffsetDateTime.now(ZoneOffset.UTC));
+                        OffsetDateTime.now(ZoneOffset.UTC),
+                        null);
         when(objectMapper.readValue("cached-json", MessageResponse.class)).thenReturn(cached);
 
         MessageResponse response =
@@ -355,7 +410,6 @@ class MessageServiceImplTest {
         UUID actorId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
         stubActiveGroupParticipant(conversationId, actorId);
-        when(idempotencyRepository.insertIfAbsent(eq(actorId), eq("key-2"), any())).thenReturn(0);
         MessageWriteIdempotency row =
                 MessageWriteIdempotency.builder()
                         .userId(actorId)
@@ -395,7 +449,11 @@ class MessageServiceImplTest {
     void listHistory_firstPage_returnsMessagesIncludingTombstones() {
         UUID actorId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
-        stubActiveGroupParticipant(conversationId, actorId);
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(directConversation(conversationId)));
+        when(participantRepository.existsByIdConversationIdAndIdUserIdAndLeftAtIsNull(
+                        conversationId, actorId))
+                .thenReturn(true);
         Message tombstone =
                 Message.builder()
                         .id(UUID.randomUUID())
@@ -412,6 +470,83 @@ class MessageServiceImplTest {
 
         assertThat(result.getContent()).hasSize(1);
         assertThat(result.getContent().get(0).isDeleted()).isTrue();
+    }
+
+    @Test
+    void listHistory_pageCursor_carriesTimestampAndIdOfTheBoundaryMessage() {
+        UUID actorId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        openHistory(actorId, conversationId);
+        OffsetDateTime sharedInstant = OffsetDateTime.parse("2026-01-01T12:00:00.123456Z");
+        Message first = historyMessage(conversationId, sharedInstant);
+        Message second = historyMessage(conversationId, sharedInstant);
+        Message probe = historyMessage(conversationId, sharedInstant);
+        when(messageRepository.findFirstByConversation(eq(conversationId), any(Pageable.class)))
+                .thenReturn(List.of(first, second, probe));
+
+        CursorPageResponse<MessageResponse> page =
+                service.listHistory(actorId, conversationId, null, 2);
+        service.listHistory(actorId, conversationId, page.getPageInfo().getEndCursor(), 2);
+
+        verify(messageRepository)
+                .findByConversationBefore(
+                        eq(conversationId),
+                        eq(sharedInstant),
+                        eq(second.getId()),
+                        any(Pageable.class));
+    }
+
+    @Test
+    void listHistory_cursorWithoutId_resumesStrictlyBeforeTheTimestamp() {
+        UUID actorId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        openHistory(actorId, conversationId);
+        OffsetDateTime instant = OffsetDateTime.parse("2026-01-01T12:00:00.123456Z");
+        String legacyCursor =
+                Base64.getEncoder()
+                        .encodeToString(instant.toString().getBytes(StandardCharsets.UTF_8));
+
+        service.listHistory(actorId, conversationId, legacyCursor, 20);
+
+        // The nil UUID sorts below every id, so the tie-break clause matches nothing and the page
+        // starts strictly before the timestamp as the old cursor promised.
+        verify(messageRepository)
+                .findByConversationBefore(
+                        eq(conversationId), eq(instant), eq(new UUID(0L, 0L)), any(Pageable.class));
+    }
+
+    @Test
+    void listHistory_malformedCursor_throwsBadRequest() {
+        UUID actorId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        openHistory(actorId, conversationId);
+        String malformed =
+                Base64.getEncoder()
+                        .encodeToString(
+                                "2026-01-01T12:00:00Z|not-a-uuid".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service.listHistory(actorId, conversationId, malformed, 20))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.BAD_REQUEST);
+    }
+
+    private void openHistory(UUID actorId, UUID conversationId) {
+        when(conversationRepository.findById(conversationId))
+                .thenReturn(Optional.of(directConversation(conversationId)));
+        when(participantRepository.existsByIdConversationIdAndIdUserIdAndLeftAtIsNull(
+                        conversationId, actorId))
+                .thenReturn(true);
+    }
+
+    private static Message historyMessage(UUID conversationId, OffsetDateTime createdAt) {
+        return Message.builder()
+                .id(UUID.randomUUID())
+                .conversationId(conversationId)
+                .messageType(MessageType.TEXT)
+                .content("hello")
+                .createdAt(createdAt)
+                .build();
     }
 
     @Test
@@ -602,6 +737,175 @@ class MessageServiceImplTest {
     }
 
     @Test
+    void sendMessage_pendingRequesterRefusedByPolicy_throwsAwaitingAcceptance() {
+        UUID actorId = UUID.randomUUID();
+        UUID recipientId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        stubPendingRequest(conversationId, actorId, recipientId, ConversationRequestStatus.PENDING);
+        when(messageRepository.countByConversationIdAndSenderId(conversationId, actorId))
+                .thenReturn(1L);
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.DENY, InteractionReason.AWAITING_ACCEPTANCE));
+
+        assertThatThrownBy(
+                        () ->
+                                service.sendMessage(
+                                        actorId, conversationId, textRequest("again"), null))
+                .isInstanceOf(AppException.class)
+                .extracting(e -> ((AppException) e).getErrorCode())
+                .isEqualTo(ApiErrorCode.MESSAGE_REQUEST_AWAITING_ACCEPTANCE);
+        verify(messageRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void sendMessage_pendingRequesterContext_carriesCountTypeAndRequesterFlag() {
+        UUID actorId = UUID.randomUUID();
+        UUID recipientId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        stubPendingRequest(conversationId, actorId, recipientId, ConversationRequestStatus.PENDING);
+        when(messageRepository.countByConversationIdAndSenderId(conversationId, actorId))
+                .thenReturn(0L);
+        stubSavedMessage(conversationId, actorId);
+
+        service.sendMessage(actorId, conversationId, textRequest("hello"), null);
+
+        verify(interactionPolicy)
+                .evaluate(
+                        argThat(
+                                request ->
+                                        request.targetUserId().equals(recipientId)
+                                                && request.conversation().actorIsRequester()
+                                                && request.conversation().actorMessagesSoFar() == 0
+                                                && "text"
+                                                        .equals(
+                                                                request.conversation()
+                                                                        .messageType())
+                                                && request.conversation().state()
+                                                        == ConversationRequestState.PENDING));
+    }
+
+    @Test
+    void sendMessage_routedToHiddenRequests_marksTheRequestHidden() {
+        UUID actorId = UUID.randomUUID();
+        UUID recipientId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        Conversation conversation =
+                stubPendingRequest(
+                        conversationId, actorId, recipientId, ConversationRequestStatus.PENDING);
+        when(messageRepository.countByConversationIdAndSenderId(conversationId, actorId))
+                .thenReturn(0L);
+        when(interactionPolicy.evaluate(any()))
+                .thenReturn(
+                        new InteractionDecision(
+                                InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS,
+                                InteractionReason.HIDDEN_WORD));
+        stubSavedMessage(conversationId, actorId);
+
+        service.sendMessage(actorId, conversationId, textRequest("hello"), null);
+
+        assertThat(conversation.isRequestHidden()).isTrue();
+        verify(conversationRepository).save(conversation);
+    }
+
+    @Test
+    void sendMessage_recipientAnsweringPendingRequest_acceptsIt() {
+        UUID recipientId = UUID.randomUUID();
+        UUID requesterId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        Conversation conversation =
+                stubPendingRequest(
+                        conversationId,
+                        recipientId,
+                        requesterId,
+                        ConversationRequestStatus.PENDING);
+        conversation.setRequestRecipientId(recipientId);
+        conversation.setRequestHidden(true);
+        stubSavedMessage(conversationId, recipientId);
+
+        service.sendMessage(recipientId, conversationId, textRequest("hi"), null);
+
+        assertThat(conversation.getRequestStatus()).isEqualTo(ConversationRequestStatus.ACCEPTED);
+        assertThat(conversation.isRequestHidden()).isFalse();
+        assertThat(conversation.getRequestResolvedAt()).isNotNull();
+        verify(messageRepository, never()).countByConversationIdAndSenderId(any(), any());
+    }
+
+    @Test
+    void sendMessage_declinedRequest_neverRevivesTheRecipientWhoLeft() {
+        UUID actorId = UUID.randomUUID();
+        UUID recipientId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        stubPendingRequest(
+                conversationId, actorId, recipientId, ConversationRequestStatus.DECLINED);
+        ConversationParticipant recipient =
+                participant(
+                        conversationId,
+                        recipientId,
+                        OffsetDateTime.now(ZoneOffset.UTC).minusDays(1));
+        when(participantRepository.findByIdConversationIdOrderByJoinedAtAsc(conversationId))
+                .thenReturn(List.of(participant(conversationId, actorId, null), recipient));
+        when(messageRepository.countByConversationIdAndSenderId(conversationId, actorId))
+                .thenReturn(0L);
+        stubSavedMessage(conversationId, actorId);
+
+        service.sendMessage(actorId, conversationId, textRequest("hello"), null);
+
+        assertThat(recipient.getLeftAt()).isNotNull();
+        verify(participantRepository, never()).save(recipient);
+    }
+
+    @Test
+    void sendMessage_retryOfRecordedKey_replaysBeforeThePolicyIsAsked() {
+        UUID actorId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        stubActiveGroupParticipant(conversationId, actorId);
+        String hash = sha256(conversationId + "|TEXT|hello|null|null|null|null");
+        when(idempotencyRepository.findByUserIdAndIdempotencyKey(actorId, "key-3"))
+                .thenReturn(
+                        Optional.of(
+                                MessageWriteIdempotency.builder()
+                                        .userId(actorId)
+                                        .idempotencyKey("key-3")
+                                        .requestHash(hash)
+                                        .responseBody("cached-json")
+                                        .build()));
+        MessageResponse cached =
+                new MessageResponse(
+                        UUID.randomUUID(),
+                        conversationId,
+                        actorId,
+                        MessageType.TEXT,
+                        "hello",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        OffsetDateTime.now(ZoneOffset.UTC),
+                        null);
+        when(objectMapper.readValue("cached-json", MessageResponse.class)).thenReturn(cached);
+
+        MessageResponse response =
+                service.sendMessage(actorId, conversationId, textRequest("hello"), "key-3");
+
+        assertThat(response).isSameAs(cached);
+        verify(interactionPolicy, never()).evaluate(any());
+    }
+
+    @Test
+    void getRequestCount_delegatesToRepository() {
+        UUID actorId = UUID.randomUUID();
+        when(messageRepository.countPendingRequests(actorId)).thenReturn(3L);
+
+        assertThat(service.getRequestCount(actorId)).isEqualTo(3L);
+    }
+
+    @Test
     void getUnreadCount_delegatesToRepository() {
         UUID actorId = UUID.randomUUID();
         when(messageRepository.countTotalUnreadForUser(actorId)).thenReturn(7L);
@@ -610,11 +914,48 @@ class MessageServiceImplTest {
     }
 
     private void stubActiveGroupParticipant(UUID conversationId, UUID actorId) {
-        when(conversationRepository.findById(conversationId))
+        when(conversationRepository.lockById(conversationId))
                 .thenReturn(Optional.of(directConversation(conversationId)));
         when(participantRepository.existsByIdConversationIdAndIdUserIdAndLeftAtIsNull(
                         conversationId, actorId))
                 .thenReturn(true);
+    }
+
+    // The actor is a participant of a request whose recipient is the other account
+    private Conversation stubPendingRequest(
+            UUID conversationId, UUID actorId, UUID otherId, ConversationRequestStatus status) {
+        Conversation conversation =
+                Conversation.builder()
+                        .id(conversationId)
+                        .requestStatus(status)
+                        .requestRecipientId(otherId)
+                        .build();
+        when(conversationRepository.lockById(conversationId)).thenReturn(Optional.of(conversation));
+        when(participantRepository.existsByIdConversationIdAndIdUserIdAndLeftAtIsNull(
+                        conversationId, actorId))
+                .thenReturn(true);
+        lenient()
+                .when(
+                        participantRepository.findByIdConversationIdOrderByJoinedAtAsc(
+                                conversationId))
+                .thenReturn(
+                        List.of(
+                                participant(conversationId, actorId, null),
+                                participant(conversationId, otherId, null)));
+        return conversation;
+    }
+
+    private void stubSavedMessage(UUID conversationId, UUID senderId) {
+        when(messageRepository.saveAndFlush(any()))
+                .thenReturn(
+                        Message.builder()
+                                .id(UUID.randomUUID())
+                                .conversationId(conversationId)
+                                .senderId(senderId)
+                                .messageType(MessageType.TEXT)
+                                .content("hello")
+                                .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
+                                .build());
     }
 
     private static SendMessageRequest textRequest(String content) {

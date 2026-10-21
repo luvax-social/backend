@@ -36,6 +36,9 @@ public class GorseRebuildSourceRepository {
      */
     public record PostRow(UUID id, boolean hidden, OffsetDateTime createdAt) {}
 
+    /** One standing not-interested mark. */
+    public record UserPost(UUID userId, UUID postId) {}
+
     private final JdbcTemplate jdbc;
 
     /** Returns up to {@code limit} live account ids after {@code after}, in id order. */
@@ -93,6 +96,38 @@ public class GorseRebuildSourceRepository {
                             return statement;
                         },
                         (rs, row) -> rs.getObject("id", UUID.class));
+        return new HashSet<>(found);
+    }
+
+    /**
+     * Returns the not-interested marks the given accounts hold now.
+     *
+     * <p>{@code post_not_interested} is the system of record for the preference, whereas the
+     * ClickHouse row of a mark is never removed when the viewer takes it back. The rebuild asks
+     * this table whether a recorded {@code not_interested} tuple still stands.
+     *
+     * @param userIds the accounts of the feedback batch being rebuilt
+     * @return the (account, post) pairs that currently stand
+     */
+    public Set<UserPost> findNotInterestedPairs(Collection<UUID> userIds) {
+        if (userIds.isEmpty()) {
+            return Set.of();
+        }
+        UUID[] array = new HashSet<>(userIds).toArray(UUID[]::new);
+        List<UserPost> found =
+                jdbc.query(
+                        connection -> {
+                            var statement =
+                                    connection.prepareStatement(
+                                            "SELECT user_id, post_id FROM post_not_interested"
+                                                    + " WHERE user_id = ANY (?)");
+                            statement.setArray(1, connection.createArrayOf("uuid", array));
+                            return statement;
+                        },
+                        (rs, row) ->
+                                new UserPost(
+                                        rs.getObject("user_id", UUID.class),
+                                        rs.getObject("post_id", UUID.class)));
         return new HashSet<>(found);
     }
 }

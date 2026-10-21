@@ -134,6 +134,7 @@ public class NotificationSeedWriter {
     private final NotificationAggregationRepository aggregation;
     private final NotificationProperties properties;
     private final PlatformTransactionManager transactionManager;
+    private final InteractionSignalLedger signalLedger;
 
     /**
      * Writes the seeded feed, its actor memberships and every account's seen state, in one
@@ -636,14 +637,22 @@ public class NotificationSeedWriter {
     // commenter themself, matching CommentNotificationConsumer.
     private List<Event> fetchCommentEvents() {
         List<Event> events = new ArrayList<>();
+        // A comment the post owner released after the filter hid it is stored approved, but the
+        // owner
+        // reviewed it already and the real unhide never notifies anyone.
+        Set<UUID> releasedComments = signalLedger.unhiddenCommentIds();
         jdbc.query(
                 "SELECT c.id AS comment_id, c.user_id AS author_id, c.post_id,"
                         + " c.created_at, p.user_id AS post_author_id,"
                         + " parent.user_id AS parent_author_id"
                         + " FROM comments c JOIN posts p ON p.id = c.post_id"
                         + " LEFT JOIN comments parent ON parent.id = c.parent_id"
-                        + " WHERE c.deleted_at IS NULL",
+                        + " WHERE c.deleted_at IS NULL AND c.moderation_status = 'approved'",
                 rs -> {
+                    UUID commentId = (UUID) rs.getObject("comment_id");
+                    if (releasedComments.contains(commentId)) {
+                        return;
+                    }
                     UUID author = (UUID) rs.getObject("author_id");
                     UUID parentAuthor = (UUID) rs.getObject("parent_author_id");
                     UUID recipient =
@@ -842,6 +851,12 @@ public class NotificationSeedWriter {
                         + " FROM admin_actions aa JOIN messages m ON m.id = aa.target_entity_id"
                         + " WHERE aa.action_type = 'remove_message'",
                 NotificationType.MESSAGE_REMOVED);
+        collectContentRemoved(
+                events,
+                "SELECT aa.id AS action_id, aa.reason, aa.created_at, mr.user_id AS owner_id"
+                        + " FROM admin_actions aa JOIN message_reactions mr ON mr.id ="
+                        + " aa.target_entity_id WHERE aa.action_type = 'remove_message_reaction'",
+                NotificationType.REACTION_REMOVED);
         return events;
     }
 

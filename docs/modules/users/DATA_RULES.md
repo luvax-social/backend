@@ -144,6 +144,6 @@ A future reader must not re-derive the "counters are safe because they're viewer
 | `media` | outbound | `avatar_url` and `banner_url` are CDN URLs sourced from `media_assets`; relationship is by convention, not FK |
 | `notification` | inbound | `UserNotificationPreferencesService` gives the notification module the `user_settings` toggles it checks before writing; `UserSummaryService` gives the actor summaries and the verified flag of a feed row |
 | `social` | outbound | `UserServiceImpl` calls `SocialService` for block gating, follow gating, and viewer relationship state; `UserSafetyController` calls `HiddenWordService` for the personal hidden words list and `InteractionLimitService` for the interaction limit |
-| `social` | inbound | `HiddenWordServiceImpl` calls `UserPrivacySettingsService` for `hidden_words_system_enabled`, and later interaction rules read `message_permission` the same way |
+| `social` | inbound | `HiddenWordServiceImpl` calls `UserPrivacySettingsService` for `hidden_words_system_enabled`, and the interaction policy's message permission rule reads `message_permission` the same way |
 | `admin` | inbound | Moderation actions mutate `users.status` and write an `admin_actions` audit row |
 | all modules | outbound | `UserSummaryService` is the shared batch resolver for embedding user identity in any response |

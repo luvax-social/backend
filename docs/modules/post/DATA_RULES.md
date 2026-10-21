@@ -15,7 +15,7 @@ Two rules remain outstanding: a background job to update `posts.view_count`, and
 | `post_likes` | `user_id`, `post_id`, `created_at` | One row per (user, post) pair; compound PK prevents duplicate likes. Canonical like signal. |
 | `post_saves` | `user_id`, `post_id`, `created_at` | One row per (user, post) pair; compound PK prevents duplicate saves. Canonical bookmark signal. |
 | `post_edit_history` | `id`, `post_id`, `editor_id`, `previous_caption`, `edited_at` | Append-only caption edit audit (V22). Rows are never updated or soft-deleted; retention is permanent until post hard-delete (FK cascade). |
-| `post_not_interested` | `user_id`, `post_id`, `created_at` | One row per (user, post) pair (V139); compound PK prevents duplicates. Rows are deleted with either the user or the post (FK cascade). |
+| `post_not_interested` | `user_id`, `post_id`, `created_at` | One row per (user, post) pair (V139); compound PK prevents duplicates. Rows are deleted with either the user or the post (FK cascade). Written only by `PostFeedbackServiceImpl`. |
 
 These tables cannot be rebuilt from any other source if lost.
 
@@ -73,6 +73,12 @@ These tables cannot be rebuilt from any other source if lost.
 | A moderation restore strips banned hashtags rather than refusing | Implemented in `PostServiceImpl.applyModerationRestore` via `HashtagService.upsertHashtagsForPostSkippingBanned`; the stripped names travel back on `PostModerationResult` and `AdminServiceImpl` records them in the audit row's `metadata.strippedHashtags` |
 | A post response lists the hashtags it is associated with, omitting any the administrator has deleted | Implemented in `PostResponseAssembler`, one batched query per page through `HashtagService.getVisibleHashtagsForPosts`. The `post_hashtags` row is left in place, so nothing is lost if the tag is restored, and the caption keeps its literal `#tag` text either way. A banned hashtag is still listed |
 | User mentions in `caption` generate `mention_post` notifications | `[NOT YET IMPLEMENTED]` — no mention parsing exists in the post module |
+| Marking a post not interested stores one `post_not_interested` row and enqueues `post.not-interested.v1` with the post and author ids, in the same transaction | `PostFeedbackServiceImpl.markNotInterested` |
+| The insert is a single `ON CONFLICT DO NOTHING` statement, so a repeat or a concurrent duplicate changes nothing and enqueues no second event | `PostNotInterestedRepository.insertIfAbsent` |
+| A viewer cannot mark their own post, which answers `400 POST_FEEDBACK_SELF` | `PostFeedbackServiceImpl.markNotInterested` |
+| A post that is missing, unpublished (another user's), hidden by a block in either direction, or owned by an unfollowed private or deleted account answers `404 POST_NOT_FOUND` | `PostFeedbackServiceImpl.markNotInterested` via `PostVisibilityService.isVisibleTo` |
+| Removing the mark is idempotent, does not check the post's current visibility, and enqueues `post.not-interested-undone.v1` only when a row was deleted | `PostFeedbackServiceImpl.undoNotInterested`, `PostNotInterestedRepository.deleteByUserAndPost` |
+| The post author is never told: neither event is bound to a notification queue, and no response of the author's carries the mark | `PostRabbitBindingConfig`, `NotificationRabbitBindingConfig` |
 
 #### The banned-hashtag boundary
 
@@ -122,6 +128,21 @@ A change that made carousels type-homogeneous would break a client feature built
 | Every caption update appends one `post_edit_history` row recording the pre-edit caption and the editor | `PostServiceImpl` |
 | Edit history is readable by the post owner only | `PostServiceImpl` |
 
+#### Interaction preferences in the feeds
+
+`PostService.getFeed(viewerId, cursor, size, surface)` serves the chronological feed for a `FeedSurface`.
+The Following tab passes `FOLLOWING`, and the ranked feed passes `FOR_YOU_FALLBACK` when it falls back, for the first page and for every continuation page.
+The cursor carries no surface, so the caller names it on each page.
+`PostServiceImpl.getFeed` subtracts the authors returned by `SocialService.findFeedSuppressedAuthors` from the followed author list before it queries posts.
+Muted authors are subtracted on every surface, and show-fewer authors are subtracted on `FOR_YOU_FALLBACK` only.
+`PostRepository.findFirstFeedPosts` and `findFeedPostsBefore` take the viewer and exclude posts with a `post_not_interested` row for that viewer, on every surface.
+The exclusion is an anti-join on the mark's primary key.
+For a single author the `idx_posts_user_created_id` keyset index still drives the scan.
+With several authors the planner may order by another posts index, so the query plan test pins only that there is no sequential scan, the anti-join and the primary key probe.
+`PostFeedbackService.findNotInterested(viewerId, postIds)` returns the marked subset of a candidate set in one indexed query, for the ranked feed.
+Profile posts, post search, hashtag posts and the saved list do not read these preferences.
+A block exclusion is unchanged, and the preference filters never replace it.
+
 ### C. Scope Simplifications
 
 - `posts.view_count` is a denormalized counter updated by a **background job**, not a trigger. This diverges from the trigger pattern used for other counters and means `view_count` may lag behind real-time activity.
@@ -139,8 +160,10 @@ A change that made carousels type-homogeneous would break a client feature built
 | `hashtag` | outbound | Hashtags extracted from `caption` are written to `post_hashtags` + `hashtags`. Also read for the banned-name check on every write path and for the hashtag list on a post response |
 | `comment` | inbound | Comments reference `posts.id`; `comment_count` trigger fires on comment table |
 | `social` | inbound | Follow/block state governs post visibility; no direct FK dependency |
+| `social` | outbound | `SocialService.findFeedSuppressedAuthors` supplies the muted and show-fewer authors the feed drops, per `FeedSurface` |
 | `notification` | outbound | `post.liked.v1` and `post.unliked.v1` drive `like_post` notifications through `PostNotificationConsumer` on `post.notification.queue` (DLQ `post.notification.dlq`), enabled by `app.post.notification-consumer.enabled`; an unlike retracts the liker from the group. Caption mentions still produce nothing. |
 | `notification` | inbound | `PostPreviewService` gives the notification feed each post's availability to the viewer and its first media as a thumbnail, in one query per page |
 | `recommendation` | inbound | `post_categories` references `posts.id`; ClickHouse `user_events` rows carry post ids in `entity_id` with no foreign key |
+| `recommendation` | outbound | `post.not-interested.v1` and `post.not-interested-undone.v1` are consumed by `RecommendationFeedbackConsumer`, which sends the mark to Gorse as `not_interested` negative feedback and takes it back on the undo; it reads `post_not_interested` through `PostFeedbackService.findNotInterested` to keep Gorse in step when the two events arrive out of order |
 | `report` | inbound | Reports can target a post via polymorphic `entity_id` |
 | `message` | inbound | Messages can share a post via `shared_post_id` (SET NULL on post delete) |

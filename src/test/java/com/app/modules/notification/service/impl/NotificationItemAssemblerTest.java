@@ -188,7 +188,8 @@ class NotificationItemAssemblerTest {
                 .thenReturn(
                         Map.of(
                                 follower,
-                                new ViewerRelationshipResponse(false, true, true, false, false)));
+                                new ViewerRelationshipResponse(
+                                        false, true, true, false, false, false, false, false)));
 
         NotificationItemResponse item = assembler.assemble(viewer, List.of(row), null).get(0);
 

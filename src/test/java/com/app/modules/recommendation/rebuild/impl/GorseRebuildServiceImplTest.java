@@ -305,7 +305,12 @@ class GorseRebuildServiceImplTest {
 
         assertThat(run.getFeedbackSent()).isEqualTo(1);
         assertThat(run.getFeedbackSkipped()).isEqualTo(1);
-        assertThat(meters.get("luvax.gorse.rebuild.skipped").counter().count()).isEqualTo(1.0);
+        assertThat(
+                        meters.get("luvax.gorse.rebuild.skipped")
+                                .tag("reason", "unknown_post")
+                                .counter()
+                                .count())
+                .isEqualTo(1.0);
     }
 
     @Test

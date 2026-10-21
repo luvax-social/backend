@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -40,6 +41,7 @@ import com.app.modules.post.dto.response.PostResponse;
 import com.app.modules.post.entity.Post;
 import com.app.modules.post.entity.PostEditHistory;
 import com.app.modules.post.entity.PostMedia;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.enums.PostType;
 import com.app.modules.post.mapper.PostMapper;
@@ -432,13 +434,27 @@ public class PostServiceImpl implements PostService {
 
     @Override
     @Transactional(readOnly = true)
-    public CursorPageResponse<FeedPostResponse> getFeed(UUID viewerId, String cursor, int size) {
+    public CursorPageResponse<FeedPostResponse> getFeed(
+            UUID viewerId, String cursor, int size, FeedSurface surface) {
         // Decoded before the empty-follow-set short-circuit below so a malformed cursor is
         // rejected the same way regardless of how many accounts the viewer follows, instead of
         // silently returning an empty page for a viewer who follows nobody.
         Cursor decoded = decodeCursor(cursor, CursorScope.POST_FEED);
-        List<UUID> authorIds = socialService.getAcceptedFollowingExcludingBlocks(viewerId);
+        List<UUID> followedIds = socialService.getAcceptedFollowingExcludingBlocks(viewerId);
         int pageSize = normalizeLimit(size);
+        if (followedIds.isEmpty()) {
+            return CursorPageResponse.of(
+                    Collections.emptyList(), false, null, null, cursor != null);
+        }
+        // Authors are removed before the query rather than rows afterwards, so a page is never
+        // served short and the keyset cursor never sees a row the viewer will not. The block
+        // exclusion above is untouched: this only subtracts the viewer's own preferences.
+        Set<UUID> suppressedIds =
+                socialService.findFeedSuppressedAuthors(viewerId, followedIds, surface);
+        List<UUID> authorIds =
+                suppressedIds.isEmpty()
+                        ? followedIds
+                        : followedIds.stream().filter(id -> !suppressedIds.contains(id)).toList();
         if (authorIds.isEmpty()) {
             return CursorPageResponse.of(
                     Collections.emptyList(), false, null, null, cursor != null);
@@ -446,9 +462,10 @@ public class PostServiceImpl implements PostService {
         PageRequest page = PageRequest.of(0, pageSize + 1);
         List<Post> posts =
                 decoded == null
-                        ? postRepository.findFirstFeedPosts(authorIds, page)
+                        ? postRepository.findFirstFeedPosts(authorIds, viewerId, page)
                         : postRepository.findFeedPostsBefore(
                                 authorIds,
+                                viewerId,
                                 TimeCursors.fromMicros(decoded.sortValueMicros()),
                                 decoded.id(),
                                 page);

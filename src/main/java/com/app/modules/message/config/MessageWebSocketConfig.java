@@ -10,6 +10,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 
 import com.app.common.security.config.CorsProperties;
 import com.app.common.security.websocket.JwtHandshakeInterceptor;
+import com.app.modules.message.live.MessageInboxAuthInterceptor;
 import com.app.modules.message.live.MessageWebSocketAuthInterceptor;
 
 /**
@@ -22,8 +23,9 @@ import com.app.modules.message.live.MessageWebSocketAuthInterceptor;
  * interceptor previously stored only the resolved principal, so a direct-message socket was never
  * enrolled and survived logout, ban, and suspension until its access token expired.
  *
- * <p>The channel interceptor authorizes each SUBSCRIBE against active conversation membership.
- * Active only when {@code app.message.live.enabled} is true.
+ * <p>The channel interceptors authorize each SUBSCRIBE: a thread topic against active conversation
+ * membership, an inbox topic against the subscriber's own account. Active only when {@code
+ * app.message.live.enabled} is true.
  *
  * <p>Contributes only this module's endpoint and its SUBSCRIBE authorization. The broker itself,
  * the destination prefixes, the send guard, and the session-tracking decorator all belong to {@link
@@ -37,14 +39,17 @@ public class MessageWebSocketConfig implements WebSocketMessageBrokerConfigurer 
 
     private final JwtHandshakeInterceptor handshakeInterceptor;
     private final MessageWebSocketAuthInterceptor authInterceptor;
+    private final MessageInboxAuthInterceptor inboxAuthInterceptor;
     private final CorsProperties corsProperties;
 
     public MessageWebSocketConfig(
             JwtHandshakeInterceptor handshakeInterceptor,
             MessageWebSocketAuthInterceptor authInterceptor,
+            MessageInboxAuthInterceptor inboxAuthInterceptor,
             CorsProperties corsProperties) {
         this.handshakeInterceptor = handshakeInterceptor;
         this.authInterceptor = authInterceptor;
+        this.inboxAuthInterceptor = inboxAuthInterceptor;
         this.corsProperties = corsProperties;
     }
 
@@ -58,7 +63,7 @@ public class MessageWebSocketConfig implements WebSocketMessageBrokerConfigurer 
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        registration.interceptors(authInterceptor);
+        registration.interceptors(authInterceptor, inboxAuthInterceptor);
     }
 
     String[] allowedOrigins() {

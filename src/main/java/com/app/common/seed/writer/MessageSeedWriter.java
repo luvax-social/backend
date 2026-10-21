@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -17,8 +18,13 @@ import org.springframework.stereotype.Service;
 
 import com.app.common.seed.loader.SeedContent;
 import com.app.common.seed.model.ConversationSeed;
+import com.app.common.seed.model.MessageRequestSeed;
 import com.app.common.seed.model.MessageSeed;
+import com.app.common.seed.model.ReactionSeed;
+import com.app.common.seed.model.ReplyParentSeed;
+import com.app.common.seed.outbox.SeedOutboxBatchWriter.UserEventImport;
 import com.app.common.seed.time.SeedTimeline;
+import com.app.modules.recommendation.enums.UserEventType;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +43,19 @@ import lombok.extern.slf4j.Slf4j;
  * been inserted (the newest {@code created_at} among its non-deleted messages, {@code null} if
  * every message in the conversation is sender-deleted or the conversation has none), never guessed
  * up front, matching the invariant this table's derived-data contract states.
+ *
+ * <p><b>Reply quotes and reactions</b>: the {@code reply_parents} of {@code
+ * safety/interaction_control.json} set {@code reply_to_id} on messages of {@code
+ * conversations.json}, and its {@code reactions} become {@code message_reactions} rows dated
+ * minutes after the message they react to, including reactions on messages a sender deleted or a
+ * moderator removed. A reaction marked undone writes no row.
+ *
+ * <p><b>Message requests</b>: each {@code message_requests} entry becomes a conversation between
+ * two accounts that follow neither way, with the requester's one text message. A pending or hidden
+ * request waits for its recipient. A declined one has the state the real delete leaves: the request
+ * marked declined, the resolution time set and the recipient's own membership ended, and nothing a
+ * sender can read differs from a pending request. An accepted one carries the recipient's reply,
+ * which quotes the request.
  *
  * <p><b>Two independent tombstones</b> (see {@code message/DATA_RULES.md} Section 1 and the
  * Domain-Specific Invariants in {@code STRUCT.md}): a sender's own deletion sets {@code is_deleted
@@ -61,15 +80,39 @@ public class MessageSeedWriter {
     private static final String INSERT_MESSAGE_SQL =
             "INSERT INTO messages (id, conversation_id, sender_id, message_type, content,"
                     + " media_asset_id, shared_post_id, shared_story_id, is_deleted, deleted_at,"
-                    + " admin_removed_at, created_at) VALUES (?, ?, ?, ?::message_type, ?, ?, ?, ?,"
-                    + " ?, ?, ?, ?)";
+                    + " admin_removed_at, created_at, reply_to_id) VALUES (?, ?, ?, ?::message_type, ?, ?, ?, ?,"
+                    + " ?, ?, ?, ?, ?)";
+    private static final String INSERT_REACTION_SQL =
+            "INSERT INTO message_reactions (message_id, conversation_id, user_id, emoji,"
+                    + " reacted_at) VALUES (?, ?, ?, ?, ?)";
+    private static final String INSERT_REQUEST_CONVERSATION_SQL =
+            "INSERT INTO conversations (id, direct_pair_key, created_by, last_message_at,"
+                    + " created_at, updated_at, request_status, request_recipient_id, request_hidden,"
+                    + " request_resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?::conversation_request_status,"
+                    + " ?, ?, ?)";
+    private static final String INSERT_REQUEST_PARTICIPANT_SQL =
+            "INSERT INTO conversation_participants (conversation_id, user_id, joined_at, left_at,"
+                    + " last_read_at) VALUES (?, ?, ?, ?, ?)";
+    private static final String INSERT_REQUEST_MESSAGE_SQL =
+            "INSERT INTO messages (id, conversation_id, sender_id, message_type, content, created_at,"
+                    + " reply_to_id) VALUES (?, ?, ?, 'text'::message_type, ?, ?, ?)";
+    private static final String COUNT_PAIR_RELATIONS_SQL =
+            "SELECT (SELECT COUNT(*) FROM follows WHERE (follower_id = ? AND following_id = ?) OR"
+                    + " (follower_id = ? AND following_id = ?)) + (SELECT COUNT(*) FROM blocks WHERE"
+                    + " (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?))";
     private static final String UPDATE_LAST_MESSAGE_AT_SQL =
             "UPDATE conversations SET last_message_at = ? WHERE id = ?";
     private static final String UPDATE_LAST_READ_AT_SQL =
             "UPDATE conversation_participants SET last_read_at = ?"
                     + " WHERE conversation_id = ? AND user_id = ?";
 
+    // How long after a message the first reaction to it lands, and how far the reactions spread
+    // out, so reactions on different messages do not all arrive the same number of minutes later.
+    private static final int REACTION_MIN_DELAY_MINUTES = 4;
+    private static final int REACTION_DELAY_SPREAD_MINUTES = 55;
+
     private final JdbcTemplate jdbc;
+    private final InteractionSignalLedger signalLedger;
 
     /**
      * Inserts every conversation from {@code conversations.json} with its participants and
@@ -97,6 +140,10 @@ public class MessageSeedWriter {
         List<Object[]> participantRows = new ArrayList<>();
         List<Object[]> messageRows = new ArrayList<>();
         List<PendingConversation> pending = new ArrayList<>();
+        List<Object[]> reactionRows = new ArrayList<>();
+        int reactionCount = 0;
+        Map<String, Map<Integer, Integer>> replyParents = replyParentsByConversation(content);
+        Map<String, List<ReactionSeed>> reactions = reactionsByConversation(content);
 
         for (ConversationSeed conversation : content.conversations()) {
             List<String> participants = conversation.participants();
@@ -157,7 +204,14 @@ public class MessageSeedWriter {
                     });
 
             Instant latestNonDeleted = null;
-            for (MessageSeed message : conversation.messages()) {
+            Map<Integer, Integer> parentIndexByMessageIndex =
+                    replyParents.getOrDefault(conversation.id(), Map.of());
+            List<UUID> messageIds = new ArrayList<>();
+            List<Instant> messageTimes = new ArrayList<>();
+            for (int messageIndex = 0;
+                    messageIndex < conversation.messages().size();
+                    messageIndex++) {
+                MessageSeed message = conversation.messages().get(messageIndex);
                 UUID senderId = requireUser(usersByUsername, message.sender(), conversation.id());
                 Instant messageCreatedAt =
                         timeline.messageCreatedAt(message, conversationCreatedAt);
@@ -204,9 +258,14 @@ public class MessageSeedWriter {
                                         message.sharedStoryOwner(),
                                         conversation.id());
 
+                UUID messageId = UUID.randomUUID();
+                Integer parentIndex = parentIndexByMessageIndex.get(messageIndex);
+                messageIds.add(messageId);
+                messageTimes.add(messageCreatedAt);
+
                 messageRows.add(
                         new Object[] {
-                            UUID.randomUUID(),
+                            messageId,
                             conversationId,
                             senderId,
                             message.messageType(),
@@ -217,7 +276,8 @@ public class MessageSeedWriter {
                             isDeleted,
                             deletedAt == null ? null : Timestamp.from(deletedAt),
                             adminRemovedAt == null ? null : Timestamp.from(adminRemovedAt),
-                            Timestamp.from(messageCreatedAt)
+                            Timestamp.from(messageCreatedAt),
+                            parentIndex == null ? null : messageIds.get(parentIndex)
                         });
 
                 if (!isDeleted
@@ -225,6 +285,64 @@ public class MessageSeedWriter {
                                 || messageCreatedAt.isAfter(latestNonDeleted))) {
                     latestNonDeleted = messageCreatedAt;
                 }
+            }
+
+            for (ReactionSeed reaction : reactions.getOrDefault(conversation.id(), List.of())) {
+                signalLedger.rememberMessage(
+                        conversation.id(),
+                        reaction.messageIndex(),
+                        messageIds.get(reaction.messageIndex()));
+                UUID reactorId =
+                        requireUser(usersByUsername, reaction.reactor(), conversation.id());
+                UUID messageId = messageIds.get(reaction.messageIndex());
+                Instant reactedAt =
+                        messageTimes
+                                .get(reaction.messageIndex())
+                                .plus(
+                                        Duration.ofMinutes(
+                                                REACTION_MIN_DELAY_MINUTES
+                                                        + (reactionCount++ * 7L)
+                                                                % REACTION_DELAY_SPREAD_MINUTES));
+                if (reactedAt.isAfter(timeline.referenceNow())) {
+                    reactedAt = timeline.referenceNow();
+                }
+                String key =
+                        conversation.id()
+                                + "#"
+                                + reaction.messageIndex()
+                                + "#"
+                                + reaction.reactor();
+                signalLedger.record(
+                        new UserEventImport(
+                                InteractionSignalLedger.signalId("reaction", key),
+                                reactorId,
+                                UserEventType.MESSAGE_REACTION,
+                                "message",
+                                messageId,
+                                "{\"emoji\":\"" + reaction.emoji() + "\"}",
+                                reactedAt));
+                if (reaction.undone()) {
+                    Instant removedAt = reactedAt.plus(Duration.ofHours(3));
+                    signalLedger.record(
+                            new UserEventImport(
+                                    InteractionSignalLedger.signalId("reaction_remove", key),
+                                    reactorId,
+                                    UserEventType.MESSAGE_REACTION_REMOVE,
+                                    "message",
+                                    messageId,
+                                    removedAt.isAfter(timeline.referenceNow())
+                                            ? timeline.referenceNow()
+                                            : removedAt));
+                    continue;
+                }
+                reactionRows.add(
+                        new Object[] {
+                            messageId,
+                            conversationId,
+                            reactorId,
+                            reaction.emoji(),
+                            Timestamp.from(reactedAt)
+                        });
             }
 
             pending.add(
@@ -243,12 +361,191 @@ public class MessageSeedWriter {
                 participantRows.size(),
                 this::bindParticipantRow);
         jdbc.batchUpdate(INSERT_MESSAGE_SQL, messageRows, messageRows.size(), this::bindMessageRow);
+        jdbc.batchUpdate(INSERT_REACTION_SQL, reactionRows);
         log.info(
-                "[seed] conversations: {} rows written, messages: {} rows written",
+                "[seed] conversations: {} rows written, messages: {} rows written, reactions: {} rows"
+                        + " written",
                 conversationRows.size(),
-                messageRows.size());
+                messageRows.size(),
+                reactionRows.size());
 
         backfillLastMessageAtAndReadState(pending);
+        writeMessageRequests(content, usersByUsername, createdAtByUserId, timeline);
+    }
+
+    private Map<String, Map<Integer, Integer>> replyParentsByConversation(SeedContent content) {
+        Map<String, Map<Integer, Integer>> byConversation = new HashMap<>();
+        for (ReplyParentSeed parent : content.interactionControl().replyParents()) {
+            byConversation
+                    .computeIfAbsent(parent.conversationId(), key -> new HashMap<>())
+                    .put(parent.messageIndex(), parent.replyToIndex());
+        }
+        return byConversation;
+    }
+
+    private Map<String, List<ReactionSeed>> reactionsByConversation(SeedContent content) {
+        Map<String, List<ReactionSeed>> byConversation = new HashMap<>();
+        for (ReactionSeed reaction : content.interactionControl().reactions()) {
+            byConversation
+                    .computeIfAbsent(reaction.conversationId(), key -> new ArrayList<>())
+                    .add(reaction);
+        }
+        return byConversation;
+    }
+
+    // Runs after the authored conversations, so a request pair that already shares one would have
+    // collided on direct_pair_key; the loader rejects that before anything is written. A request
+    // is written whole, with its messages, because it never changes after the one message (and the
+    // reply that accepts it): last_message_at and the read marks are known up front.
+    private void writeMessageRequests(
+            SeedContent content,
+            Map<String, UUID> usersByUsername,
+            Map<UUID, Instant> createdAtByUserId,
+            SeedTimeline timeline) {
+        Instant referenceNow = timeline.referenceNow();
+        List<Object[]> conversations = new ArrayList<>();
+        List<Object[]> participants = new ArrayList<>();
+        List<Object[]> messages = new ArrayList<>();
+        int index = 0;
+        for (MessageRequestSeed request : content.interactionControl().messageRequests()) {
+            UUID requesterId = requireUser(usersByUsername, request.requester(), request.id());
+            UUID recipientId = requireUser(usersByUsername, request.recipient(), request.id());
+            requireStrangers(requesterId, recipientId, request.id());
+
+            Instant earliest =
+                    createdAtByUserId.get(requesterId).isAfter(createdAtByUserId.get(recipientId))
+                            ? createdAtByUserId.get(requesterId)
+                            : createdAtByUserId.get(recipientId);
+            Instant startedAt =
+                    referenceNow
+                            .minus(Duration.ofDays(request.daysAgo()))
+                            .minus(Duration.ofMinutes(17L * index));
+            if (startedAt.isBefore(earliest.plus(Duration.ofDays(1)))) {
+                startedAt = earliest.plus(Duration.ofDays(1));
+            }
+            Instant sentAt = startedAt.plus(Duration.ofMinutes(1));
+            boolean accepted = "accepted".equals(request.status());
+            boolean declined = "declined".equals(request.status());
+            Instant repliedAt =
+                    accepted
+                            ? sentAt.plus(Duration.ofHours(3))
+                                    .plus(Duration.ofMinutes(20L * (index % 5)))
+                            : null;
+            Instant resolvedAt =
+                    accepted
+                            ? repliedAt
+                            : declined
+                                    ? sentAt.plus(Duration.ofDays(1)).plus(Duration.ofHours(2))
+                                    : null;
+            if (resolvedAt != null && resolvedAt.isAfter(referenceNow)) {
+                throw new IllegalStateException(
+                        "MessageSeedWriter: message request '"
+                                + request.id()
+                                + "' would be resolved after the seed clock; give it a larger days_ago");
+            }
+            Instant lastMessageAt = accepted ? repliedAt : sentAt;
+
+            UUID conversationId = UUID.randomUUID();
+            UUID requestMessageId = UUID.randomUUID();
+            conversations.add(
+                    new Object[] {
+                        conversationId,
+                        directPairKey(requesterId, recipientId),
+                        requesterId,
+                        Timestamp.from(lastMessageAt),
+                        Timestamp.from(startedAt),
+                        Timestamp.from(resolvedAt == null ? lastMessageAt : resolvedAt),
+                        accepted ? "accepted" : declined ? "declined" : "pending",
+                        recipientId,
+                        "hidden".equals(request.status()),
+                        resolvedAt == null ? null : Timestamp.from(resolvedAt)
+                    });
+            participants.add(
+                    new Object[] {
+                        conversationId,
+                        requesterId,
+                        Timestamp.from(startedAt),
+                        null,
+                        Timestamp.from(sentAt)
+                    });
+            participants.add(
+                    new Object[] {
+                        conversationId,
+                        recipientId,
+                        Timestamp.from(startedAt),
+                        declined ? Timestamp.from(resolvedAt) : null,
+                        accepted
+                                ? Timestamp.from(repliedAt)
+                                : declined
+                                        ? Timestamp.from(sentAt.plus(Duration.ofMinutes(30)))
+                                        : null
+                    });
+            messages.add(
+                    new Object[] {
+                        requestMessageId,
+                        conversationId,
+                        requesterId,
+                        request.text(),
+                        Timestamp.from(sentAt),
+                        null
+                    });
+            if (accepted) {
+                messages.add(
+                        new Object[] {
+                            UUID.randomUUID(),
+                            conversationId,
+                            recipientId,
+                            request.replyText(),
+                            Timestamp.from(repliedAt),
+                            requestMessageId
+                        });
+            }
+            if (accepted || declined) {
+                signalLedger.record(
+                        new UserEventImport(
+                                InteractionSignalLedger.signalId("message_request", request.id()),
+                                recipientId,
+                                accepted
+                                        ? UserEventType.MESSAGE_REQUEST_ACCEPT
+                                        : UserEventType.MESSAGE_REQUEST_DELETE,
+                                "conversation",
+                                conversationId,
+                                accepted ? null : "{\"blocked\":false}",
+                                resolvedAt));
+            }
+            index++;
+        }
+        jdbc.batchUpdate(INSERT_REQUEST_CONVERSATION_SQL, conversations);
+        jdbc.batchUpdate(INSERT_REQUEST_PARTICIPANT_SQL, participants);
+        jdbc.batchUpdate(INSERT_REQUEST_MESSAGE_SQL, messages);
+        log.info(
+                "[seed] message requests: {} conversations, {} messages written",
+                conversations.size(),
+                messages.size());
+    }
+
+    // A follow either way would have routed the first message past the requests folder, and a
+    // block would have refused it; SocialGraphSeedWriter keeps these pairs apart, and this check
+    // turns a regression there into a failed run instead of a quietly inconsistent request.
+    private void requireStrangers(UUID requesterId, UUID recipientId, String requestId) {
+        Integer relations =
+                jdbc.queryForObject(
+                        COUNT_PAIR_RELATIONS_SQL,
+                        Integer.class,
+                        requesterId,
+                        recipientId,
+                        recipientId,
+                        requesterId,
+                        requesterId,
+                        recipientId,
+                        recipientId,
+                        requesterId);
+        if (relations != null && relations > 0) {
+            throw new IllegalStateException(
+                    "MessageSeedWriter: message request '"
+                            + requestId
+                            + "' is between accounts that follow or block each other");
+        }
     }
 
     // Runs only after every message row above is committed to the batch, so "the newest created_at
@@ -463,6 +760,7 @@ public class MessageSeedWriter {
             ps.setTimestamp(11, (Timestamp) row[10]);
         }
         ps.setTimestamp(12, (Timestamp) row[11]);
+        bindNullableUuid(ps, 13, (UUID) row[12]);
     }
 
     private void bindNullableUuid(PreparedStatement ps, int index, UUID value) throws SQLException {

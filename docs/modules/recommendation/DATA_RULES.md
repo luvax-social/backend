@@ -8,7 +8,7 @@ The activity-log read surface lives in the `admin` module; this module owns the 
 The writers exist because their durability contracts differ and cannot be met by one component.
 `UserEventRecorder` must never fail or slow the request that triggered it, so it drops rows under pressure.
 `RecommendationFeedbackConsumer` writes the canonical engagement record that Gorse is rebuilt from, so it must not drop anything and must be idempotent across redelivery.
-`UserEventImportConsumer` writes `recommendation.user-event.imported.v1` events, the durable path for a server-side behavioural event that must not reach Gorse; it has no production producer today, and the development seed is its user.
+`UserEventImportConsumer` writes `recommendation.user-event.imported.v1` events, which the development seed produces, and the interaction control signals of Section 3F, each mapped from its own domain event; both are the durable path for a server-side behavioural event that must not reach Gorse.
 
 `ImpressionService` is a producer for the second of those, not a fourth writer.
 It writes no `user_events` row itself; it enqueues one outbox row per impression and the consumer writes the row, so impressions inherit the durable path's guarantees rather than needing their own.
@@ -46,7 +46,8 @@ Not implemented: `categories`, `user_interests`, `post_categories`.
 | `comment.created.v1` | `comment` | 1.0 | positive |
 | `post.shared.v1` | `share` | 1.0 | positive |
 | `comment.liked.v1` | `like` | 0.5 | attributed to the parent post |
-| `post.viewed.v1` | `read` | dwell seconds, or 1.0 | the negative training signal |
+| `post.viewed.v1` | `read` | dwell seconds, or 1.0 | the inferred negative training example |
+| `post.not-interested.v1` | `not_interested` | 1.0 | negative, declared in `negative_feedback_types`; the undo event deletes the tuple |
 | story views | none | none | recorded in `user_events` only |
 
 **A comment like is a deliberate reduction, not the raw signal.**
@@ -62,6 +63,27 @@ What prevents that is the inbox guard keyed on the event id, not the recommender
 
 **A share is a positive example.**
 It costs the user more effort than a like and is a deliberate endorsement to a specific person rather than a passive signal, so `share` is listed in `positive_feedback_types`.
+
+**Not interested is declared negative feedback, and only the viewer's own recommendations change.**
+`negative_feedback_types = ["not_interested"]` under `[recommend.data_source]` is accepted by the pinned image (`zhenghaoz/gorse-in-one:0.5.11`), and Gorse then leaves an item the user marked out of that user's personalized list.
+`gorse/README.md` records what was observed and when.
+`RecommendationFeedbackConsumer` handles both events:
+
+- `post.not-interested.v1` writes `post_not_interested` with `feedback_type = 'not_interested'` and `feedback_value` 1.0 to ClickHouse first, by the same durable path as every engagement event, then calls `insertFeedback`.
+- `post.not-interested-undone.v1` writes `post_not_interested_undo` without feedback columns, so a rebuild never replays it, then calls `GorseClient.deleteFeedback`.
+A Gorse answer of not found is a success, because an undo is idempotent.
+- Neither path calls `hideItem`. The `IsHidden` flag belongs to the item and would hide the post from every viewer, so it is never used for a personal preference.
+- The application filter stays the authority for the viewer's own feeds. The trending top-up and the popularity and chronological fallbacks never pass through Gorse's exclusion, so only the filter covers them.
+
+**The two events converge on PostgreSQL when they arrive out of order.**
+`post_not_interested` is the system of record for the preference, and an undo can be delivered after a later mark of the same post.
+The consumer acts on each event as delivered, but reads the pair from PostgreSQL after the ClickHouse write and before the Gorse call:
+
+- When the apply event is handled and the row no longer exists, the viewer has undone it since, so the Gorse insert is skipped.
+- When the undo event is handled and the row exists again, the viewer has marked the post again since, so the Gorse delete is skipped.
+- In both cases the ClickHouse row is still written, because it records that the event happened.
+
+Whatever order the events arrive in, Gorse ends holding the tuple exactly when the row exists.
 
 **Story views are never sent to Gorse. Do not reopen this.**
 Stories expire after 24 hours, while Gorse fits on a schedule and caches recommendation results for the configured `cache_expire`, so a story could be recommended after it has ceased to exist.
@@ -110,6 +132,24 @@ When both ranked sources are exhausted or unavailable on the first page, the per
 That fallback is, by definition, exactly the accounts an Explore-style caller asked to exclude, so entering it under `excludeFollowed` would show precisely the wrong content.
 An exhausted Explore result is therefore an honest empty page instead.
 
+### Interaction preferences in every candidate path
+
+The viewer's muted authors, show-fewer authors and not-interested posts are applied by the application, never by Gorse.
+The recommender's `IsHidden` flag is global to an item and would hide the post from every viewer, so it is never used for a personal preference.
+`RecommendationFeedServiceImpl.appendVisible` applies the preferences once per source round, beside the existing visibility filters.
+It reads `PostFeedbackService.findNotInterested` over the round's candidate posts and `SocialService.findFeedSuppressedAuthors` over the candidate owners, one batched query each.
+Every candidate source reaches that method: the personalized Gorse list, the trending top-up and the popularity fallback all arrive as one `SourceBatch`.
+`RecommendationSource` filters nothing for the viewer, and a test pins that the top-up and popularity candidates are filtered like the primary ones.
+A dropped candidate still counts as consumed, so the next page does not read it again.
+Explore (`excludeFollowed`) is the same path and uses the `FOR_YOU` surface.
+A muted author's posts are removed, a show-fewer author's posts are removed, and a post marked not interested is removed, on For You and on Explore.
+The chronological fallback is served by `PostService.getFeed` with `FeedSurface.FOR_YOU_FALLBACK`, for the first fallback page and for every continuation page.
+A continuation page arrives at this endpoint with a post-module cursor, which carries no surface, so the endpoint it arrives on is what names the surface.
+The Following tab calls the same method with `FeedSurface.FOLLOWING`, which keeps show-fewer authors.
+The filters add to the block and visibility checks and never replace them.
+A mute or show-fewer row written concurrently with a block can survive the block for a moment.
+That race is accepted, because the block exclusion still applies to the same candidate.
+
 ---
 
 ## Section 1: Canonical Data
@@ -130,7 +170,7 @@ These tables cannot be rebuilt if lost - `user_events` is the raw behavioral rec
 | Data | Location | Rebuilt From | Rebuild Trigger |
 |------|----------|--------------|-----------------|
 | `user_hashtag_affinity` | PostgreSQL table | ClickHouse `user_events` joined to `post_hashtags` (Section 3D) | The affinity job, every 12 hours |
-| The Gorse store (users, items, feedback) | Gorse's own database | PostgreSQL `users` and `posts`, and the feedback recorded in ClickHouse `user_events` | The operator-triggered rebuild (Section 3E); the live pipeline keeps it current otherwise |
+| The Gorse store (users, items, feedback) | Gorse's own database | PostgreSQL `users`, `posts` and `post_not_interested`, and the feedback recorded in ClickHouse `user_events` | The operator-triggered rebuild (Section 3E); the live pipeline keeps it current otherwise |
 
 ---
 
@@ -144,7 +184,7 @@ These tables cannot be rebuilt if lost - `user_events` is the raw behavioral rec
 | `user_interests` allows at most one row per (user, category) pair | Compound `PRIMARY KEY (user_id, category_id)` |
 | `post_categories` allows at most one row per (post, category) pair | Compound `PRIMARY KEY (post_id, category_id)` |
 | `post_categories.confidence` must be in [0, 1] | `DECIMAL(4,3)` precision; application must enforce range |
-| `user_events.event_type` must be one of the 20 values of the ClickHouse `Enum8` | `event_type Enum8(...)` in `luvax_analytics.user_events`: an unknown value is rejected with code 691, and adding a `UserEventType` value needs a `V{n}` ClickHouse migration in the same commit |
+| `user_events.event_type` must be one of the 33 values of the ClickHouse `Enum8` (V1 declared 20, V4 added 13) | `event_type Enum8(...)` in `luvax_analytics.user_events`: an unknown value is rejected with code 691, and adding a `UserEventType` value needs a `V{n}` ClickHouse migration in the same commit |
 | Deleting a user cascades to `user_interests`; `user_events` rows are not deleted with the user, because ClickHouse has no foreign keys, and they age out with the 12-month retention | `ON DELETE CASCADE` on the PostgreSQL references only |
 | Deleting a post cascades to `post_categories` | `ON DELETE CASCADE` on FK references |
 | `user_events` rows older than 12 months are removed, in whole monthly parts, so a month is gone between 12 and 13 months after it began | `TTL toDateTime(created_at) + INTERVAL 12 MONTH` with `ttl_only_drop_parts = 1` |
@@ -176,6 +216,7 @@ Batch reads that need more rows than the reader profile allows set `max_result_r
 | A dropped or delayed analytics write must not lose the request's trace | `UserEventRecorder`'s task decorator restores the caller's W3C trace context on the virtual thread before the insert runs, so the write's own span (a `jdbc` span tagged with the ClickHouse datasource) still joins the request's trace even though it commits independently and on no schedule the caller can observe |
 | Engagement event writes must not drop rows and must survive redelivery | `RecommendationFeedbackConsumer` writes ClickHouse first with `wait_for_async_insert = 1`, so the acknowledgement follows the part write, and only then Gorse. The row id is the domain event id, so a replay lands on the same key and folds away. A Gorse failure rolls back the inbox marker and the retry re-inserts an identical row. Writing ClickHouse first means Gorse never holds feedback without a durable record. These rows are the canonical record Gorse is rebuilt from, which is why they take the durable path rather than the dropping one |
 | An engagement row stores the exact Gorse feedback it was sent with | `RecommendationFeedbackConsumer` - `feedback_type` and `feedback_value` are the type and value passed to `GorseClient.insertFeedback`, so dwell seconds and the half-weight comment like are reproduced by a rebuild rather than re-derived. Rows written by the recorder and the import consumer have neither and are never sent |
+| A not-interested event must leave Gorse agreeing with `post_not_interested` whatever order the apply and undo events arrive in | `RecommendationFeedbackConsumer` - after the ClickHouse write it reads the pair through `PostFeedbackService.findNotInterested` and skips the Gorse insert when the row is gone, or the Gorse delete when the row exists again. Neither path calls `hideItem` |
 | An actor that no longer exists is a permanent failure | `RecommendationFeedbackConsumer` - `UserSummaryService.exists` is checked before the write, because ClickHouse has no foreign key to refuse it; the message is dead-lettered once |
 | A ClickHouse outage must pause ingestion, not dead-letter it | `RecommendationFeedbackConsumer` and `UserEventImportConsumer` nack with requeue on `ClickHouseUnavailableException`, and `AnalyticsIngestionController` stops the listener containers while the `clickhouse` breaker is open, so the messages wait ready in their queues. A rejected request or a malformed envelope dead-letters at once; a Gorse failure keeps the retry-then-dead-letter path |
 | An engagement write must never fail the user action that triggered it | `PostLikeServiceImpl` / `PostSaveServiceImpl` enqueue an outbox row inside the domain transaction; the event reaches `user_events` and Gorse later, off the request thread |
@@ -190,7 +231,9 @@ Batch reads that need more rows than the reader profile allows set `max_result_r
 - Analytics reads lag writes by seconds: an event is visible after the outbox publishes it and the consumer writes it (the recorder's rows after the async flush).
 - ClickHouse partitions `user_events` monthly by itself; there is no partition maintenance job.
 - No A/B testing infrastructure for recommendation algorithms.
-- No explicit user "not interested" signal. Negative training examples are inferred rather than declared: a `read` with no accompanying positive feedback is what the factorization machine ranker trains against. A seeded database with no read signal therefore teaches the ranker nothing, which is why `SeedOutboxEmitter` emits `post.viewed.v1` and `AnalyticsSeedWriter` no longer writes `post_view` rows of its own.
+- A user's "not interested" mark on a post is stored in PostgreSQL (`post_not_interested`) and announced by `post.not-interested.v1` and `post.not-interested-undone.v1`.
+- The mark is sent to Gorse as `not_interested` negative feedback, so it changes that user's ranking from the next fit, and the application filter hides the post in every feed path at once.
+- Other negative training examples are inferred rather than declared: a `read` with no accompanying positive feedback is what the factorization machine ranker trains against. A seeded database with no read signal therefore teaches the ranker nothing, which is why `SeedOutboxEmitter` emits `post.viewed.v1` and `AnalyticsSeedWriter` no longer writes `post_view` rows of its own.
 
 ---
 
@@ -307,9 +350,15 @@ Every Gorse write is an overwrite, so repeating the batch that was in flight whe
 | `PURGE` | `AnalyticsIngestionController.suspend("gorse-rebuild")` stops the `recommendationFeedback` listener for the rest of the run, so no live feedback interleaves and its messages wait in the queue; then `GorsePurger.purge()` truncates `feedback`, `items`, `users`, `documents`, `values`, `time_series_points` and `message`. A failure is fatal here, unlike the seed reset's warning |
 | `USERS` | Every non-deleted user, in id order, pushed with `POST /api/users` (an upsert) |
 | `ITEMS` | Every post, soft-deleted ones included, pushed with `POST /api/items` (an upsert); an item is hidden when the post is not `published` or is soft-deleted, which is what `PostIndexSyncConsumer` does live; labels come from `HashtagService.getHashtagNamesForPosts` |
-| `FEEDBACK` | Per batch of users, the ClickHouse sums of `feedback_value` per (`feedback_type`, user, post) over rows that carry a `feedback_type`, keeping only posts PostgreSQL knows (the rest are counted in `feedback_skipped`), sent with `PUT /api/feedback`, which overwrites, where `POST` accumulates |
+| `FEEDBACK` | Per batch of users, the ClickHouse sums of `feedback_value` per (`feedback_type`, user, post) over rows that carry a `feedback_type`, keeping only posts PostgreSQL knows and, for `not_interested`, only tuples whose `(user, post)` still has a `post_not_interested` row (the rest are counted in `feedback_skipped`, see below), sent with `PUT /api/feedback`, which overwrites, where `POST` accumulates |
 | `VERIFY` | Pages Gorse's items and compares them with PostgreSQL: the same set of ids, the same hidden flag on every item, and 20 sampled feedback tuples read back within 1e-6 of the ClickHouse sums (read through `GET /api/user/{user}/feedback/{type}`, because Gorse 0.5.11 drops the connection on the per-tuple endpoint when it does not hold the tuple) |
 | `DONE` | `finished_at` is set; in every terminal state the feedback listener is resumed |
+
+`not_interested` is the one feedback type whose truth is not the ClickHouse sum.
+`user_events` is append-only, so a preference that was marked and then undone still has its earlier `post_not_interested` row there, and sending that tuple would make Gorse stop recommending a post the viewer is interested in again.
+The rebuild therefore asks PostgreSQL, the system of record, whether the `(user, post)` pair still has a `post_not_interested` row, in one read per batch of users and only when the batch holds a `not_interested` total, and sends the tuple only if it does.
+A tuple without a row is counted in `feedback_skipped` and in `luvax_gorse_rebuild_skipped_total{reason="undone_not_interested"}`.
+The `VERIFY` sample applies the same selection, so a tuple the rebuild deliberately did not send is never expected in Gorse.
 
 Feedback older than the 12-month `user_events` retention is not restored.
 Recorder and import rows carry no `feedback_type` and are never sent, as they never were live.
@@ -319,7 +368,7 @@ Recorder and import rows carry no `feedback_type` and are never sent, as they ne
 - A Gorse 5xx or I/O failure is retried three times (2 s, 4 s, 8 s), after which the run is `FAILED` with its checkpoint and a restart with the same token resumes; a 4xx fails the run at once.
 - A verification difference ends the run `FAILED_VERIFICATION`, logging the counts (`missing`, `stray`, `hiddenMismatch`, `feedbackMismatch`) and up to 20 example ids each.
 - Logs are prefixed `[gorse-rebuild] token=<token>`: `starting phase=PREFLIGHT` or `resuming phase=<phase> checkpoint=<id>`, one `phase=<USERS|ITEMS|FEEDBACK> sent=<n> checkpoint=<id>` line per batch, and a final `phase=DONE users=<n> items=<n> feedback=<n> feedbackSkipped=<n>`.
-- Meters: `luvax_gorse_rebuild_phase` (0 idle, 1 `PREFLIGHT`, 2 `PURGE`, 3 `USERS`, 4 `ITEMS`, 5 `FEEDBACK`, 6 `VERIFY`, 7 done, -1 failed), `luvax_gorse_rebuild_sent_total{kind}`, `luvax_gorse_rebuild_skipped_total{reason="unknown_post"}` and `luvax_gorse_rebuild_verification_failures_total`.
+- Meters: `luvax_gorse_rebuild_phase` (0 idle, 1 `PREFLIGHT`, 2 `PURGE`, 3 `USERS`, 4 `ITEMS`, 5 `FEEDBACK`, 6 `VERIFY`, 7 done, -1 failed), `luvax_gorse_rebuild_sent_total{kind}`, `luvax_gorse_rebuild_skipped_total{reason="unknown_post"|"undone_not_interested"}` and `luvax_gorse_rebuild_verification_failures_total`.
 
 ### Privilege the purge needs
 
@@ -329,12 +378,70 @@ The operational grant, verification and rollback statements are in the observabi
 
 ---
 
+## Section 3F: Interaction control signals
+
+The interaction controls (show fewer, mute, the interaction limit, hidden comments and their release) are behavioural signals that the insights work must be able to measure.
+Each one is a domain event that the owning module enqueues through the outbox in the same transaction as the change, and `UserEventImportConsumer` stores it in `user_events`.
+None of them is sent to Gorse, so a row has no `feedback_type` and a Gorse rebuild never replays it.
+
+### Mapping
+
+`DomainSignalMappings.BY_EVENT_TYPE` is the single table.
+It is keyed by event type, which is also the routing key, and each entry says which `UserEventType` the event becomes, the `entity_type`, how `entity_id` is read from the event, and how `metadata` is built.
+For every entry the row's account is the envelope's actor, `created_at` is the envelope's `occurredAt` and never the delivery time, and the row id is the envelope's event id.
+A redelivery therefore writes an identical row that the engine folds away, on top of the inbox guard that normally skips it first.
+
+| Event | `event_type` | `entity_type` and `entity_id` | `metadata` |
+|-------|--------------|-------------------------------|------------|
+| `user.show-fewer.v1` | `account_show_fewer` | `user`, the author | none |
+| `user.show-fewer-undone.v1` | `account_show_fewer_undo` | `user`, the author | none |
+| `user.muted.v1` | `account_mute` | `user`, the muted account | `{"posts":bool,"stories":bool}` |
+| `user.unmuted.v1` | `account_unmute` | `user`, the formerly muted account | none |
+| `user.interaction-limit.changed.v1` | `interaction_limit_change` | `user`, the account itself | `{"nonFollowers":bool,"recentFollowers":bool,"active":bool}` |
+| `comment.hidden.v1` | `comment_hidden` | `comment`, the hidden comment | `{"reason":"hidden_words"\|"limited_interaction"\|"hidden_parent"}` |
+| `comment.unhidden.v1` | `comment_unhide` | `comment`, one row per released comment | none |
+| `message.request.resolved.v1` | `message_request_accept` for `accepted`; `message_request_delete` for `deleted` and `blocked` | `conversation`, the request | none for an accept; `{"blocked":bool}` for a delete |
+| `message.reaction.changed.v1` | `message_reaction` when the event carries an emoji; `message_reaction_remove` when it carries none | `message`, the reacted-to message | `{"emoji":"..."}` for a reaction; none for a removal |
+
+`active` is true when either toggle is on.
+The account of a `comment_hidden` row is the commenter, and the account of a `comment_unhide` row is the post owner who released the comment.
+A payload that lacks the entity id, a boolean flag or a known reason, an envelope without an actor or an `occurredAt`, and an event type with no entry are all permanent failures that dead-letter at once.
+The reason is checked against the closed set of hidden reasons, and the emoji against the single-emoji rule of the message module, before either is written into the JSON, so a malformed event cannot add structure to a row.
+
+### Adding a signal
+
+A later event is one entry in `DomainSignalMappings` and one binding in `RecommendationRabbitBindingConfig`.
+The enum value must already exist in `UserEventType` and in the ClickHouse `Enum8`; V4 added all thirteen values for this phase, ordinals 21 to 33, with ordinals 1 to 20 unchanged.
+`RabbitMqTopologyConfigTest` fails when a mapped key is not bound to the import queue or when any other queue would also receive it, and `DomainSignalMappingsTest` pins each entry.
+
+`post.not-interested.v1` and `post.not-interested-undone.v1` are not in this table: they feed Gorse as negative feedback and are written, with their `post_not_interested` and `post_not_interested_undo` values, by `RecommendationFeedbackConsumer`.
+
+### What is deliberately not recorded
+
+- The text of a personal hidden word, and which entry matched a hidden comment: only the reason `hidden_words` is stored.
+- The text of a comment.
+- Why an account muted, asked to see fewer posts or limited interactions: no event carries a reason, and none is invented.
+- The end time of an interaction limit: the row records the toggles and whether a limit is active, not when it was meant to lapse.
+- Anything about the other party that the actor did not choose: a muted account is never told, and a hidden comment's author is never told.
+
+### Retention and visibility
+
+The rows follow the table's 12-month retention in whole monthly parts.
+Seven of them are an account's private preferences: `account_mute`, `account_unmute`, `account_show_fewer`, `account_show_fewer_undo`, `post_not_interested`, `post_not_interested_undo` and `interaction_limit_change`.
+These seven stay in ClickHouse for insights and are never returned by the administrative activity log.
+`UserEventAnalyticsRepositoryImpl.findPage` excludes them in its statement, and the activity log refuses a filter that names one.
+The affinity, entity id and Gorse rebuild reads are unchanged.
+The other rows are visible to the administrative activity log like every other `user_events` row, filtered by `event_type`, and no row is shown to the account it is about.
+
+---
+
 ## Section 4: Inter-Module Dependencies
 
 | Dependency | Direction | Nature |
 |------------|-----------|--------|
 | `users` | inbound | `user_interests` references `users.id`; `user_events.user_id` is a plain column in ClickHouse with no foreign key; `UserSummaryService.exists` is the actor check the feedback consumer makes |
 | `post` | inbound | `post_categories` references `posts.id`; `user_events` references posts via `entity_id`; the rebuild reads every `posts` row and `HashtagService` supplies item labels |
+| `post` | inbound | `PostFeedbackService.findNotInterested` is how `RecommendationFeedbackConsumer` checks that a not-interested mark still stands before it calls Gorse; the rebuild reads `post_not_interested` directly, in native SQL, for the same question; `post.not-interested.v1` and `post.not-interested-undone.v1` arrive on `recommendation.feedback.queue` |
 | `hashtag` | inbound | `user_events` captures `hashtag_click` events with `entity_type = 'hashtag'` |
 | `story` | inbound | `user_events` captures `story_view` events with `entity_type = 'story'` |
 | `common/analytics` | outbound | Every ClickHouse read and write goes through `ClickHouseOperations`; the four analytics listeners, `recommendationFeedback` and `userEventImport` among them, are started and stopped by `AnalyticsIngestionController` |

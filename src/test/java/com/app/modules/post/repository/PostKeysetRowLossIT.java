@@ -2,17 +2,25 @@ package com.app.modules.post.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.lang.reflect.Method;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.core.simple.JdbcClient.StatementSpec;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
@@ -98,6 +106,7 @@ class PostKeysetRowLossIT {
 
     @Test
     void feed_tieGroupOnCreatedAt_pagesEveryRowExactlyOnce() {
+        UUID viewer = insertUser("feed_viewer");
         UUID author = insertUser("feed_author");
         List<UUID> authorIds = List.of(author);
         List<UUID> expected = new ArrayList<>();
@@ -105,18 +114,128 @@ class PostKeysetRowLossIT {
             expected.add(insertPost(author, SHARED_INSTANT));
         }
 
+        assertThat(pageFeed(authorIds, viewer)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void feed_notInterestedPostsInsideATieGroup_areSkippedWithoutLosingOrRepeatingTheRest() {
+        UUID viewer = insertUser("feed_ni_viewer");
+        UUID author = insertUser("feed_ni_author");
+        List<UUID> authorIds = List.of(author);
+        List<UUID> expected = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            UUID post = insertPost(author, SHARED_INSTANT);
+            if (i % 2 == 0) {
+                markNotInterested(viewer, post);
+            } else {
+                expected.add(post);
+            }
+        }
+
+        assertThat(pageFeed(authorIds, viewer)).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void feed_notInterestedMarkOfAnotherViewer_doesNotHideThePost() {
+        UUID viewer = insertUser("feed_other_viewer");
+        UUID other = insertUser("feed_other_marker");
+        UUID author = insertUser("feed_other_author");
+        UUID post = insertPost(author, SHARED_INSTANT);
+        markNotInterested(other, post);
+
+        assertThat(pageFeed(List.of(author), viewer)).containsExactly(post);
+    }
+
+    // The plan is read with sequential scans disabled so a small test table cannot hide the access
+    // path the production table would take. The statement is read from the repository's own @Query
+    // annotation rather than repeated here, so a change to either feed query is checked by this
+    // test without anyone remembering to copy it across. The methods are looked up by their
+    // parameter types because getDeclaredMethods() order is unspecified.
+    @ParameterizedTest(name = "{0} with {1} author(s)")
+    @MethodSource("feedQueryShapes")
+    void feed_keysetQuery_stillUsesTheKeysetIndexAndAntiJoinsTheMarks(
+            String method, int authorCount, boolean withCursor) throws NoSuchMethodException {
+        String shape = (withCursor ? "before" : "first") + authorCount;
+        UUID viewer = insertUser("plan_viewer_" + shape);
+        List<UUID> authors = new ArrayList<>();
+        for (int a = 0; a < authorCount; a++) {
+            UUID author = insertUser("plan_author_" + shape + "_" + a);
+            authors.add(author);
+            for (int i = 0; i < 20; i++) {
+                insertPost(author, SHARED_INSTANT.minusMinutes(i));
+            }
+        }
+        jdbcClient.sql("SET LOCAL enable_seqscan = off").update();
+
+        StatementSpec spec =
+                jdbcClient
+                        .sql("EXPLAIN " + feedQuery(method, withCursor) + " LIMIT 21")
+                        .param("authorIds", authors)
+                        .param("viewerId", viewer);
+        if (withCursor) {
+            spec = spec.param("cursorTime", SHARED_INSTANT).param("cursorId", UUID.randomUUID());
+        }
+        String plan = String.join("\n", spec.query(String.class).list());
+
+        if (authorCount == 1) {
+            assertThat(plan)
+                    .as("the keyset index must drive the scan")
+                    .contains("idx_posts_user_created_id");
+        } else {
+            // With several authors the planner may order by another posts index and filter the
+            // authors; what matters is that the table is never read sequentially.
+            assertThat(plan).as("no sequential scan of posts").doesNotContain("Seq Scan");
+        }
+        assertThat(plan).as("the marks are excluded by an anti-join").contains("Anti Join");
+        assertThat(plan)
+                .as("the marks are probed through their primary key")
+                .contains("post_not_interested_pkey");
+    }
+
+    private static Stream<Arguments> feedQueryShapes() {
+        return Stream.of(
+                Arguments.of("findFirstFeedPosts", 1, false),
+                Arguments.of("findFirstFeedPosts", 3, false),
+                Arguments.of("findFeedPostsBefore", 1, true),
+                Arguments.of("findFeedPostsBefore", 3, true));
+    }
+
+    private static String feedQuery(String method, boolean withCursor)
+            throws NoSuchMethodException {
+        Method repositoryMethod =
+                withCursor
+                        ? PostRepository.class.getMethod(
+                                method,
+                                List.class,
+                                UUID.class,
+                                OffsetDateTime.class,
+                                UUID.class,
+                                Pageable.class)
+                        : PostRepository.class.getMethod(
+                                method, List.class, UUID.class, Pageable.class);
+        return repositoryMethod.getAnnotation(Query.class).value();
+    }
+
+    private List<UUID> pageFeed(List<UUID> authorIds, UUID viewer) {
         List<UUID> seen = new ArrayList<>();
-        List<Post> page = postRepository.findFirstFeedPosts(authorIds, page());
+        List<Post> page = postRepository.findFirstFeedPosts(authorIds, viewer, page());
         int guard = 0;
         while (!page.isEmpty() && guard++ < 100) {
             page.forEach(p -> seen.add(p.getId()));
             Post last = page.get(page.size() - 1);
             page =
                     postRepository.findFeedPostsBefore(
-                            authorIds, last.getCreatedAt(), last.getId(), page());
+                            authorIds, viewer, last.getCreatedAt(), last.getId(), page());
         }
+        return seen;
+    }
 
-        assertThat(seen).containsExactlyInAnyOrderElementsOf(expected);
+    private void markNotInterested(UUID viewer, UUID post) {
+        jdbcClient
+                .sql("INSERT INTO post_not_interested(user_id, post_id) VALUES (:viewer, :post)")
+                .param("viewer", viewer)
+                .param("post", post)
+                .update();
     }
 
     @Test

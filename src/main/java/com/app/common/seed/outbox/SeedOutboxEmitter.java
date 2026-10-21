@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import com.app.common.seed.loader.SeedContent;
+import com.app.common.seed.model.NotInterestedSeed;
 import com.app.common.seed.model.PersonaSeed;
 import com.app.common.seed.model.PostSeed;
 import com.app.common.seed.model.UserSeed;
@@ -109,14 +110,25 @@ public class SeedOutboxEmitter {
     /** One seeded post-share message's identifying data. */
     public record ShareRow(UUID postId, UUID postOwnerId, UUID senderId, UUID messageId) {}
 
-    /** One non-soft-deleted comment row's identifying data. */
+    /**
+     * One non-soft-deleted comment row's identifying data. {@code hidden} is whether the post
+     * owner's rules hid the comment, which the created event announces so no consumer notifies
+     * about it.
+     */
     public record CommentRow(
             UUID commentId,
             UUID postId,
             UUID postOwnerId,
             UUID userId,
             int depth,
-            UUID parentOwnerId) {}
+            UUID parentOwnerId,
+            boolean hidden) {}
+
+    /**
+     * One not-interested mark. {@code undone} marks one the viewer took back, which leaves no row
+     * but is still replayed as the mark followed by its removal, so the recommender sees both.
+     */
+    public record NotInterestedRow(UUID postId, UUID authorId, UUID userId, boolean undone) {}
 
     /** One real sample of each of the five emitted event kinds, used by the envelope proof. */
     public record ProofSample(
@@ -135,6 +147,7 @@ public class SeedOutboxEmitter {
             int comments,
             int views,
             int shares,
+            int notInterested,
             int adminActions) {
         public int total() {
             return postIndex
@@ -144,6 +157,7 @@ public class SeedOutboxEmitter {
                     + comments
                     + views
                     + shares
+                    + notInterested
                     + adminActions;
         }
     }
@@ -226,6 +240,12 @@ public class SeedOutboxEmitter {
         List<ShareRow> shares = fetchPostShares();
         emitBatched(shares, batchWriter::emitShareBatch);
 
+        List<NotInterestedRow> notInterested =
+                buildNotInterestedRows(content, usersByUsername, postIdBySeedId);
+        emitBatched(notInterested, batchWriter::emitNotInterestedBatch);
+        int notInterestedEvents =
+                notInterested.size() + (int) notInterested.stream().filter(r -> r.undone()).count();
+
         List<AdminActionRow> adminActions = fetchAdminActions();
         emitBatched(adminActions, batchWriter::emitAdminActionReplicationBatch);
 
@@ -238,10 +258,12 @@ public class SeedOutboxEmitter {
                         comments.size(),
                         views.size(),
                         shares.size(),
+                        notInterestedEvents,
                         adminActions.size());
         log.info(
                 "[seed] outbox full volume emitted: postIndex={}, hashtagIndex={}, likes={}, saves={},"
-                        + " comments={}, views={}, shares={}, adminActions={}, total={}",
+                        + " comments={}, views={}, shares={}, notInterested={}, adminActions={},"
+                        + " total={}",
                 counts.postIndex(),
                 counts.hashtagIndex(),
                 counts.likes(),
@@ -249,9 +271,36 @@ public class SeedOutboxEmitter {
                 counts.comments(),
                 counts.views(),
                 counts.shares(),
+                counts.notInterested(),
                 counts.adminActions(),
                 counts.total());
         return counts;
+    }
+
+    // Every not-interested mark of the content, the ones the viewer later took back included. The
+    // marks that stand are rows; an undone one has none, so its post comes from the content, and
+    // its author from the post.
+    private List<NotInterestedRow> buildNotInterestedRows(
+            SeedContent content,
+            Map<String, UUID> usersByUsername,
+            Map<String, UUID> postIdBySeedId) {
+        Map<UUID, UUID> ownerByPostId = fetchPostOwners();
+        List<NotInterestedRow> rows = new ArrayList<>();
+        for (NotInterestedSeed seed : content.interactionControl().notInterested()) {
+            UUID postId = postIdBySeedId.get(seed.postSeedId());
+            UUID userId = usersByUsername.get(seed.viewer());
+            UUID authorId = postId == null ? null : ownerByPostId.get(postId);
+            if (userId == null || authorId == null) {
+                throw new IllegalStateException(
+                        "SeedOutboxEmitter: not_interested entry '"
+                                + seed.viewer()
+                                + "' -> '"
+                                + seed.postSeedId()
+                                + "' names an account or a published post that was not written");
+            }
+            rows.add(new NotInterestedRow(postId, authorId, userId, seed.undone()));
+        }
+        return rows;
     }
 
     // The read set is the union of every like and save pair with a band-weighted, persona-matched
@@ -499,8 +548,8 @@ public class SeedOutboxEmitter {
 
     private List<CommentRow> fetchComments() {
         String sql =
-                "SELECT c.id, c.post_id, c.user_id, c.depth, p.user_id AS post_owner_id, parent.user_id"
-                        + " AS parent_owner_id FROM comments c JOIN posts p ON p.id = c.post_id LEFT"
+                "SELECT c.id, c.post_id, c.user_id, c.depth, c.moderation_status, p.user_id AS"
+                        + " post_owner_id, parent.user_id AS parent_owner_id FROM comments c JOIN posts p ON p.id = c.post_id LEFT"
                         + " JOIN comments parent ON parent.id = c.parent_id WHERE c.deleted_at IS"
                         + " NULL AND c.admin_removed_at IS NULL";
         return jdbc.query(
@@ -513,7 +562,8 @@ public class SeedOutboxEmitter {
                             (UUID) rs.getObject("post_owner_id"),
                             (UUID) rs.getObject("user_id"),
                             rs.getInt("depth"),
-                            parentOwner == null ? null : (UUID) parentOwner);
+                            parentOwner == null ? null : (UUID) parentOwner,
+                            "hidden".equals(rs.getString("moderation_status")));
                 });
     }
 }

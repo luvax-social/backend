@@ -16,7 +16,9 @@ import org.springframework.stereotype.Service;
 import com.app.common.response.CursorPageResponse;
 import com.app.modules.post.dto.response.FeedPostResponse;
 import com.app.modules.post.entity.Post;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.enums.PostStatus;
+import com.app.modules.post.service.PostFeedbackService;
 import com.app.modules.post.service.PostLookupService;
 import com.app.modules.post.service.PostService;
 import com.app.modules.post.service.PostVisibilityService;
@@ -45,6 +47,7 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
     private final RecommendationSource recommendationSource;
     private final PostLookupService postLookupService;
     private final PostVisibilityService postVisibilityService;
+    private final PostFeedbackService postFeedbackService;
     private final PostService postService;
     private final SocialService socialService;
     private final GorseProperties gorseProperties;
@@ -54,6 +57,7 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
             RecommendationSource recommendationSource,
             PostLookupService postLookupService,
             PostVisibilityService postVisibilityService,
+            PostFeedbackService postFeedbackService,
             PostService postService,
             SocialService socialService,
             GorseProperties gorseProperties,
@@ -61,6 +65,7 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
         this.recommendationSource = recommendationSource;
         this.postLookupService = postLookupService;
         this.postVisibilityService = postVisibilityService;
+        this.postFeedbackService = postFeedbackService;
         this.postService = postService;
         this.socialService = socialService;
         this.gorseProperties = gorseProperties;
@@ -81,7 +86,7 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
             }
             // Not a ranked cursor: the previous page came from the chronological fallback, whose
             // timestamp cursors the post module owns. Delegate so pagination continues seamlessly.
-            return postService.getFeed(viewerId, cursor, pageSize);
+            return postService.getFeed(viewerId, cursor, pageSize, FeedSurface.FOR_YOU_FALLBACK);
         }
 
         char source = decoded.source();
@@ -160,7 +165,7 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
                     viewerId,
                     roundsRun);
             recommendationMetrics.chronologicalFallback();
-            return postService.getFeed(viewerId, null, pageSize);
+            return postService.getFeed(viewerId, null, pageSize, FeedSurface.FOR_YOU_FALLBACK);
         }
         String startCursor =
                 content.isEmpty()
@@ -180,9 +185,10 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
     }
 
     /**
-     * Hydrates a candidate batch, filters it down to posts the viewer may see, and appends up to
-     * the page capacity. Returns how many raw candidates were consumed (accepted or rejected);
-     * candidates beyond a filled page are not counted so the next page re-reads them.
+     * Hydrates a candidate batch, filters it down to posts the viewer may see and has not asked to
+     * be spared, and appends up to the page capacity. Returns how many raw candidates were consumed
+     * (accepted or rejected); candidates beyond a filled page are not counted so the next page
+     * re-reads them.
      */
     private int appendVisible(
             UUID viewerId,
@@ -200,6 +206,16 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
                 postsById.values().stream().map(Post::getUserId).collect(Collectors.toSet());
         Set<UUID> visibleOwnerIds =
                 postVisibilityService.filterVisibleOwnerIds(viewerId, candidateOwnerIds);
+        // The viewer's own preferences are applied here in the application and never through the
+        // recommender's IsHidden flag, which is global to an item and would hide the post from
+        // everyone. Both reads are one batched query per round, whatever the candidate source: the
+        // personalized list, the trending topup and the popularity list all arrive through this
+        // method. They add to the visibility filters above and never replace them.
+        Set<UUID> notInterestedPostIds =
+                postFeedbackService.findNotInterested(viewerId, postsById.keySet());
+        Set<UUID> suppressedOwnerIds =
+                socialService.findFeedSuppressedAuthors(
+                        viewerId, candidateOwnerIds, FeedSurface.FOR_YOU);
 
         List<Post> accepted = new ArrayList<>();
         List<Double> acceptedScores = new ArrayList<>();
@@ -215,7 +231,9 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
                     || post.getStatus() != PostStatus.PUBLISHED
                     || viewerId.equals(post.getUserId())
                     || !visibleOwnerIds.contains(post.getUserId())
-                    || excludedOwnerIds.contains(post.getUserId())) {
+                    || excludedOwnerIds.contains(post.getUserId())
+                    || notInterestedPostIds.contains(postId)
+                    || suppressedOwnerIds.contains(post.getUserId())) {
                 continue;
             }
             accepted.add(post);

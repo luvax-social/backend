@@ -13,7 +13,7 @@ import io.micrometer.core.instrument.MeterRegistry;
  *
  * <p>Prometheus names: {@code luvax_gorse_rebuild_phase} (0 idle, 1 to 6 the phases in order, 7
  * done, -1 failed), {@code luvax_gorse_rebuild_sent_total{kind="users|items|feedback"}}, {@code
- * luvax_gorse_rebuild_skipped_total{reason="unknown_post"}} and {@code
+ * luvax_gorse_rebuild_skipped_total{reason="unknown_post|undone_not_interested"}} and {@code
  * luvax_gorse_rebuild_verification_failures_total}. All exist at zero from startup, so a dashboard
  * built on them is defined before the first rebuild.
  */
@@ -41,6 +41,7 @@ public class GorseRebuildMetrics {
     private final Counter items;
     private final Counter feedback;
     private final Counter skippedUnknownPost;
+    private final Counter skippedUndoneNotInterested;
     private final Counter verificationFailures;
 
     public GorseRebuildMetrics(MeterRegistry registry) {
@@ -53,7 +54,12 @@ public class GorseRebuildMetrics {
         skippedUnknownPost =
                 Counter.builder("luvax.gorse.rebuild.skipped")
                         .tag("reason", "unknown_post")
-                        .description("Feedback tuples not sent because PostgreSQL has no such post")
+                        .description("Feedback tuples a rebuild did not send, by reason")
+                        .register(registry);
+        skippedUndoneNotInterested =
+                Counter.builder("luvax.gorse.rebuild.skipped")
+                        .tag("reason", "undone_not_interested")
+                        .description("Feedback tuples a rebuild did not send, by reason")
                         .register(registry);
         verificationFailures =
                 Counter.builder("luvax.gorse.rebuild.verification.failures")
@@ -90,6 +96,10 @@ public class GorseRebuildMetrics {
 
     public void skippedUnknownPost(long count) {
         skippedUnknownPost.increment(count);
+    }
+
+    public void skippedUndoneNotInterested(long count) {
+        skippedUndoneNotInterested.increment(count);
     }
 
     public void verificationFailed() {

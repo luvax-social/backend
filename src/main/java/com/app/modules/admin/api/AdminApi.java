@@ -602,6 +602,100 @@ public interface AdminApi {
             @PathVariable("messageId") UUID messageId,
             @Valid @RequestBody AdminActionRequest request);
 
+    /** Removes a message reaction and returns the persisted audit event. */
+    @Operation(
+            summary = "Removes a message reaction and returns the persisted audit event",
+            description =
+                    "Hides a reported reaction from both participants. The message and the"
+                            + " reactor's other reactions are untouched, the linked report is"
+                            + " resolved, and the reactor is notified and mailed an appeal notice."
+                            + " The row keeps its emoji so a restore can return it.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Reaction removed"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "403",
+                description = "Moderator or administrator role required",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "Reaction or linked report not found",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "409",
+                description = "Reaction is already removed",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "429",
+                description = "Rate limit exceeded",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @MalformedBodyErrorResponses
+    @AuthenticationRequiredResponse
+    @PatchMapping(ApiConstants.Admin.REMOVE_MESSAGE_REACTION)
+    ResponseEntity<ApiResponse<AdminActionResponse>> removeMessageReaction(
+            @PathVariable("reactionId") UUID reactionId,
+            @Valid @RequestBody AdminActionRequest request);
+
+    /** Restores a removed message reaction and returns the persisted audit event. */
+    @Operation(
+            summary = "Restores a removed message reaction and returns the persisted audit event",
+            description =
+                    "Reverses a reaction removal, returning the reaction with its original emoji"
+                            + " and time to both participants.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "200",
+                description = "Reaction restored"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "403",
+                description = "Moderator or administrator role required",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "404",
+                description = "Reaction or linked report not found",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "409",
+                description = "Reaction is not removed",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                responseCode = "429",
+                description = "Rate limit exceeded",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = ApiResponse.class)))
+    })
+    @MalformedBodyErrorResponses
+    @AuthenticationRequiredResponse
+    @PatchMapping(ApiConstants.Admin.RESTORE_MESSAGE_REACTION)
+    ResponseEntity<ApiResponse<AdminActionResponse>> restoreMessageReaction(
+            @PathVariable("reactionId") UUID reactionId,
+            @Valid @RequestBody AdminActionRequest request);
+
     /** Resolves a report and returns the persisted audit event. */
     @Operation(summary = "Resolve a report")
     @ApiResponses({

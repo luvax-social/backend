@@ -65,6 +65,13 @@ public class AdminUserEventServiceImpl implements AdminUserEventService {
             int limit) {
         adminAuthorizationService.assertActorIsAdministrator(actorId);
         validateWindow(from, to);
+        // Refused as a validation error, the same answer a malformed filter gets, so the response
+        // does not vary with whether the account has recorded any such signal.
+        if (eventType != null && eventType.isPrivatePreferenceSignal()) {
+            throw new AppException(
+                    ApiErrorCode.BAD_REQUEST,
+                    "The activity log does not offer event type '" + eventType.toJson() + "'");
+        }
         int pageSize = normalizeLimit(limit);
         Cursor decoded = CursorCodec.decode(cursor, CursorScope.ADMIN_USER_EVENTS);
         List<UserEventRow> rows;

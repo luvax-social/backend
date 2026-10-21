@@ -51,6 +51,10 @@ public interface StoryRepository extends JpaRepository<Story, UUID> {
      * account is not subject to dismissal or to the {@code suggestible} opt-out: both govern being
      * *offered* to strangers, not being read by somebody who already follows you.
      *
+     * <p>An author whose stories the viewer muted is dropped, followed or suggested alike, by an
+     * anti-join on the viewer's own mute row. It is an additional exclusion only: the block
+     * exclusion above stays as it is, and a mute of posts alone changes nothing here.
+     *
      * <p>The unseen predicate is what stops the feed offering the same story twice. An author whose
      * every active story the viewer has already opened drops out rather than being re-suggested.
      *
@@ -95,6 +99,9 @@ public interface StoryRepository extends JpaRepository<Story, UUID> {
                             + " AND NOT EXISTS (SELECT 1 FROM blocks b"
                             + "   WHERE (b.blocker_id = :viewerId AND b.blocked_id = c.author_id)"
                             + "   OR (b.blocker_id = c.author_id AND b.blocked_id = :viewerId))"
+                            + " AND NOT EXISTS (SELECT 1 FROM user_mutes m"
+                            + "   WHERE m.user_id = :viewerId AND m.muted_user_id = c.author_id"
+                            + "   AND m.mute_stories)"
                             + " GROUP BY c.author_id"
                             + " ORDER BY MIN(c.tier) ASC, MIN(c.rank) ASC, c.author_id"
                             + " LIMIT :limit",

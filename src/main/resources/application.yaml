@@ -35,15 +35,15 @@ spring:
         stringtype: unspecified
   flyway:
     enabled: true
-    # The migration set is a contiguous V01-V111 sequence with no gaps; out-of-order would only
-    # suppress Flyway's own check against an out-of-order apply, which has no branch-merge
-    # workflow here to justify disabling.
+    # The migration set is the sequence V01-V149 with one deliberate gap, V144, whose file lives on
+    # a branch that has not been merged here. Out-of-order would only suppress Flyway's own check
+    # against an out-of-order apply, which has no branch-merge workflow here to justify disabling.
     out-of-order: false
     locations: classpath:db/migration
     postgresql:
-      # Required for the sixteen migrations that build indexes with CREATE INDEX CONCURRENTLY:
-      # V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109, V110.
-      # V57 was the first, and is the one the behaviour below was observed on.
+      # Required for every migration that builds or drops an index CONCURRENTLY; each carries a
+      # .sql.conf sidecar setting executeInTransaction=false. V57 was the first, and is the one
+      # the behaviour below was observed on.
       #
       # With the default (true), Flyway holds its schema-history lock inside an open transaction on
       # a second connection for the whole migration run. CREATE INDEX CONCURRENTLY waits for every

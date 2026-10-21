@@ -35,6 +35,7 @@ import com.app.modules.recommendation.rebuild.GorseRebuildRunRepository;
 import com.app.modules.recommendation.rebuild.GorseRebuildService;
 import com.app.modules.recommendation.rebuild.GorseRebuildSourceRepository;
 import com.app.modules.recommendation.rebuild.GorseRebuildSourceRepository.PostRow;
+import com.app.modules.recommendation.rebuild.GorseRebuildSourceRepository.UserPost;
 import com.app.modules.recommendation.rebuild.GorseRebuildStatus;
 import com.app.modules.recommendation.repository.UserEventAnalyticsRepository;
 import com.app.modules.recommendation.repository.UserEventAnalyticsRepository.FeedbackTotal;
@@ -328,23 +329,19 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
                 break;
             }
             List<FeedbackTotal> totals = userEvents.findFeedbackTotals(userIds);
-            Set<UUID> knownPosts =
-                    source.findExistingPostIds(totals.stream().map(FeedbackTotal::itemId).toList());
-            List<GorseFeedback> feedback = new ArrayList<>();
-            long skipped = 0;
-            for (FeedbackTotal total : totals) {
-                if (!knownPosts.contains(total.itemId())) {
-                    skipped++;
-                    continue;
-                }
-                feedback.add(
-                        new GorseFeedback(
-                                total.feedbackType(),
-                                total.userId().toString(),
-                                total.itemId().toString(),
-                                total.latest(),
-                                total.value()));
-            }
+            SelectedFeedback selected = select(userIds, totals);
+            List<GorseFeedback> feedback =
+                    selected.sendable().stream()
+                            .map(
+                                    total ->
+                                            new GorseFeedback(
+                                                    total.feedbackType(),
+                                                    total.userId().toString(),
+                                                    total.itemId().toString(),
+                                                    total.latest(),
+                                                    total.value()))
+                            .toList();
+            long skipped = selected.unknownPost() + selected.undoneNotInterested();
             int chunkSize = properties.feedbackBatchSize();
             for (int from = 0; from < feedback.size(); from += chunkSize) {
                 List<GorseFeedback> chunk =
@@ -356,13 +353,48 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
             run.setCheckpointId(userIds.get(userIds.size() - 1));
             runs.save(run);
             metrics.sent(GorseRebuildMetrics.Kind.FEEDBACK, feedback.size());
-            metrics.skippedUnknownPost(skipped);
+            metrics.skippedUnknownPost(selected.unknownPost());
+            metrics.skippedUndoneNotInterested(selected.undoneNotInterested());
             logBatch(run, run.getFeedbackSent());
             if (userIds.size() < userBatchSize) {
                 break;
             }
         }
         advance(run, GorseRebuildPhase.VERIFY);
+    }
+
+    /** The feedback of a batch of users that is worth sending, and why the rest is not. */
+    private record SelectedFeedback(
+            List<FeedbackTotal> sendable, long unknownPost, long undoneNotInterested) {}
+
+    // The ClickHouse sums are the truth for every feedback type except not_interested. Its table is
+    // append-only, so a mark that was later undone still has its row there, and sending that tuple
+    // would make Gorse stop recommending a post the viewer has since said they are interested in
+    // again. PostgreSQL holds the preference itself, and is read only when the batch has one.
+    private SelectedFeedback select(List<UUID> userIds, List<FeedbackTotal> totals) {
+        Set<UUID> knownPosts =
+                source.findExistingPostIds(totals.stream().map(FeedbackTotal::itemId).toList());
+        boolean hasNegative =
+                totals.stream()
+                        .anyMatch(
+                                total ->
+                                        GorseFeedback.NOT_INTERESTED_TYPE.equals(
+                                                total.feedbackType()));
+        Set<UserPost> standing = hasNegative ? source.findNotInterestedPairs(userIds) : Set.of();
+        List<FeedbackTotal> sendable = new ArrayList<>();
+        long unknownPost = 0;
+        long undone = 0;
+        for (FeedbackTotal total : totals) {
+            if (!knownPosts.contains(total.itemId())) {
+                unknownPost++;
+            } else if (GorseFeedback.NOT_INTERESTED_TYPE.equals(total.feedbackType())
+                    && !standing.contains(new UserPost(total.userId(), total.itemId()))) {
+                undone++;
+            } else {
+                sendable.add(total);
+            }
+        }
+        return new SelectedFeedback(sendable, unknownPost, undone);
     }
 
     // Compares what Gorse holds with PostgreSQL in both directions, then spot-checks feedback
@@ -448,10 +480,10 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
                 break;
             }
             List<FeedbackTotal> totals = userEvents.findFeedbackTotals(userIds);
-            Set<UUID> knownPosts =
-                    source.findExistingPostIds(totals.stream().map(FeedbackTotal::itemId).toList());
-            for (FeedbackTotal total : totals) {
-                if (sample.size() < VERIFY_FEEDBACK_SAMPLE && knownPosts.contains(total.itemId())) {
+            // The same selection the push applies, so a tuple the rebuild deliberately did not
+            // send is never looked for in Gorse.
+            for (FeedbackTotal total : select(userIds, totals).sendable()) {
+                if (sample.size() < VERIFY_FEEDBACK_SAMPLE) {
                     sample.add(total);
                 }
             }

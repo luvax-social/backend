@@ -9,6 +9,7 @@ import com.app.modules.post.dto.request.UpdatePostCaptionRequest;
 import com.app.modules.post.dto.response.FeedPostResponse;
 import com.app.modules.post.dto.response.PostEditHistoryResponse;
 import com.app.modules.post.dto.response.PostResponse;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.validation.PostTypeFilter;
 
 /** Domain API for post creation, retrieval, lifecycle, and caption edit history. */
@@ -151,7 +152,8 @@ public interface PostService {
             UUID viewerId, UUID targetUserId, PostTypeFilter typeFilter, String cursor, int size);
 
     /**
-     * Cursor-paginated chronological feed of published posts from accounts the viewer follows.
+     * Cursor-paginated chronological feed of published posts from accounts the viewer follows, with
+     * the viewer's own interaction preferences applied for the given surface.
      *
      * <p>Only accepted follow relationships contribute to the feed; pending follow requests are
      * excluded. Posts from any account involved in a block relationship with the viewer, in either
@@ -159,12 +161,24 @@ public interface PostService {
      * nobody or when all followed accounts are blocked. Posts are ordered by creation time, newest
      * first.
      *
+     * <p>Posts the viewer marked not interested are never returned, and neither are posts by
+     * accounts whose posts the viewer muted. Accounts the viewer asked to see fewer posts from are
+     * also left out on {@link FeedSurface#FOR_YOU_FALLBACK}, the chronological feed standing in for
+     * the ranked one, and are kept on {@link FeedSurface#FOLLOWING}. The cursor carries no surface,
+     * so the caller names it on every page: the ranked feed passes {@code FOR_YOU_FALLBACK} for the
+     * first fallback page and for each continuation page, which arrive at its own endpoint.
+     *
+     * <p>There is deliberately no overload that omits the surface: a caller that does not name one
+     * would silently inherit the Following rules.
+     *
      * @param viewerId authenticated viewer
      * @param cursor opaque base64 cursor from the previous page; null or blank for the first page
      * @param size requested page size, normalized to 1–100 with a default of 20
+     * @param surface the feed the page is served for
      * @return cursor page of feed posts ordered by creation time, newest first
      */
-    CursorPageResponse<FeedPostResponse> getFeed(UUID viewerId, String cursor, int size);
+    CursorPageResponse<FeedPostResponse> getFeed(
+            UUID viewerId, String cursor, int size, FeedSurface surface);
 
     /**
      * Cursor-paginated caption edit history of an owned post, newest first.

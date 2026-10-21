@@ -51,9 +51,9 @@ public interface AdminUserEventApi {
             description =
                     "Returns one cursor page of recorded behavioural events ordered by event time"
                             + " descending. Both bounds are required and the window may span at"
-                            + " most 30 days. Only session_start, search and profile_view are ever"
-                            + " produced; every other event_type value exists in the schema without"
-                            + " a writer. A search carries the term and the surface it ran against"
+                            + " most 30 days. Engagement, session, search and profile events are"
+                            + " listed; the private preference signals are never returned. A search"
+                            + " carries the term and the surface it ran against"
                             + " in its metadata; a profile view carries the viewed account as its"
                             + " target entity. Viewing one's own profile records nothing.")
     @ApiResponses({
@@ -64,7 +64,8 @@ public interface AdminUserEventApi {
                 responseCode = "400",
                 description =
                         "A bound is absent, 'to' is not after 'from', the window exceeds 30 days,"
-                                + " or the cursor is malformed",
+                                + " the cursor is malformed, or eventType names a private preference"
+                                + " signal",
                 content =
                         @Content(
                                 mediaType = "application/json",
@@ -117,8 +118,13 @@ public interface AdminUserEventApi {
                     OffsetDateTime to,
             @Parameter(
                             description =
-                                    "Restrict to one event type. Only session_start, search and"
-                                            + " profile_view can match anything.")
+                                    "Restrict to one event type. Any event type may be named except"
+                                            + " the private preference signals (account_mute,"
+                                            + " account_unmute, account_show_fewer,"
+                                            + " account_show_fewer_undo, post_not_interested,"
+                                            + " post_not_interested_undo and"
+                                            + " interaction_limit_change), which are refused with"
+                                            + " 400.")
                     @RequestParam(required = false)
                     UserEventType eventType,
             @Parameter(description = "Opaque cursor from a previous page")

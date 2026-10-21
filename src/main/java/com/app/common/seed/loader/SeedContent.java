@@ -6,6 +6,7 @@ import com.app.common.seed.model.BadgeSeed;
 import com.app.common.seed.model.CommentPoolSeed;
 import com.app.common.seed.model.ConversationSeed;
 import com.app.common.seed.model.HashtagSeed;
+import com.app.common.seed.model.InteractionControlSeed;
 import com.app.common.seed.model.MediaManifestEntry;
 import com.app.common.seed.model.ModerationCaseSeed;
 import com.app.common.seed.model.ModerationSupplementaryAction;
@@ -16,8 +17,8 @@ import com.app.common.seed.model.SupportTicketPoolSeed;
 import com.app.common.seed.model.UserSeed;
 
 /**
- * Aggregates every parsed seed JSON file into one immutable snapshot, handed to every domain writer
- * in Tasks 5-7.
+ * Aggregates every parsed seed JSON file into one immutable snapshot, handed to every domain
+ * writer.
  */
 public record SeedContent(
         List<PersonaSeed> personas,
@@ -31,4 +32,5 @@ public record SeedContent(
         List<ModerationSupplementaryReport> supplementaryModerationReports,
         List<MediaManifestEntry> mediaManifest,
         SupportTicketPoolSeed supportTicketPools,
-        BadgeSeed badges) {}
+        BadgeSeed badges,
+        InteractionControlSeed interactionControl) {}

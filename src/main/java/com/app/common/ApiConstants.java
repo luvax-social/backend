@@ -61,10 +61,12 @@ public final class ApiConstants {
         public static final String LIKES = "/{postId}/likes";
         public static final String SAVE = "/{postId}/save";
         public static final String SAVED = "/saved";
+        public static final String NOT_INTERESTED = "/{postId}/not-interested";
         public static final String VIEW = "/{postId}/view";
         public static final String LIKED = "/liked";
         public static final String SEARCH = "/search";
         public static final String COMMENTS = "/{postId}/comments";
+        public static final String HIDDEN_COMMENTS = "/{postId}/comments/hidden";
         public static final String FEED = "/feed";
         public static final String USER_POSTS = "/user/{userId}";
     }
@@ -78,6 +80,7 @@ public final class ApiConstants {
         public static final String REPLIES = "/{commentId}/replies";
         public static final String CONTEXT = "/{commentId}/context";
         public static final String DELETION_SCOPE = "/{commentId}/deletion-scope";
+        public static final String UNHIDE = "/{commentId}/unhide";
     }
 
     public static final class Stories {
@@ -105,6 +108,9 @@ public final class ApiConstants {
         public static final String FOLLOW_REQUEST_REJECT = "/follow-requests/{requesterId}/reject";
         public static final String BLOCK = "/block/{targetUserId}";
         public static final String BLOCKED = "/blocked";
+        public static final String SHOW_FEWER = "/show-fewer/{authorId}";
+        public static final String MUTES = "/mutes";
+        public static final String MUTE_BY_ID = "/mutes/{targetUserId}";
     }
 
     public static final class Messages {
@@ -120,6 +126,10 @@ public final class ApiConstants {
         public static final String PIN = "/{conversationId}/pin";
         public static final String MUTE = "/{conversationId}/mute";
         public static final String NICKNAME = "/{conversationId}/nickname";
+        public static final String ACCEPT = "/{conversationId}/accept";
+        public static final String REQUEST = "/{conversationId}/request";
+        public static final String BLOCK = "/{conversationId}/block";
+        public static final String REACTION = "/{conversationId}/messages/{messageId}/reaction";
     }
 
     public static final class Notifications {
@@ -250,6 +260,10 @@ public final class ApiConstants {
         public static final String RESTORE_STORY = "/stories/{storyId}/restore";
         public static final String REMOVE_MESSAGE = "/messages/{messageId}/remove";
         public static final String RESTORE_MESSAGE = "/messages/{messageId}/restore";
+        public static final String REMOVE_MESSAGE_REACTION =
+                "/message-reactions/{reactionId}/remove";
+        public static final String RESTORE_MESSAGE_REACTION =
+                "/message-reactions/{reactionId}/restore";
         public static final String RESOLVE_REPORT = "/reports/{reportId}/resolve";
         public static final String DISMISS_REPORT = "/reports/{reportId}/dismiss";
         public static final String ESCALATE_REPORT = "/reports/{reportId}/escalate";

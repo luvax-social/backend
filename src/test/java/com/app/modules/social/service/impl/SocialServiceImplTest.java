@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -14,6 +15,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,7 +30,9 @@ import com.app.common.exception.AppException;
 import com.app.common.response.CursorPageResponse;
 import com.app.common.response.UserListItemResponse;
 import com.app.common.response.UserSummaryResponse;
+import com.app.common.response.ViewerRelationshipResponse;
 import com.app.modules.message.service.DirectConversationProvisioner;
+import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.report.service.ReportedTargetService;
 import com.app.modules.social.dto.response.FollowRequestResponse;
 import com.app.modules.social.dto.response.FollowResponse;
@@ -37,9 +41,12 @@ import com.app.modules.social.entity.BlockId;
 import com.app.modules.social.entity.Follow;
 import com.app.modules.social.entity.FollowId;
 import com.app.modules.social.enums.FollowStatus;
+import com.app.modules.social.repository.AccountShowFewerRepository;
 import com.app.modules.social.repository.BlockRepository;
 import com.app.modules.social.repository.FollowRepository;
 import com.app.modules.social.repository.SocialUserRepository;
+import com.app.modules.social.repository.UserMuteRepository;
+import com.app.modules.social.repository.ViewerPreferenceProjection;
 import com.app.modules.social.service.SocialEventService;
 import com.app.modules.users.entity.User;
 import com.app.modules.users.service.UserSummaryService;
@@ -54,6 +61,8 @@ class SocialServiceImplTest {
     @Mock private UserSummaryService userSummaryService;
     @Mock private ReportedTargetService reportedTargetService;
     @Mock private DirectConversationProvisioner directConversationProvisioner;
+    @Mock private UserMuteRepository userMuteRepository;
+    @Mock private AccountShowFewerRepository accountShowFewerRepository;
 
     private SocialServiceImpl service;
 
@@ -67,7 +76,9 @@ class SocialServiceImplTest {
                         socialEventService,
                         userSummaryService,
                         reportedTargetService,
-                        directConversationProvisioner);
+                        directConversationProvisioner,
+                        userMuteRepository,
+                        accountShowFewerRepository);
     }
 
     @Test
@@ -444,6 +455,60 @@ class SocialServiceImplTest {
     }
 
     @Test
+    void blockUser_valid_deletesMutesAndShowFewerRowsInBothDirections() {
+        UUID current = UUID.randomUUID();
+        UUID target = UUID.randomUUID();
+        when(socialUserRepository.existsByIdAndDeletedAtIsNull(target)).thenReturn(true);
+        when(blockRepository.existsById(new BlockId(current, target))).thenReturn(false);
+
+        service.blockUser(current, target);
+
+        verify(userMuteRepository).deleteBetween(current, target);
+        verify(accountShowFewerRepository).deleteBetween(current, target);
+    }
+
+    @Test
+    void blockUser_alreadyBlocked_leavesMutesAndShowFewerRowsAlone() {
+        UUID current = UUID.randomUUID();
+        UUID target = UUID.randomUUID();
+        when(socialUserRepository.existsByIdAndDeletedAtIsNull(target)).thenReturn(true);
+        when(blockRepository.existsById(new BlockId(current, target))).thenReturn(true);
+
+        assertThatThrownBy(() -> service.blockUser(current, target))
+                .isInstanceOf(AppException.class);
+
+        verify(userMuteRepository, never()).deleteBetween(any(), any());
+        verify(accountShowFewerRepository, never()).deleteBetween(any(), any());
+    }
+
+    @Test
+    void loadRelationships_mutesAndShowFewer_fillFlagsFromOneExtraQuery() {
+        UUID viewer = UUID.randomUUID();
+        UUID mutedPosts = UUID.randomUUID();
+        UUID mutedBoth = UUID.randomUUID();
+        UUID fewer = UUID.randomUUID();
+        UUID untouched = UUID.randomUUID();
+        List<UUID> ids = List.of(mutedPosts, mutedBoth, fewer, untouched);
+        when(userMuteRepository.findViewerPreferences(eq(viewer), any()))
+                .thenReturn(
+                        List.of(
+                                preference(mutedPosts, true, false, false),
+                                preference(mutedBoth, true, true, false),
+                                preference(fewer, false, false, true)));
+
+        Map<UUID, ViewerRelationshipResponse> result = service.loadRelationships(viewer, ids);
+
+        assertThat(result.get(mutedPosts).isMutingPosts()).isTrue();
+        assertThat(result.get(mutedPosts).isMutingStories()).isFalse();
+        assertThat(result.get(mutedBoth).isMutingPosts()).isTrue();
+        assertThat(result.get(mutedBoth).isMutingStories()).isTrue();
+        assertThat(result.get(fewer).isShowingFewer()).isTrue();
+        assertThat(result.get(fewer).isMutingPosts()).isFalse();
+        assertThat(result.get(untouched)).isEqualTo(ViewerRelationshipResponse.NONE);
+        verify(userMuteRepository, times(1)).findViewerPreferences(eq(viewer), any());
+    }
+
+    @Test
     void unblockUser_notBlocked_throwsNotFound() {
         UUID current = UUID.randomUUID();
         UUID target = UUID.randomUUID();
@@ -725,5 +790,99 @@ class SocialServiceImplTest {
                 .status(status)
                 .createdAt(OffsetDateTime.now())
                 .build();
+    }
+
+    @Test
+    void findFeedSuppressedAuthors_followingSurface_readsOnlyMutedPostAuthorsAmongTheCandidates() {
+        UUID viewer = UUID.randomUUID();
+        UUID muted = UUID.randomUUID();
+        UUID kept = UUID.randomUUID();
+        UUID mutedButNotACandidate = UUID.randomUUID();
+        when(userMuteRepository.findFeedSuppressedAuthorIds(viewer, false))
+                .thenReturn(List.of(muted, mutedButNotACandidate));
+
+        Set<UUID> suppressed =
+                service.findFeedSuppressedAuthors(
+                        viewer, List.of(muted, kept, muted), FeedSurface.FOLLOWING);
+
+        assertThat(suppressed).containsExactly(muted);
+        verify(userMuteRepository, times(1)).findFeedSuppressedAuthorIds(viewer, false);
+        verify(userMuteRepository, never()).findFeedSuppressedAuthorIds(viewer, true);
+    }
+
+    @Test
+    void findFeedSuppressedAuthors_forYouAndFallbackSurfaces_alsoReadShowFewerAuthors() {
+        UUID viewer = UUID.randomUUID();
+        UUID muted = UUID.randomUUID();
+        UUID showFewer = UUID.randomUUID();
+        UUID kept = UUID.randomUUID();
+        when(userMuteRepository.findFeedSuppressedAuthorIds(viewer, true))
+                .thenReturn(List.of(muted, showFewer));
+
+        for (FeedSurface surface : List.of(FeedSurface.FOR_YOU, FeedSurface.FOR_YOU_FALLBACK)) {
+            assertThat(
+                            service.findFeedSuppressedAuthors(
+                                    viewer, List.of(muted, showFewer, kept), surface))
+                    .as("surface %s", surface)
+                    .containsExactlyInAnyOrder(muted, showFewer);
+        }
+        verify(userMuteRepository, never()).findFeedSuppressedAuthorIds(viewer, false);
+    }
+
+    @Test
+    void findFeedSuppressedAuthors_noCandidates_readsNothing() {
+        UUID viewer = UUID.randomUUID();
+
+        assertThat(service.findFeedSuppressedAuthors(viewer, List.of(), FeedSurface.FOR_YOU))
+                .isEmpty();
+        assertThat(service.findFeedSuppressedAuthors(viewer, null, FeedSurface.FOR_YOU)).isEmpty();
+
+        verifyNoInteractions(userMuteRepository);
+    }
+
+    @Test
+    void findFeedSuppressedAuthors_viewerHoldsNoPreference_returnsNothing() {
+        UUID viewer = UUID.randomUUID();
+        when(userMuteRepository.findFeedSuppressedAuthorIds(viewer, true)).thenReturn(List.of());
+
+        assertThat(
+                        service.findFeedSuppressedAuthors(
+                                viewer, List.of(UUID.randomUUID()), FeedSurface.FOR_YOU))
+                .isEmpty();
+    }
+
+    @Test
+    void findStoryMutedAuthors_returnsTheAccountsWhoseStoriesAreMuted() {
+        UUID viewer = UUID.randomUUID();
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        when(userMuteRepository.findStoryMutedAuthorIds(viewer)).thenReturn(List.of(first, second));
+
+        assertThat(service.findStoryMutedAuthors(viewer)).containsExactlyInAnyOrder(first, second);
+    }
+
+    private static ViewerPreferenceProjection preference(
+            UUID otherId, boolean mutePosts, boolean muteStories, boolean showFewer) {
+        return new ViewerPreferenceProjection() {
+            @Override
+            public UUID getOtherId() {
+                return otherId;
+            }
+
+            @Override
+            public boolean getMutePosts() {
+                return mutePosts;
+            }
+
+            @Override
+            public boolean getMuteStories() {
+                return muteStories;
+            }
+
+            @Override
+            public boolean getShowFewer() {
+                return showFewer;
+            }
+        };
     }
 }

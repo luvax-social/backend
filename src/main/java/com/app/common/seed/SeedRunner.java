@@ -44,9 +44,9 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Entry point that orchestrates the full seed pipeline on application startup: wipes every seedable
- * table, runs every domain writer from Tasks 5-7 in FK-safe order, emits the full seed event volume
- * through the real transactional outbox, then asserts every enum-typed column this pipeline is
- * supposed to exercise actually reaches a minimum row count per value.
+ * table, runs every domain writer in FK-safe order, emits the full seed event volume through the
+ * real transactional outbox, then asserts every enum-typed column this pipeline is supposed to
+ * exercise actually reaches a minimum row count per value.
  *
  * <p>Active under {@code dev} with {@code seed}, exactly as originally gated, and now also under
  * {@code prod} with {@code seed} - accepted for this project's staging-style deployment model,
@@ -62,9 +62,13 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class SeedRunner {
 
-    // The 17 enum-typed columns the plan names as the mandatory coverage set, paired with the
-    // table each lives on. Every value of every one of these enums must appear on at least
-    // MIN_ROWS_PER_ENUM_VALUE rows once a full seed run completes.
+    // The enum-typed columns every seed run must cover, paired with the table each lives on. Every
+    // value of every one of these enums must appear on at least MIN_ROWS_PER_ENUM_VALUE rows once a
+    // full seed run completes. The count is deliberately not written here: it is
+    // ENUM_COLUMNS.size(),
+    // which the coverage log line reports, and a number in a comment drifts the first time a column
+    // is
+    // added.
     private static final List<EnumColumn> ENUM_COLUMNS =
             List.of(
                     new EnumColumn("users", "status", "user_status"),
@@ -81,7 +85,10 @@ public class SeedRunner {
                     new EnumColumn("reports", "report_reason", "report_reason"),
                     new EnumColumn("notifications", "type", "notification_type"),
                     new EnumColumn("notifications", "category", "notification_category"),
-                    new EnumColumn("admin_actions", "action_type", "admin_action_type"));
+                    new EnumColumn("admin_actions", "action_type", "admin_action_type"),
+                    new EnumColumn("user_settings", "message_permission", "message_permission"),
+                    new EnumColumn(
+                            "conversations", "request_status", "conversation_request_status"));
 
     private static final int MIN_ROWS_PER_ENUM_VALUE = 5;
 
@@ -281,9 +288,9 @@ public class SeedRunner {
     }
 
     /**
-     * Queries every one of the 17 mandatory enum-typed columns and asserts every distinct value
-     * present in the column's PostgreSQL enum type has at least {@link #MIN_ROWS_PER_ENUM_VALUE}
-     * rows.
+     * Queries every mandatory enum-typed column in {@link #ENUM_COLUMNS} and asserts every distinct
+     * value present in the column's PostgreSQL enum type has at least {@link
+     * #MIN_ROWS_PER_ENUM_VALUE} rows.
      *
      * <p>A value that never appears at all is reported the same way as a value that appears but
      * falls short - both are shortfalls the seed content must fix, not a threshold to lower.
@@ -416,6 +423,13 @@ public class SeedRunner {
                         "user_warnings",
                         "user_strikes",
                         "hashtags",
+                        "user_mutes",
+                        "account_show_fewer",
+                        "interaction_limits",
+                        "user_hidden_words",
+                        "hidden_words",
+                        "post_not_interested",
+                        "message_reactions",
                         "support_tickets",
                         "verification_requests",
                         "outbox_events");

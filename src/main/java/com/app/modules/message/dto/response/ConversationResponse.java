@@ -18,4 +18,17 @@ public record ConversationResponse(
                 OffsetDateTime lastMessageAt,
         @Schema(description = "Creation timestamp.") OffsetDateTime createdAt,
         @Schema(description = "Whether the caller has pinned this conversation.") boolean pinned,
-        @Schema(description = "Whether the caller has muted this conversation.") boolean muted) {}
+        @Schema(description = "Whether the caller has muted this conversation.") boolean muted,
+        @Schema(
+                        description =
+                                "accepted, or pending while the recipient has not accepted. A"
+                                        + " declined request reads as pending to its sender.")
+                String requestStatus,
+        @Schema(description = "Whether the caller is the one asked to accept this request.")
+                boolean isRequestRecipient,
+        @Schema(
+                        description =
+                                "awaiting_acceptance when the caller is the sender of an"
+                                        + " unaccepted request and may not send another message;"
+                                        + " otherwise none.")
+                String sendRestriction) {}

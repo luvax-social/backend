@@ -14,6 +14,7 @@ import org.springframework.web.socket.config.annotation.WebSocketTransportRegist
 
 import com.app.common.security.websocket.BrokerSendGuardInterceptor;
 import com.app.common.security.websocket.SessionTrackingWebSocketHandlerDecoratorFactory;
+import com.app.common.security.websocket.WildcardSubscriptionGuardInterceptor;
 import com.app.modules.comment.live.CommentLiveBlockFilterInterceptor;
 import com.app.modules.comment.live.CommentWebSocketAuthInterceptor;
 import com.app.modules.notification.live.NotificationWebSocketAuthInterceptor;
@@ -50,6 +51,7 @@ import tools.jackson.databind.json.JsonMapper;
 public class WebSocketBrokerConfig implements WebSocketMessageBrokerConfigurer {
 
     private final BrokerSendGuardInterceptor brokerSendGuardInterceptor;
+    private final WildcardSubscriptionGuardInterceptor wildcardSubscriptionGuardInterceptor;
     private final CommentWebSocketAuthInterceptor commentAuthInterceptor;
     private final NotificationWebSocketAuthInterceptor notificationAuthInterceptor;
     private final SessionTrackingWebSocketHandlerDecoratorFactory sessionTrackingDecoratorFactory;
@@ -60,6 +62,7 @@ public class WebSocketBrokerConfig implements WebSocketMessageBrokerConfigurer {
 
     public WebSocketBrokerConfig(
             BrokerSendGuardInterceptor brokerSendGuardInterceptor,
+            WildcardSubscriptionGuardInterceptor wildcardSubscriptionGuardInterceptor,
             CommentWebSocketAuthInterceptor commentAuthInterceptor,
             NotificationWebSocketAuthInterceptor notificationAuthInterceptor,
             SessionTrackingWebSocketHandlerDecoratorFactory sessionTrackingDecoratorFactory,
@@ -68,6 +71,7 @@ public class WebSocketBrokerConfig implements WebSocketMessageBrokerConfigurer {
             PostLiveBlockFilterInterceptor postLiveBlockFilterInterceptor,
             JsonMapper jsonMapper) {
         this.brokerSendGuardInterceptor = brokerSendGuardInterceptor;
+        this.wildcardSubscriptionGuardInterceptor = wildcardSubscriptionGuardInterceptor;
         this.commentAuthInterceptor = commentAuthInterceptor;
         this.notificationAuthInterceptor = notificationAuthInterceptor;
         this.sessionTrackingDecoratorFactory = sessionTrackingDecoratorFactory;
@@ -105,9 +109,11 @@ public class WebSocketBrokerConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
         // brokerSendGuardInterceptor runs first so a forged SEND at a /topic/** destination is
-        // rejected before any module-specific interceptor logic runs.
+        // rejected before any module-specific interceptor logic runs; the wildcard guard follows
+        // so a pattern SUBSCRIBE, which no module guard owns, never reaches the broker.
         registration.interceptors(
                 brokerSendGuardInterceptor,
+                wildcardSubscriptionGuardInterceptor,
                 commentAuthInterceptor,
                 notificationAuthInterceptor,
                 postAuthInterceptor);

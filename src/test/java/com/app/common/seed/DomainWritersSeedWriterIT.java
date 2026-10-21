@@ -111,6 +111,8 @@ class DomainWritersSeedWriterIT {
     @Autowired private AnalyticsSeedWriter analyticsSeedWriter;
 
     private static final Instant REFERENCE_NOW = Instant.parse("2026-08-25T00:00:00Z");
+    private static final int AUTHORED_CONVERSATIONS = 85;
+    private static final int MESSAGE_REQUESTS = 25;
 
     @Test
     void write_seedsDomainWritersAgainstRealSchema() {
@@ -147,6 +149,299 @@ class DomainWritersSeedWriterIT {
         assertAnalyticsBucketsClosedBeforeReferenceNow();
         assertUserEventsEnqueuedForImport();
         assertUserEventsCoverEveryEventTypeValue();
+        assertHiddenCommentsMatchTheOwnersWordLists();
+        assertMessageRequestsCoverEveryStatusAndStayConsistent();
+        assertRepliesAndReactions();
+        assertReactionAndHiddenWordModeration();
+    }
+
+    // Each new admin action type reaches five rows, a reaction report is closed by the action that
+    // closed it, and the notification a removal sends names the reaction's owner.
+    private void assertReactionAndHiddenWordModeration() {
+        for (String actionType :
+                new String[] {
+                    "create_hidden_word",
+                    "edit_hidden_word",
+                    "delete_hidden_word",
+                    "remove_message_reaction",
+                    "restore_message_reaction"
+                }) {
+            assertThat(
+                            count(
+                                    "SELECT COUNT(*) FROM admin_actions WHERE action_type = ?::admin_action_type",
+                                    actionType))
+                    .as("admin actions of type %s", actionType)
+                    .isGreaterThanOrEqualTo(5);
+        }
+        assertThat(count("SELECT COUNT(*) FROM reports WHERE report_type = 'message_reaction'"))
+                .isGreaterThanOrEqualTo(5);
+        for (String status : new String[] {"pending", "reviewing", "resolved", "dismissed"}) {
+            assertThat(
+                            count(
+                                    "SELECT COUNT(*) FROM reports WHERE report_type ="
+                                            + " 'message_reaction' AND status ="
+                                            + " ?::report_status",
+                                    status))
+                    .as("message reaction reports with status %s", status)
+                    .isPositive();
+        }
+        // A reporter is the other participant, never the reactor.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM reports r JOIN message_reactions mr ON mr.id ="
+                                        + " r.entity_id JOIN messages m ON m.id = mr.message_id"
+                                        + " WHERE r.report_type = 'message_reaction' AND"
+                                        + " (r.reporter_id = mr.user_id OR NOT EXISTS (SELECT 1 FROM"
+                                        + " conversation_participants p WHERE p.conversation_id ="
+                                        + " m.conversation_id AND p.user_id = r.reporter_id))"))
+                .isZero();
+        // A removal resolves the report it was taken for, and no report is resolved before the
+        // action that resolved it.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a JOIN reports r ON r.id ="
+                                        + " a.report_id WHERE a.action_type ="
+                                        + " 'remove_message_reaction' AND (r.status <> 'resolved' OR"
+                                        + " r.reviewed_at <> a.created_at OR a.target_entity_id <>"
+                                        + " r.entity_id)"))
+                .isZero();
+        // The reaction a moderator left removed carries the tombstone; the ones restored do not.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM message_reactions WHERE admin_removed_at IS NOT NULL"))
+                .isEqualTo(1);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a WHERE a.action_type ="
+                                        + " 'restore_message_reaction' AND EXISTS (SELECT 1 FROM"
+                                        + " message_reactions mr WHERE mr.id = a.target_entity_id AND"
+                                        + " mr.admin_removed_at IS NOT NULL)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions r JOIN admin_actions d ON"
+                                        + " d.target_entity_id = r.target_entity_id AND d.action_type"
+                                        + " = 'remove_message_reaction' WHERE r.action_type ="
+                                        + " 'restore_message_reaction' AND r.created_at <="
+                                        + " d.created_at"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM notifications n JOIN admin_actions a ON a.id ="
+                                        + " n.admin_action_id JOIN message_reactions mr ON mr.id ="
+                                        + " a.target_entity_id WHERE n.type = 'reaction_removed' AND"
+                                        + " n.recipient_id = mr.user_id AND n.category = 'system'"))
+                .isEqualTo(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions WHERE action_type ="
+                                        + " 'remove_message_reaction'"))
+                .isGreaterThanOrEqualTo(5);
+        // Hidden Words audit history matches the lists: an edit and a create name a stored entry,
+        // a delete names one that is gone, and every audit row records the phrase.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a WHERE a.action_type IN"
+                                        + " ('create_hidden_word', 'edit_hidden_word',"
+                                        + " 'delete_hidden_word') AND (a.target_entity_type <>"
+                                        + " 'hidden_word' OR a.metadata->>'phrase' IS NULL OR"
+                                        + " a.report_id IS NOT NULL OR a.target_user_id IS NOT NULL)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a WHERE a.action_type ="
+                                        + " 'delete_hidden_word' AND EXISTS (SELECT 1 FROM"
+                                        + " hidden_words h WHERE h.id = a.target_entity_id)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM admin_actions a WHERE a.action_type ="
+                                        + " 'edit_hidden_word' AND NOT EXISTS (SELECT 1 FROM"
+                                        + " hidden_words h WHERE h.id = a.target_entity_id AND"
+                                        + " h.phrase = a.metadata->>'phrase')"))
+                .isZero();
+        assertThat(count("SELECT COUNT(*) FROM hidden_words"))
+                .isEqualTo(
+                        count(
+                                        "SELECT COUNT(*) FROM admin_actions WHERE action_type ="
+                                                + " 'create_hidden_word'")
+                                - count(
+                                        "SELECT COUNT(*) FROM admin_actions WHERE action_type ="
+                                                + " 'delete_hidden_word'"));
+    }
+
+    // Every request status reaches five rows, and a request sits between two accounts with no
+    // follow or block, as the rules that route a first message assume.
+    private void assertMessageRequestsCoverEveryStatusAndStayConsistent() {
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations WHERE request_status ="
+                                        + " 'pending' AND NOT request_hidden"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations WHERE request_status ="
+                                        + " 'pending' AND request_hidden"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(count("SELECT COUNT(*) FROM conversations WHERE request_status = 'declined'"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations WHERE request_status ="
+                                        + " 'accepted' AND request_recipient_id IS NOT NULL"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations WHERE request_recipient_id IS"
+                                        + " NOT NULL"))
+                .isEqualTo(MESSAGE_REQUESTS);
+
+        // A recipient only receives requests while allowing everyone to write.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN user_settings s ON"
+                                        + " s.user_id = c.request_recipient_id WHERE"
+                                        + " s.message_permission <> 'everyone'"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN conversation_participants p"
+                                        + " ON p.conversation_id = c.id AND p.user_id <>"
+                                        + " c.request_recipient_id WHERE c.request_recipient_id IS"
+                                        + " NOT NULL AND (EXISTS (SELECT 1 FROM follows f WHERE"
+                                        + " (f.follower_id = p.user_id AND f.following_id ="
+                                        + " c.request_recipient_id) OR (f.follower_id ="
+                                        + " c.request_recipient_id AND f.following_id = p.user_id))"
+                                        + " OR EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id ="
+                                        + " p.user_id AND b.blocked_id = c.request_recipient_id) OR"
+                                        + " (b.blocker_id = c.request_recipient_id AND b.blocked_id"
+                                        + " = p.user_id)))"))
+                .isZero();
+
+        // An open or declined request holds the requester's one text message and nothing else, so
+        // a declined request shows its sender exactly what a pending one does.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c WHERE c.request_status IN"
+                                        + " ('pending', 'declined') AND (SELECT COUNT(*) FROM"
+                                        + " messages m WHERE m.conversation_id = c.id) <> 1"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN messages m ON"
+                                        + " m.conversation_id = c.id WHERE c.request_status IN"
+                                        + " ('pending', 'declined') AND (m.sender_id ="
+                                        + " c.request_recipient_id OR m.message_type <> 'text' OR"
+                                        + " m.is_deleted OR m.admin_removed_at IS NOT NULL)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c WHERE c.request_status ="
+                                        + " 'declined' AND (c.request_resolved_at IS NULL OR"
+                                        + " c.request_hidden)"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN conversation_participants"
+                                        + " p ON p.conversation_id = c.id WHERE c.request_status ="
+                                        + " 'declined' AND ((p.user_id = c.request_recipient_id) <>"
+                                        + " (p.left_at IS NOT NULL))"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN conversation_participants"
+                                        + " p ON p.conversation_id = c.id WHERE c.request_status IN"
+                                        + " ('pending', 'accepted') AND p.left_at IS NOT NULL AND"
+                                        + " c.request_recipient_id IS NOT NULL"))
+                .isZero();
+        // An accepted request was answered, and the answer quotes the request.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c WHERE c.request_status ="
+                                        + " 'accepted' AND c.request_recipient_id IS NOT NULL AND"
+                                        + " NOT EXISTS (SELECT 1 FROM messages m JOIN messages q ON"
+                                        + " q.id = m.reply_to_id WHERE m.conversation_id = c.id AND"
+                                        + " m.sender_id = c.request_recipient_id)"))
+                .isZero();
+        // A hidden request is hidden for a reason the recipient's rules explain: a personal or
+        // platform word in the message, or an active limit.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM conversations c JOIN messages m ON"
+                                        + " m.conversation_id = c.id WHERE c.request_hidden AND NOT"
+                                        + " EXISTS (SELECT 1 FROM user_hidden_words w WHERE w.user_id"
+                                        + " = c.request_recipient_id AND lower(m.content) LIKE '%' ||"
+                                        + " w.normalized_phrase || '%') AND NOT EXISTS (SELECT 1 FROM"
+                                        + " interaction_limits l WHERE l.user_id ="
+                                        + " c.request_recipient_id AND l.expires_at > ?)"
+                                        + " AND NOT EXISTS (SELECT 1 FROM hidden_words h WHERE"
+                                        + " lower(m.content) LIKE '%' || h.normalized_phrase ||"
+                                        + " '%')",
+                                java.sql.Timestamp.from(REFERENCE_NOW)))
+                .isZero();
+        // Nothing reads as a message from the future.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM messages WHERE created_at > ?",
+                                java.sql.Timestamp.from(REFERENCE_NOW)))
+                .isZero();
+    }
+
+    // Reply quotes point inside their own conversation, and reactions are one per participant per
+    // message, never dated before the message, and include some on a message that was deleted or
+    // removed by moderation.
+    private void assertRepliesAndReactions() {
+        assertThat(count("SELECT COUNT(*) FROM messages WHERE reply_to_id IS NOT NULL"))
+                .isGreaterThanOrEqualTo(12 + 5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM messages m JOIN messages q ON q.id ="
+                                        + " m.reply_to_id WHERE q.conversation_id <>"
+                                        + " m.conversation_id OR q.created_at > m.created_at"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM messages m JOIN messages q ON q.id ="
+                                        + " m.reply_to_id WHERE q.is_deleted OR q.admin_removed_at IS"
+                                        + " NOT NULL"))
+                .isGreaterThanOrEqualTo(3);
+        assertThat(count("SELECT COUNT(*) FROM message_reactions")).isGreaterThanOrEqualTo(30);
+        assertThat(count("SELECT COUNT(DISTINCT emoji) FROM message_reactions"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM message_reactions r JOIN messages m ON m.id ="
+                                        + " r.message_id WHERE m.is_deleted OR m.admin_removed_at IS"
+                                        + " NOT NULL"))
+                .isGreaterThanOrEqualTo(1);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM message_reactions r JOIN messages m ON m.id ="
+                                        + " r.message_id WHERE r.reacted_at < m.created_at OR"
+                                        + " r.reacted_at > ?",
+                                java.sql.Timestamp.from(REFERENCE_NOW)))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM message_reactions r JOIN messages m ON m.id ="
+                                        + " r.message_id WHERE NOT EXISTS (SELECT 1 FROM"
+                                        + " conversation_participants p WHERE p.conversation_id ="
+                                        + " m.conversation_id AND p.user_id = r.user_id)"))
+                .isZero();
+    }
+
+    // Hidden Words filter at write time, so each comment hidden for that reason really contains an
+    // entry of the post owner's list or of the platform list.
+    private void assertHiddenCommentsMatchTheOwnersWordLists() {
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM comments c JOIN posts p ON p.id = c.post_id"
+                                        + " WHERE c.hidden_reason = 'hidden_words' AND NOT EXISTS"
+                                        + " (SELECT 1 FROM user_hidden_words w WHERE w.user_id ="
+                                        + " p.user_id AND lower(c.content) LIKE '%' ||"
+                                        + " w.normalized_phrase || '%') AND NOT EXISTS (SELECT 1"
+                                        + " FROM hidden_words h WHERE lower(c.content) LIKE '%' ||"
+                                        + " h.normalized_phrase || '%')"))
+                .isZero();
     }
 
     // Step 1's hardest invariant: every live story's created_at is within 24h of referenceNow,
@@ -209,7 +504,7 @@ class DomainWritersSeedWriterIT {
 
         Integer conversationCount =
                 jdbcTemplate.queryForObject("SELECT COUNT(*) FROM conversations", Integer.class);
-        assertThat(conversationCount).isEqualTo(85);
+        assertThat(conversationCount).isEqualTo(AUTHORED_CONVERSATIONS + MESSAGE_REQUESTS);
 
         Integer messageCount =
                 jdbcTemplate.queryForObject("SELECT COUNT(*) FROM messages", Integer.class);
@@ -222,7 +517,7 @@ class DomainWritersSeedWriterIT {
         Integer directPairKeyCount =
                 jdbcTemplate.queryForObject(
                         "SELECT COUNT(DISTINCT direct_pair_key) FROM conversations", Integer.class);
-        assertThat(directPairKeyCount).isEqualTo(85);
+        assertThat(directPairKeyCount).isEqualTo(AUTHORED_CONVERSATIONS + MESSAGE_REQUESTS);
     }
 
     private void assertNotificationCreatedAtWritten() {
@@ -364,8 +659,8 @@ class DomainWritersSeedWriterIT {
                 .isTrue();
     }
 
-    private int count(String sql) {
-        Integer value = jdbcTemplate.queryForObject(sql, Integer.class);
+    private int count(String sql, Object... args) {
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class, args);
         return value == null ? 0 : value;
     }
 
@@ -451,30 +746,31 @@ class DomainWritersSeedWriterIT {
                         "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
                                 + " 'recommendation.user-event.imported.v1'",
                         Integer.class);
-        assertThat(enqueued).isEqualTo(10_000);
+        // 10,000 random behavioural events plus the signals of the seeded interaction control rows.
+        assertThat(enqueued).isGreaterThan(10_000);
         Integer distinct =
                 jdbcTemplate.queryForObject(
                         "SELECT COUNT(DISTINCT event_id) FROM outbox_events WHERE event_type ="
                                 + " 'recommendation.user-event.imported.v1'",
                         Integer.class);
-        assertThat(distinct).isEqualTo(10_000);
+        assertThat(distinct).isEqualTo(enqueued);
         Integer outsideRetention =
                 jdbcTemplate.queryForObject(
                         "SELECT COUNT(*) FROM outbox_events WHERE event_type ="
                                 + " 'recommendation.user-event.imported.v1'"
                                 + " AND (payload->'data'->>'createdAt')::timestamptz < ?",
                         Integer.class,
-                        java.sql.Timestamp.from(REFERENCE_NOW.minus(Duration.ofDays(91))));
+                        java.sql.Timestamp.from(REFERENCE_NOW.minus(Duration.ofDays(361))));
         assertThat(outsideRetention).isZero();
     }
 
     // Reproduces the coverage SeedRunner.assertEnumCoverage() used to require of the PostgreSQL
     // table: every event type must have at least 5 events once a full seed run completes.
     // AnalyticsSeedWriter is the only writer that produces them synchronously, so this is a direct
-    // proof that WEIGHTED_EVENT_TYPES and resolveEntityRef cover every value it owns. post_view is
-    // deliberately absent from that list and from this assertion: it is produced by the
-    // recommendation consumer draining post.viewed.v1, which happens asynchronously and does not
-    // run in this writers-only test.
+    // proof that WEIGHTED_EVENT_TYPES and resolveEntityRef cover every value it owns. The values in
+    // AnalyticsSeedWriter.UNSEEDED_TYPES are deliberately absent from that list and from this
+    // assertion: post_view is produced by the recommendation consumer draining post.viewed.v1,
+    // which happens asynchronously and does not run in this writers-only test.
     private void assertUserEventsCoverEveryEventTypeValue() {
         Map<String, Integer> countsByEventType =
                 jdbcTemplate
@@ -491,7 +787,7 @@ class DomainWritersSeedWriterIT {
                                         Map.Entry::getKey, Map.Entry::getValue));
 
         for (UserEventType type : UserEventType.values()) {
-            if (type == UserEventType.POST_VIEW) {
+            if (AnalyticsSeedWriter.UNSEEDED_TYPES.contains(type)) {
                 continue;
             }
             assertThat(countsByEventType.getOrDefault(type.toJson(), 0))

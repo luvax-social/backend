@@ -664,6 +664,65 @@ class OpenApiContractIT {
                         Arrays.stream(PlatformMetric.values()).map(PlatformMetric::key).toList());
     }
 
+    // A 429 is declared only where a rate limiter can produce one. The mute list endpoint carries
+    // a @RateLimiter and keeps its declaration; setting and removing a mute and the two show-fewer
+    // endpoints have none, so declaring it there promised an answer they cannot give.
+    @Test
+    void muteAndShowFewerWriteOperationsWithoutARateLimiterDeclareNo429() {
+        Map<String, JsonNode> operations = new java.util.HashMap<>();
+        forEachOperation(document(), operations::put);
+
+        for (String operationId :
+                List.of(
+                        "PUT /api/v1/social/mutes/{targetUserId}",
+                        "DELETE /api/v1/social/mutes/{targetUserId}",
+                        "POST /api/v1/social/show-fewer/{authorId}",
+                        "DELETE /api/v1/social/show-fewer/{authorId}")) {
+            JsonNode operation = operations.get(operationId);
+            assertThat(operation).as("%s must exist", operationId).isNotNull();
+            assertThat(operation.path("responses").has("429"))
+                    .as("%s declares no 429", operationId)
+                    .isFalse();
+        }
+        assertThat(operations.get("GET /api/v1/social/mutes").path("responses").has("429"))
+                .as("the rate-limited mute list keeps its 429")
+                .isTrue();
+    }
+
+    @Test
+    void activityLogEventTypeFilterOffersNoPrivatePreferenceSignal() {
+        JsonNode parameters =
+                document()
+                        .path("paths")
+                        .path("/api/v1/admin/user-events")
+                        .path("get")
+                        .path("parameters");
+        JsonNode eventTypeSchema = null;
+        for (JsonNode parameter : parameters) {
+            if ("eventType".equals(parameter.path("name").asString(""))) {
+                eventTypeSchema = parameter.path("schema");
+            }
+        }
+        assertThat(eventTypeSchema).as("the eventType parameter must be declared").isNotNull();
+
+        List<String> values = new ArrayList<>();
+        eventTypeSchema.path("enum").forEach(node -> values.add(node.asString("")));
+
+        assertThat(values)
+                .as("the activity log filter must still offer the types it can return")
+                .contains("session_start", "search", "profile_view", "message_reaction");
+        assertThat(values)
+                .as("private preference signals must not be offered as a filter")
+                .doesNotContain(
+                        "account_mute",
+                        "account_unmute",
+                        "account_show_fewer",
+                        "account_show_fewer_undo",
+                        "post_not_interested",
+                        "post_not_interested_undo",
+                        "interaction_limit_change");
+    }
+
     @Test
     void theDocumentPointsAtTheRealTimeSurfaceItCannotDescribe() {
         JsonNode doc = document();

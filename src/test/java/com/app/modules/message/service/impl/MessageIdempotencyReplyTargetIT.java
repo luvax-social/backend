@@ -149,6 +149,13 @@ class MessageIdempotencyReplyTargetIT {
     }
 
     private UUID createDirect(TestUser actor, UUID targetId) {
+        // These tests send several messages, so the conversation must be accepted, which a follow
+        // by
+        // the recipient gives
+        jdbc.update(
+                "INSERT INTO follows(follower_id, following_id, status) VALUES (?, ?, 'accepted')",
+                targetId,
+                actor.id());
         ResponseEntity<Map> response =
                 rest.exchange(
                         "/api/v1/conversations",

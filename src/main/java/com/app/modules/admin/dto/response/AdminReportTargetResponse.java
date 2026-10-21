@@ -30,6 +30,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param mediaUrls CDN URLs of the attached media, in carousel order; empty when there is none
  * @param removed whether the entity is already soft-deleted, so a moderator does not act twice
  * @param createdAt when the entity was created
+ * @param emoji the emoji of a reported message reaction, whose {@code ownerId} is the reactor and
+ *     whose {@code text} is a snippet of the message it sits on; null for every other type
  */
 @Schema(description = "A reported entity rendered for moderation review")
 public record AdminReportTargetResponse(
@@ -64,4 +66,10 @@ public record AdminReportTargetResponse(
                                         + " there is none")
                 List<String> mediaUrls,
         @Schema(description = "Whether the entity is already soft-deleted") boolean removed,
-        @Schema(description = "When the entity was created") OffsetDateTime createdAt) {}
+        @Schema(description = "When the entity was created") OffsetDateTime createdAt,
+        @Schema(
+                        description =
+                                "The emoji of a reported message reaction; null for every other"
+                                        + " type",
+                        nullable = true)
+                String emoji) {}

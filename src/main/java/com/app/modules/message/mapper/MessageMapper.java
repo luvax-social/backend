@@ -2,19 +2,27 @@ package com.app.modules.message.mapper;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
+import com.app.common.text.Snippets;
 import com.app.modules.media.entity.MediaAsset;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
+import com.app.modules.message.dto.response.LastReactionPreviewResponse;
 import com.app.modules.message.dto.response.MessageMediaResponse;
+import com.app.modules.message.dto.response.MessageReactionResponse;
 import com.app.modules.message.dto.response.MessageResponse;
 import com.app.modules.message.dto.response.ParticipantResponse;
+import com.app.modules.message.dto.response.ReplyPreviewResponse;
 import com.app.modules.message.entity.Conversation;
 import com.app.modules.message.entity.ConversationParticipant;
 import com.app.modules.message.entity.Message;
+import com.app.modules.message.entity.MessageReaction;
+import com.app.modules.message.enums.MessageType;
 import com.app.modules.users.entity.User;
 
 /** Maps conversation and participant entities to API response DTOs. */
@@ -46,13 +54,22 @@ public interface MessageMapper {
      * @param participants active and former members, already hydrated
      * @param pinned whether the requesting caller has pinned this conversation
      * @param muted whether the requesting caller has muted this conversation
+     * @param requestStatusLabel the request status as the caller may see it
+     * @param recipientOfRequest whether the caller is the one asked to accept the request
+     * @param sendRestrictionLabel whether the caller may not send another message yet
      * @return the conversation detail response
      */
+    @Mapping(source = "requestStatusLabel", target = "requestStatus")
+    @Mapping(source = "recipientOfRequest", target = "isRequestRecipient")
+    @Mapping(source = "sendRestrictionLabel", target = "sendRestriction")
     ConversationResponse toConversationResponse(
             Conversation conversation,
             List<ParticipantResponse> participants,
             boolean pinned,
-            boolean muted);
+            boolean muted,
+            String requestStatusLabel,
+            boolean recipientOfRequest,
+            String sendRestrictionLabel);
 
     /**
      * Builds one conversation-list row from the entity, its active participants, a
@@ -66,9 +83,19 @@ public interface MessageMapper {
      * @param pinned whether the requesting caller has pinned this conversation
      * @param muted whether the requesting caller has muted this conversation
      * @param manuallyUnread whether the requesting caller manually flagged this conversation unread
+     * @param requestStatusLabel the request status as the caller may see it
+     * @param recipientOfRequest whether the caller is the one asked to accept the request
+     * @param hiddenRequest whether the caller, as recipient, has the request filed as hidden
+     * @param sendRestrictionLabel whether the caller may not send another message yet
+     * @param lastReaction the newest reaction the caller may see when it is newer than the last
+     *     message, or null
      * @return the conversation summary response
      */
     @Mapping(source = "conversation.id", target = "id")
+    @Mapping(source = "requestStatusLabel", target = "requestStatus")
+    @Mapping(source = "recipientOfRequest", target = "isRequestRecipient")
+    @Mapping(source = "hiddenRequest", target = "requestHidden")
+    @Mapping(source = "sendRestrictionLabel", target = "sendRestriction")
     ConversationSummaryResponse toSummaryResponse(
             Conversation conversation,
             List<ParticipantResponse> participants,
@@ -76,7 +103,12 @@ public interface MessageMapper {
             MessageResponse lastMessage,
             boolean pinned,
             boolean muted,
-            boolean manuallyUnread);
+            boolean manuallyUnread,
+            String requestStatusLabel,
+            boolean recipientOfRequest,
+            boolean hiddenRequest,
+            String sendRestrictionLabel,
+            LastReactionPreviewResponse lastReaction);
 
     /**
      * Projects a message entity onto its API response shape, including a tombstoned one.
@@ -109,14 +141,59 @@ public interface MessageMapper {
      * @return the message response
      */
     default MessageResponse toMessageResponse(Message message, MessageMediaResponse media) {
+        return toMessageResponse(message, media, null);
+    }
+
+    /**
+     * Projects a message with its resolved media and the parents its reply preview reads.
+     *
+     * <p>The parents arrive as one batched lookup per page, tombstoned rows included, so the
+     * preview of a reply to a deleted or removed message can say so instead of vanishing. A null
+     * map means the caller did not resolve parents and the preview is left out.
+     *
+     * @param message the source message
+     * @param media the resolved attachment, or null when the message carries none
+     * @param replyParents the parents of the rendered messages keyed by id, or null
+     * @return the message response
+     */
+    default MessageResponse toMessageResponse(
+            Message message, MessageMediaResponse media, Map<UUID, Message> replyParents) {
+        return toMessageResponse(message, media, replyParents, null);
+    }
+
+    /**
+     * Projects a message with its resolved media, reply parents and visible reactions.
+     *
+     * <p>A message that is no longer shown carries no reactions whatever the caller passes, so a
+     * stale lookup can never serve reactions beside a tombstone.
+     *
+     * @param message the source message
+     * @param media the resolved attachment, or null when the message carries none
+     * @param replyParents the parents of the rendered messages keyed by id, or null
+     * @param reactions the reactions the caller may see on this message, or null for none
+     * @return the message response
+     */
+    default MessageResponse toMessageResponse(
+            Message message,
+            MessageMediaResponse media,
+            Map<UUID, Message> replyParents,
+            List<MessageReactionResponse> reactions) {
         if (message == null) {
             return null;
         }
         boolean adminRemoved = message.getAdminRemovedAt() != null;
+        boolean tombstoned = message.isDeleted() || adminRemoved;
         OffsetDateTime tombstonedAt =
                 message.getDeletedAt() != null
                         ? message.getDeletedAt()
                         : message.getAdminRemovedAt();
+        // A message that is itself no longer shown carries no preview: the placeholder it renders
+        // as has nothing to quote.
+        ReplyPreviewResponse replyTo =
+                message.getReplyToId() == null || replyParents == null || tombstoned
+                        ? null
+                        : toReplyPreview(
+                                message.getReplyToId(), replyParents.get(message.getReplyToId()));
         return new MessageResponse(
                 message.getId(),
                 message.getConversationId(),
@@ -128,9 +205,52 @@ public interface MessageMapper {
                 adminRemoved ? null : message.getSharedPostId(),
                 adminRemoved ? null : message.getSharedStoryId(),
                 message.getReplyToId(),
-                message.isDeleted() || adminRemoved,
+                replyTo,
+                tombstoned,
                 tombstonedAt,
-                message.getCreatedAt());
+                message.getCreatedAt(),
+                tombstoned ? List.of() : reactions);
+    }
+
+    /**
+     * Builds the preview of a replied-to message.
+     *
+     * <p>Either tombstone makes the parent unavailable and withholds everything but its id; a
+     * restore clears the moderation tombstone, so the next read shows the snippet again. Only a
+     * text parent has a snippet, because an image or a share has no text to quote.
+     *
+     * @param replyToId the id the reply points at
+     * @param parent the parent row, or null when it no longer exists
+     * @return the preview
+     */
+    default ReplyPreviewResponse toReplyPreview(UUID replyToId, Message parent) {
+        boolean unavailable =
+                parent == null || parent.isDeleted() || parent.getAdminRemovedAt() != null;
+        // Every unavailable parent looks the same, so the preview cannot tell a deletion from a
+        // removal or from a missing row, and it carries nothing of the withheld message.
+        if (unavailable) {
+            return new ReplyPreviewResponse(replyToId, null, null, null, true);
+        }
+        String snippet =
+                parent.getMessageType() == MessageType.TEXT
+                        ? Snippets.of(parent.getContent())
+                        : null;
+        return new ReplyPreviewResponse(
+                parent.getId(), parent.getSenderId(), parent.getMessageType(), snippet, false);
+    }
+
+    /**
+     * Projects a reaction onto its response shape.
+     *
+     * @param reaction the stored reaction
+     * @return the reaction response
+     */
+    default MessageReactionResponse toReactionResponse(MessageReaction reaction) {
+        return new MessageReactionResponse(
+                reaction.getId(),
+                reaction.getUserId(),
+                reaction.getEmoji(),
+                reaction.getReactedAt());
     }
 
     /**

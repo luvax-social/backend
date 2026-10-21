@@ -108,6 +108,7 @@ public enum ApiErrorCode {
     POST_FORBIDDEN("POST_FORBIDDEN", "You do not have access to this post", HttpStatus.FORBIDDEN),
     POST_ALREADY_LIKED("POST_ALREADY_LIKED", "Post already liked", HttpStatus.CONFLICT),
     POST_ALREADY_SAVED("POST_ALREADY_SAVED", "Post already saved", HttpStatus.CONFLICT),
+    POST_FEEDBACK_SELF("POST_FEEDBACK_SELF", "You cannot mark your own post as not interested", HttpStatus.BAD_REQUEST),
     // 422 rather than 400: the caption is syntactically fine and the request is well formed, but a
     // tag it names is one an administrator has taken out of circulation. The response body carries
     // the offending names under data.bannedTags, in normalized form, so a client can highlight them
@@ -123,6 +124,7 @@ public enum ApiErrorCode {
     COMMENT_NOT_LIKED("COMMENT_NOT_LIKED", "Comment has not been liked", HttpStatus.CONFLICT),
     COMMENT_SLOW_MODE_ACTIVE("COMMENT_SLOW_MODE_ACTIVE", "Slow mode is active. Please wait before commenting again.", HttpStatus.TOO_MANY_REQUESTS),
     COMMENT_IDEMPOTENCY_CONFLICT("COMMENT_IDEMPOTENCY_CONFLICT", "Idempotency key reused with different request payload", HttpStatus.CONFLICT),
+    COMMENT_PARENT_STILL_HIDDEN("COMMENT_PARENT_STILL_HIDDEN", "The comment this replies to is still hidden", HttpStatus.CONFLICT),
     POST_COMMENTING_RESTRICTED("POST_COMMENTING_RESTRICTED", "You do not have access to comment on this post", HttpStatus.FORBIDDEN),
 
     // Story
@@ -140,6 +142,8 @@ public enum ApiErrorCode {
     MESSAGE_FORBIDDEN("MESSAGE_FORBIDDEN", "You do not have access to this message", HttpStatus.FORBIDDEN),
     MESSAGE_INVALID_PAYLOAD("MESSAGE_INVALID_PAYLOAD", "Message payload does not match its type", HttpStatus.BAD_REQUEST),
     MESSAGE_IDEMPOTENCY_CONFLICT("MESSAGE_IDEMPOTENCY_CONFLICT", "Idempotency key reused with a different payload", HttpStatus.CONFLICT),
+    MESSAGE_REQUEST_AWAITING_ACCEPTANCE("MESSAGE_REQUEST_AWAITING_ACCEPTANCE", "This message request has not been accepted yet", HttpStatus.CONFLICT),
+    MESSAGE_REACTION_INVALID_EMOJI("MESSAGE_REACTION_INVALID_EMOJI", "A reaction must be exactly one emoji", HttpStatus.BAD_REQUEST),
 
     // Report
     REPORT_NOT_FOUND("REPORT_NOT_FOUND", "Report not found", HttpStatus.NOT_FOUND),

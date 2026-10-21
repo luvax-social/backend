@@ -153,7 +153,8 @@
       "banner_media_ref": null,
       "post_count_target": 14,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "following"
     },
     {
       "username": "ryan.walsh94",
@@ -187,7 +188,8 @@
       "banner_media_ref": null,
       "post_count_target": 13,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "nobody"
     },
     {
       "username": "henry.devops",
@@ -255,7 +257,8 @@
       "banner_media_ref": null,
       "post_count_target": 4,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "hidden_words_system_enabled": false
     },
     {
       "username": "derek.freelancedev",
@@ -272,7 +275,8 @@
       "banner_media_ref": null,
       "post_count_target": 16,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "hidden_words_system_enabled": false
     },
     {
       "username": "tyler.sysadmin",
@@ -289,7 +293,8 @@
       "banner_media_ref": null,
       "post_count_target": 10,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "hidden_words_system_enabled": false
     },
     {
       "username": "leo.embedded",
@@ -306,7 +311,8 @@
       "banner_media_ref": null,
       "post_count_target": 3,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "hidden_words_system_enabled": false
     },
     {
       "username": "sam.dataeng",
@@ -323,7 +329,8 @@
       "banner_media_ref": null,
       "post_count_target": 8,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "hidden_words_system_enabled": false
     },
     {
       "username": "sophieg.design",
@@ -357,7 +364,8 @@
       "banner_media_ref": null,
       "post_count_target": 14,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "following"
     },
     {
       "username": "blake.design",
@@ -561,7 +569,8 @@
       "banner_media_ref": null,
       "post_count_target": 2,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "nobody"
     },
     {
       "username": "yuna.study",
@@ -578,7 +587,8 @@
       "banner_media_ref": null,
       "post_count_target": 5,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "following"
     },
     {
       "username": "phil.senior4",
@@ -595,7 +605,8 @@
       "banner_media_ref": null,
       "post_count_target": 12,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "hidden_words_system_enabled": false
     },
     {
       "username": "tamara.nyu",
@@ -697,7 +708,8 @@
       "banner_media_ref": null,
       "post_count_target": 15,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "nobody"
     },
     {
       "username": "victor.marathon",
@@ -731,7 +743,8 @@
       "banner_media_ref": null,
       "post_count_target": 12,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "following"
     },
     {
       "username": "tucker.trailrunner",
@@ -765,7 +778,8 @@
       "banner_media_ref": null,
       "post_count_target": 4,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "nobody"
     },
     {
       "username": "grandma.roses",
@@ -833,7 +847,8 @@
       "banner_media_ref": null,
       "post_count_target": 15,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "following"
     },
     {
       "username": "phoebe.accounting",
@@ -850,7 +865,8 @@
       "banner_media_ref": null,
       "post_count_target": 3,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "nobody"
     },
     {
       "username": "keith.finance",
@@ -867,7 +883,8 @@
       "banner_media_ref": null,
       "post_count_target": 11,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "nobody"
     },
     {
       "username": "nora.investsafe",
@@ -901,7 +918,8 @@
       "banner_media_ref": null,
       "post_count_target": 11,
       "is_qa_account": false,
-      "qa_note": ""
+      "qa_note": "",
+      "message_permission": "following"
     },
     {
       "username": "logan.warehouse",

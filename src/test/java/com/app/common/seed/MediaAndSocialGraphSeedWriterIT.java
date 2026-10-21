@@ -2,6 +2,7 @@ package com.app.common.seed;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -22,6 +23,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.app.common.seed.loader.SeedContent;
 import com.app.common.seed.loader.SeedDataLoader;
+import com.app.common.seed.model.InteractionControlSeed;
 import com.app.common.seed.reset.SeedResetService;
 import com.app.common.seed.time.SeedTimeline;
 import com.app.common.seed.writer.MediaSeedWriter;
@@ -185,6 +187,117 @@ class MediaAndSocialGraphSeedWriterIT {
                         Integer.class,
                         boostedUserId);
         assertThat(boostedFollowerCount).isGreaterThanOrEqualTo(55);
+    }
+
+    @Test
+    void write_seedsMutesLimitsHiddenWordsAndRecentFollowsConsistentlyWithTheGraph() {
+        seedResetService.reset();
+        SeedContent content = new SeedDataLoader().load();
+        Instant referenceNow = Instant.parse("2026-08-25T00:00:00Z");
+        SeedTimeline timeline = new SeedTimeline(20260825L, referenceNow);
+
+        Map<String, UUID> usersByUsername = userSeedWriter.write(content, timeline);
+        socialGraphSeedWriter.write(content, usersByUsername, timeline);
+
+        InteractionControlSeed seed = content.interactionControl();
+        long liveMutes = seed.mutes().stream().filter(m -> !m.undone()).count();
+        assertThat(countRows("user_mutes")).isEqualTo((int) liveMutes);
+        assertThat(count("SELECT COUNT(*) FROM user_mutes WHERE mute_posts AND NOT mute_stories"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(count("SELECT COUNT(*) FROM user_mutes WHERE mute_stories AND NOT mute_posts"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(count("SELECT COUNT(*) FROM user_mutes WHERE mute_posts AND mute_stories"))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(countRows("account_show_fewer"))
+                .isEqualTo((int) seed.showFewer().stream().filter(s -> !s.undone()).count());
+        // A preference is a choice about content the viewer sees, so the viewer follows the
+        // account and neither side has blocked the other.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM user_mutes m WHERE NOT EXISTS (SELECT 1 FROM"
+                                        + " follows f WHERE f.follower_id = m.user_id AND"
+                                        + " f.following_id = m.muted_user_id AND f.status ="
+                                        + " 'accepted')"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM account_show_fewer s WHERE NOT EXISTS (SELECT"
+                                        + " 1 FROM follows f WHERE f.follower_id = s.user_id AND"
+                                        + " f.following_id = s.author_id AND f.status ="
+                                        + " 'accepted')"))
+                .isZero();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM user_mutes m JOIN blocks b ON (b.blocker_id ="
+                                        + " m.user_id AND b.blocked_id = m.muted_user_id) OR"
+                                        + " (b.blocker_id = m.muted_user_id AND b.blocked_id ="
+                                        + " m.user_id)"))
+                .isZero();
+        assertThat(countRows("blocks")).isEqualTo(25);
+
+        Timestamp now = Timestamp.from(referenceNow);
+        assertThat(count("SELECT COUNT(*) FROM interaction_limits WHERE expires_at > ?", now))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(count("SELECT COUNT(*) FROM interaction_limits WHERE expires_at <= ?", now))
+                .isGreaterThanOrEqualTo(5);
+        assertThat(countRows("interaction_limits")).isEqualTo(seed.interactionLimits().size());
+
+        assertThat(count("SELECT COUNT(*) FROM user_hidden_words"))
+                .isEqualTo(
+                        (int) seed.hiddenWords().stream().filter(w -> w.owner() != null).count());
+        assertThat(count("SELECT COUNT(*) FROM hidden_words WHERE created_by IS NOT NULL"))
+                .isEqualTo(
+                        (int)
+                                seed.hiddenWords().stream()
+                                        .filter(w -> w.owner() == null && !w.deleted())
+                                        .count());
+        assertThat(
+                        jdbcTemplate.queryForObject(
+                                "SELECT normalized_phrase FROM user_hidden_words uhw JOIN users u ON"
+                                        + " u.id = uhw.user_id WHERE u.username = 'user_power' AND"
+                                        + " uhw.phrase = 'follow for follow'",
+                                String.class))
+                .isEqualTo("follow for follow");
+
+        // Recent followers were approved after an old request: the request keeps its original
+        // date and only the approval is recent. Every other accepted follow keeps the approval
+        // date it was created with, which is how follows read before the approval timestamp
+        // existed.
+        long recentPairs =
+                seed.interactionLimits().stream().mapToLong(l -> l.recentFollowers().size()).sum();
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM follows WHERE status = 'accepted' AND"
+                                        + " accepted_at IS DISTINCT FROM created_at"))
+                .isEqualTo((int) recentPairs);
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM follows f JOIN users fu ON fu.id ="
+                                        + " f.follower_id JOIN users tu ON tu.id = f.following_id"
+                                        + " JOIN interaction_limits l ON l.user_id = tu.id WHERE"
+                                        + " fu.username IN ('lauren.t02', 'yuna.study') AND"
+                                        + " tu.username = 'quinn.familyonly' AND f.status ="
+                                        + " 'accepted' AND f.created_at < ?"
+                                        + " AND f.accepted_at > NOW() - INTERVAL '7 days'",
+                                Timestamp.from(referenceNow)))
+                .isEqualTo(2);
+
+        // Accounts that must stay strangers because a seeded request or a filtered comment
+        // depends on it never follow each other in the generated graph.
+        assertThat(
+                        count(
+                                "SELECT COUNT(*) FROM follows f JOIN users fu ON fu.id ="
+                                        + " f.follower_id JOIN users tu ON tu.id = f.following_id"
+                                        + " WHERE (fu.username = 'dario.onlycomments' AND"
+                                        + " tu.username = 'closet.by.hana') OR (fu.username ="
+                                        + " 'halima.quietreply' AND tu.username ="
+                                        + " 'shop.mimidress')"))
+                .isZero();
+    }
+
+    private int count(String sql, Object... args) {
+        Integer value = jdbcTemplate.queryForObject(sql, Integer.class, args);
+        return value == null ? 0 : value;
     }
 
     private int countRows(String table) {

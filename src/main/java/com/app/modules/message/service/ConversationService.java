@@ -6,6 +6,7 @@ import com.app.common.response.CursorPageResponse;
 import com.app.modules.message.dto.request.CreateDirectConversationRequest;
 import com.app.modules.message.dto.response.ConversationResponse;
 import com.app.modules.message.dto.response.ConversationSummaryResponse;
+import com.app.modules.message.enums.ConversationFolder;
 
 /** Conversation lifecycle: creation, membership, group management, and listing. */
 public interface ConversationService {
@@ -13,8 +14,12 @@ public interface ConversationService {
     /**
      * Starts (or reuses) a 1-1 conversation with the target user.
      *
-     * <p>An existing 1-1 between the same two users is reused rather than duplicated; if the caller
-     * had previously left it, their participation is reactivated.
+     * <p>An existing 1-1 between the same two users is reused rather than duplicated, without
+     * asking for message permission again; if the caller had previously left it, their
+     * participation is reactivated. A new conversation is accepted straight away when the target
+     * follows the caller and otherwise becomes a pending request in the target's requests (or
+     * hidden requests) folder. A recipient who declined a request and now writes to the sender
+     * starts a fresh conversation.
      *
      * @param actorId the authenticated caller
      * @param request the target user to converse with
@@ -29,15 +34,20 @@ public interface ConversationService {
             UUID actorId, CreateDirectConversationRequest request);
 
     /**
-     * Lists the caller's active conversations, newest activity first.
+     * Lists the caller's active conversations in one folder, newest activity first.
+     *
+     * <p>The primary folder holds accepted conversations and the caller's own outgoing requests;
+     * the requests and hidden requests folders hold the incoming pending requests that carry a
+     * message.
      *
      * @param actorId the authenticated caller
+     * @param folder which folder to list
      * @param cursor opaque continuation cursor from a previous page, or null for the first page
      * @param limit requested page size, clamped between 1 and 100
      * @return a cursor page of conversation summaries with unread counts
      */
     CursorPageResponse<ConversationSummaryResponse> listMyConversations(
-            UUID actorId, String cursor, int limit);
+            UUID actorId, ConversationFolder folder, String cursor, int limit);
 
     /**
      * Returns one conversation's detail, including active and former participants.
@@ -116,4 +126,45 @@ public interface ConversationService {
      *     CONVERSATION_FORBIDDEN when the caller is not an active participant
      */
     void setNickname(UUID actorId, UUID conversationId, String nickname);
+
+    /**
+     * Accepts a message request the caller received, which moves the conversation into their
+     * primary folder and lets its sender write freely.
+     *
+     * <p>Records a {@code message.request.resolved.v1} event so the decision reaches analytics. The
+     * sender is told nothing.
+     *
+     * @param actorId the authenticated caller, who must be the recipient of a pending request
+     * @param conversationId the conversation holding the request
+     * @return the accepted conversation
+     * @throws com.app.common.exception.AppException CONVERSATION_NOT_FOUND unless the caller is the
+     *     recipient of a pending request that already carries a message, so a caller who is not
+     *     entitled to see the request cannot tell it from a missing one
+     */
+    ConversationResponse acceptRequest(UUID actorId, UUID conversationId);
+
+    /**
+     * Deletes a message request the caller received, which declines it and removes it from their
+     * inbox.
+     *
+     * <p>The sender keeps seeing a pending request that is simply never answered, so a decline
+     * cannot be told from silence. Nothing is delivered to the sender, live or otherwise.
+     *
+     * @param actorId the authenticated caller, who must be the recipient of a pending request
+     * @param conversationId the conversation holding the request
+     * @throws com.app.common.exception.AppException CONVERSATION_NOT_FOUND under the same
+     *     conditions as {@link #acceptRequest}
+     */
+    void deleteRequest(UUID actorId, UUID conversationId);
+
+    /**
+     * Declines a message request the caller received and blocks its sender, in one transaction:
+     * when the block fails the request stays pending.
+     *
+     * @param actorId the authenticated caller, who must be the recipient of a pending request
+     * @param conversationId the conversation holding the request
+     * @throws com.app.common.exception.AppException CONVERSATION_NOT_FOUND under the same
+     *     conditions as {@link #acceptRequest}; the block's own errors when it cannot be created
+     */
+    void blockRequester(UUID actorId, UUID conversationId);
 }

@@ -11,7 +11,8 @@ public enum ReportType {
     COMMENT,
     USER,
     STORY,
-    MESSAGE;
+    MESSAGE,
+    MESSAGE_REACTION;
 
     @JsonCreator
     public static ReportType fromJson(String value) {

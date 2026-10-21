@@ -1,12 +1,15 @@
 package com.app.modules.recommendation.client.impl;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 
 import com.app.modules.recommendation.client.GorseClient;
@@ -122,6 +125,27 @@ public class GorseClientImpl implements GorseClient {
     @Override
     public void upsertFeedback(List<GorseFeedback> feedback) {
         gorseRestClient.put().uri("/api/feedback").body(feedback).retrieve().toBodilessEntity();
+    }
+
+    @Override
+    public void deleteFeedback(String feedbackType, String userId, String itemId) {
+        try {
+            gorseRestClient
+                    .delete()
+                    .uri("/api/feedback/{type}/{user}/{item}", feedbackType, userId, itemId)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (HttpClientErrorException.NotFound absent) {
+            // An undo that finds nothing to remove has done its job, so a replayed or reordered
+            // undo event is not an error.
+        } catch (HttpServerErrorException failure) {
+            // Some Gorse paths report a missing tuple as a server error carrying the phrase
+            // rather than as a 404; any other server error must still reach the consumer's retry.
+            String body = failure.getResponseBodyAsString();
+            if (body == null || !body.toLowerCase(Locale.ROOT).contains("not found")) {
+                throw failure;
+            }
+        }
     }
 
     @Override

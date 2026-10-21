@@ -80,14 +80,15 @@ class ConversationKeysetRowLossIT {
         }
 
         List<UUID> seen = new ArrayList<>();
-        List<Conversation> page = conversationRepository.findFirstMyConversations(viewer, page());
+        List<Conversation> page =
+                conversationRepository.findFirstMyConversations(viewer, "primary", page());
         int guard = 0;
         while (!page.isEmpty() && guard++ < 100) {
             page.forEach(c -> seen.add(c.getId()));
             Conversation last = page.get(page.size() - 1);
             page =
                     conversationRepository.findMyConversationsBefore(
-                            viewer, last.getLastMessageAt(), last.getId(), page());
+                            viewer, "primary", last.getLastMessageAt(), last.getId(), page());
         }
 
         assertThat(seen)
@@ -95,6 +96,58 @@ class ConversationKeysetRowLossIT {
                         "every conversation in both the tie-group and the null group must appear"
                                 + " exactly once")
                 .containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void requestFolders_tieGroupPagesEveryRequestExactlyOnce() {
+        UUID viewer = insertUser("conv_request_viewer");
+        UUID sender = insertUser("conv_request_sender");
+        List<UUID> visible = new ArrayList<>();
+        List<UUID> hidden = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            visible.add(insertRequest(viewer, sender, false));
+            hidden.add(insertRequest(viewer, sender, true));
+        }
+
+        assertThat(walk(viewer, "requests")).containsExactlyInAnyOrderElementsOf(visible);
+        assertThat(walk(viewer, "hidden_requests")).containsExactlyInAnyOrderElementsOf(hidden);
+        assertThat(walk(viewer, "primary")).isEmpty();
+        List<UUID> bothFolders = new ArrayList<>(visible);
+        bothFolders.addAll(hidden);
+        assertThat(walk(sender, "primary")).containsExactlyInAnyOrderElementsOf(bothFolders);
+    }
+
+    private List<UUID> walk(UUID viewer, String folder) {
+        List<UUID> seen = new ArrayList<>();
+        List<Conversation> page =
+                conversationRepository.findFirstMyConversations(viewer, folder, page());
+        int guard = 0;
+        while (!page.isEmpty() && guard++ < 100) {
+            page.forEach(c -> seen.add(c.getId()));
+            Conversation last = page.get(page.size() - 1);
+            page =
+                    conversationRepository.findMyConversationsBefore(
+                            viewer, folder, last.getLastMessageAt(), last.getId(), page());
+        }
+        return seen;
+    }
+
+    private UUID insertRequest(UUID recipient, UUID requester, boolean hidden) {
+        UUID conversationId =
+                jdbcClient
+                        .sql(
+                                "INSERT INTO conversations(last_message_at, request_status,"
+                                        + " request_recipient_id, request_hidden)"
+                                        + " VALUES (:lastMessageAt, 'pending', :recipient, :hidden)"
+                                        + " RETURNING id")
+                        .param("lastMessageAt", SHARED_INSTANT)
+                        .param("recipient", recipient)
+                        .param("hidden", hidden)
+                        .query(UUID.class)
+                        .single();
+        insertParticipant(conversationId, recipient);
+        insertParticipant(conversationId, requester);
+        return conversationId;
     }
 
     private static PageRequest page() {

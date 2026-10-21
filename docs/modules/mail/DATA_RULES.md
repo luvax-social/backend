@@ -11,7 +11,7 @@ It never decides that mail should be sent; it renders and delivers what a consum
 
 | Table | Owner | Notes |
 |-------|-------|-------|
-| `email_deliveries` | mail | One row per send attempt (V96). Append-only except for the status transition and `sent_at`. |
+| `email_deliveries` | mail | One row per moderation-lane send attempt (V96). Append-only except for the status transition and `sent_at`. |
 
 `email_deliveries` outlives its recipient.
 `recipient_user_id` is `ON DELETE SET NULL` while `recipient_email` is `NOT NULL`, so a hard delete removes the link to the account and leaves the record that a message was sent and where it went.
@@ -29,7 +29,8 @@ The three tables were archived into `archived_mail_templates`, `archived_mail_ca
 `admin_action_type` lost `send_mail_campaign`, which had never been reachable: the Java enum `AdminActionType` never declared it and no campaign class ever wrote an `admin_actions` row.
 
 `email_deliveries` survives and is unaffected.
-The auth, moderation and support lanes all write to it, so it was never campaign-specific.
+Only the moderation lane writes to it, which covers account, content-removal, support-answer and verification notices, so it was never campaign-specific.
+Auth mail and the support link mails leave no row.
 `AbstractTemplateMailSender` lost only its `sendCampaign` method; the recipient allowlist every lane routes through is untouched.
 
 Do not reintroduce this by adding a table here.
@@ -164,13 +165,13 @@ It carries nothing else, so the reason cannot reach a template even by accident.
 
 ### Events
 
-Nine action types mail their subject: `BAN_USER`, `UNBAN_USER`, `SUSPEND_USER`, `UNSUSPEND_USER`, `WARN_USER`, `REMOVE_POST`, `REMOVE_COMMENT`, `REMOVE_STORY`, `REMOVE_MESSAGE`.
+Fifteen action types mail their subject: `BAN_USER`, `UNBAN_USER`, `SUSPEND_USER`, `UNSUSPEND_USER`, `WARN_USER`, `REMOVE_POST`, `REMOVE_COMMENT`, `REMOVE_STORY`, `REMOVE_MESSAGE`, `REMOVE_MESSAGE_REACTION`, `RESPOND_SUPPORT_TICKET`, `REJECT_SUPPORT_TICKET`, `GRANT_VERIFICATION`, `REJECT_VERIFICATION` and `REVOKE_VERIFICATION`.
 
 The mapping is closed and lives in `ModerationMailTemplates`.
 No `RESTORE_*` action mails, and neither do `ISSUE_STRIKE`, `FORCE_LOGOUT`, `REVOKE_SESSION`, `CHANGE_USER_ROLE`, `REVOKE_WARNING`, `REVOKE_STRIKE`, `ESCALATE_REPORT` or any hashtag action.
 
 `admin.moderation-notice.requested.v1` is raised by `AdminActionRecorder`, which is the single writer of `admin_actions` and joins the caller's transaction.
-Raising it there rather than at each of the nine calling paths means the notice cannot be enqueued for an action that rolled back, and an action cannot commit without its notice enqueued.
+Raising it there rather than at each calling path means the notice cannot be enqueued for an action that rolled back, and an action cannot commit without its notice enqueued.
 
 The event is deliberately distinct from `user.warned.v1`.
 Binding the moderation mail queue to that existing key would have tied the in-app notification and the outbound mail to one payload, one binding and one failure mode, and neither could be disabled without the other.

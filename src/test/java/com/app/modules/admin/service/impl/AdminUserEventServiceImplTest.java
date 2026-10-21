@@ -168,6 +168,58 @@ class AdminUserEventServiceImplTest {
                 .containsExactly(Map.of("scope", "posts", "query", "sunset"), null, null);
     }
 
+    // The signals are an account's private preferences: a filter naming one is refused with the
+    // same validation error a malformed filter gets, before any read, and never answered as an
+    // empty page that would confirm or deny the signal exists.
+    @Test
+    void listUserEvents_filterNamesAPrivatePreferenceSignal_rejectedBeforeAnyRead() {
+        List<UserEventType> privateSignals =
+                List.of(
+                        UserEventType.ACCOUNT_MUTE,
+                        UserEventType.ACCOUNT_UNMUTE,
+                        UserEventType.ACCOUNT_SHOW_FEWER,
+                        UserEventType.ACCOUNT_SHOW_FEWER_UNDO,
+                        UserEventType.POST_NOT_INTERESTED,
+                        UserEventType.POST_NOT_INTERESTED_UNDO,
+                        UserEventType.INTERACTION_LIMIT_CHANGE);
+
+        for (UserEventType type : privateSignals) {
+            assertThatThrownBy(
+                            () ->
+                                    service.listUserEvents(
+                                            ACTOR, null, NOW.minusDays(1), NOW, type, null, 20))
+                    .as("filter %s", type)
+                    .isInstanceOf(AppException.class)
+                    .satisfies(
+                            e ->
+                                    assertThat(((AppException) e).getErrorCode())
+                                            .isEqualTo(ApiErrorCode.BAD_REQUEST));
+        }
+
+        verify(userEventAnalyticsRepository, never())
+                .findPage(any(), any(), any(), any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void listUserEvents_filterNamesAnotherType_stillReachesTheRead() {
+        when(userEventAnalyticsRepository.findPage(
+                        any(), any(), any(), any(), any(), any(), anyInt()))
+                .thenReturn(List.of());
+
+        service.listUserEvents(
+                ACTOR, null, NOW.minusDays(1), NOW, UserEventType.MESSAGE_REACTION, null, 20);
+
+        verify(userEventAnalyticsRepository)
+                .findPage(
+                        eq(null),
+                        eq(NOW.minusDays(1)),
+                        eq(NOW),
+                        eq(UserEventType.MESSAGE_REACTION),
+                        eq(null),
+                        eq(null),
+                        eq(21));
+    }
+
     private static UserEventRow row(UserEventType type, String metadata) {
         return new UserEventRow(
                 UUID.randomUUID(), UUID.randomUUID(), type, null, null, metadata, NOW);
