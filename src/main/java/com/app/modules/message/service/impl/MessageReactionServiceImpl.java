@@ -167,7 +167,7 @@ public class MessageReactionServiceImpl implements MessageReactionService {
         Map<String, Object> data = new HashMap<>();
         data.put(
                 "inboxRecipientIds",
-                inboxAudience.recipients(conversation, userId).stream()
+                inboxAudience.reactionRecipients(conversation, userId).stream()
                         .map(UUID::toString)
                         .toList());
         data.put("conversationId", conversationId.toString());

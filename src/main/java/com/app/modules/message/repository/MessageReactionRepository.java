@@ -110,6 +110,11 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
      * instead of the reactions made anywhere on the platform. Applies the same visibility rules as
      * {@link #findVisibleForMessages}; one statement for the whole list avoids a query per row.
      *
+     * <p>While a conversation is a request that has not been accepted, its recipient does not see
+     * the requester's reactions here: reacting is not a message, so it must not give a requester
+     * who has used their one message a way to keep surfacing in the recipient's list. The requester
+     * still sees their own and the recipient's reactions, and the exclusion ends at acceptance.
+     *
      * @param conversationIds the conversations being listed
      * @param viewerId the user reading the list
      * @return at most one reaction per conversation
@@ -132,6 +137,10 @@ public interface MessageReactionRepository extends JpaRepository<MessageReaction
 							SELECT 1 FROM blocks b
 							WHERE (b.blocker_id = :viewerId AND b.blocked_id = r.user_id)
 								OR (b.blocker_id = r.user_id AND b.blocked_id = :viewerId))
+						AND NOT (
+							c.request_status <> 'accepted'
+							AND c.request_recipient_id = :viewerId
+							AND r.user_id <> :viewerId)
 						ORDER BY r.reacted_at DESC, r.id DESC
 						LIMIT 1
 					) latest

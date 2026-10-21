@@ -251,6 +251,51 @@ class MessageReactionControllerIT {
     }
 
     @Test
+    void react_requesterOnUnacceptedRequest_neverNamesTheRecipientForAnInboxFrame() {
+        TestUser alice = registerUser("rx_ping_alice");
+        TestUser bob = registerUser("rx_ping_bob");
+        UUID conversation = createDirect(alice, bob.id());
+        UUID message = sendId(alice, conversation, "may I message you?");
+
+        put(alice, conversation, message, THUMBS_UP);
+        put(alice, conversation, message, HEART);
+        delete(alice, conversation, message);
+        List<String> pending = inboxRecipients(message);
+        jdbc.update(
+                "UPDATE conversations SET request_status = 'declined', request_resolved_at ="
+                        + " NOW() WHERE id = ?",
+                conversation);
+        put(alice, conversation, message, THUMBS_UP);
+        delete(alice, conversation, message);
+        List<String> all = inboxRecipients(message);
+
+        assertThat(pending).hasSize(3).containsOnly("[]");
+        assertThat(all).hasSize(5).containsOnly("[]");
+    }
+
+    @Test
+    void react_recipientOnPendingRequest_stillReachesTheRequester() {
+        TestUser alice = registerUser("rx_answer_alice");
+        TestUser bob = registerUser("rx_answer_bob");
+        UUID conversation = createDirect(alice, bob.id());
+        UUID message = sendId(alice, conversation, "may I message you?");
+
+        put(bob, conversation, message, THUMBS_UP);
+
+        assertThat(inboxRecipients(message)).containsExactly("[\"" + alice.id() + "\"]");
+    }
+
+    @Test
+    void react_requesterAfterAcceptance_reachesTheRecipient() {
+        Chat chat = openAcceptedChat("rx_accepted_ping");
+        UUID message = sendId(chat.alice(), chat.id(), "hello");
+
+        put(chat.alice(), chat.id(), message, THUMBS_UP);
+
+        assertThat(inboxRecipients(message)).containsExactly("[\"" + chat.bob().id() + "\"]");
+    }
+
+    @Test
     void react_blockedPair_getsTheStealthNotFoundAndSeesNoReactions() {
         Chat chat = openAcceptedChat("rx_block");
         UUID message = sendId(chat.alice(), chat.id(), "before the block");
@@ -334,6 +379,16 @@ class MessageReactionControllerIT {
 
         assertThat(reactionRows(message)).isZero();
         assertThat(reactionEvents(message)).isEqualTo(1);
+    }
+
+    // The inbox audience each reaction event carries, in publication order, as a JSON array text.
+    private List<String> inboxRecipients(UUID messageId) {
+        return jdbc.queryForList(
+                "SELECT payload->'data'->'inboxRecipientIds' FROM outbox_events WHERE event_type ="
+                        + " 'message.reaction.changed.v1' AND aggregate_id = ? ORDER BY"
+                        + " created_at, id",
+                String.class,
+                messageId);
     }
 
     private int reactionEvents(UUID messageId) {

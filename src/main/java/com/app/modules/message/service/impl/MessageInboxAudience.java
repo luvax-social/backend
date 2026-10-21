@@ -56,6 +56,29 @@ public class MessageInboxAudience {
     }
 
     /**
+     * The accounts whose inbox topic should hear about a reaction the actor made.
+     *
+     * <p>Reacting is not a message, so it is not subject to the one-message rule of a pending
+     * request, and a requester could otherwise react and unreact in a loop to keep pinging the
+     * recipient. While the conversation is not accepted, a reaction by its requester therefore
+     * reaches nobody. This is decided from the request state alone, so it is identical for a
+     * pending and a declined request and the requester learns nothing from the difference. A
+     * reaction by the request's recipient, and every reaction once the request is accepted, reaches
+     * the same accounts {@link #recipients} names.
+     *
+     * @param conversation the conversation as it stands after the change
+     * @param actorId the account that reacted, never part of the result
+     * @return the other active participants who may be told, in join order
+     */
+    public List<UUID> reactionRecipients(Conversation conversation, UUID actorId) {
+        boolean unaccepted = conversation.getRequestStatus() != ConversationRequestStatus.ACCEPTED;
+        if (unaccepted && !actorId.equals(conversation.getRequestRecipientId())) {
+            return List.of();
+        }
+        return recipients(conversation, actorId);
+    }
+
+    /**
      * The folder the conversation occupies for its recipient, in the vocabulary of the conversation
      * list's {@code folder} parameter.
      *

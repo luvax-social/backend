@@ -606,6 +606,7 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- A requester's reactions on a message request that has not been accepted no longer reach the recipient's live inbox or replace the recipient's reaction preview in the conversation list, and a declined request behaves the same to its requester.
 - The conversation list now finds the newest reaction of each listed conversation through a per-conversation index on `message_reactions.conversation_id` (V148, V149) instead of scanning every reaction made on the platform since that conversation's last message.
 - A story reply to an account that does not follow the sender is again accepted as the one message of a message request, instead of being refused as a media message.
 - Deep message history pages now use a `created_at` bound the planner can seek on, a removal event is decided from the row the delete removed so a racing react can no longer lose it, and the conversation list reads only reactions newer than the last message.

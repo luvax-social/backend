@@ -113,6 +113,70 @@ class MessageReactionRepositoryIT {
     }
 
     @Test
+    void latestVisible_requesterReactionOnUnacceptedRequest_isHiddenFromTheRecipient() {
+        UUID requester = insertUser("latest_req_requester");
+        UUID recipient = insertUser("latest_req_recipient");
+        for (String status : List.of("pending", "declined")) {
+            UUID conversation = insertRequestConversation(status, recipient);
+            UUID message = insertMessage(conversation, requester, NOW.minusHours(1), false, false);
+            insertReaction(message, requester, "ping", NOW.plusMinutes(1), false);
+
+            assertThat(latest(recipient, conversation))
+                    .as("recipient of a %s request", status)
+                    .isEmpty();
+            assertThat(latest(requester, conversation))
+                    .as("requester of a %s request", status)
+                    .extracting(MessageReaction::getEmoji)
+                    .containsExactly("ping");
+        }
+    }
+
+    @Test
+    void latestVisible_recipientReactionOnUnacceptedRequest_isShownToBoth() {
+        UUID requester = insertUser("latest_rec_requester");
+        UUID recipient = insertUser("latest_rec_recipient");
+        UUID conversation = insertRequestConversation("pending", recipient);
+        UUID message = insertMessage(conversation, requester, NOW.minusHours(1), false, false);
+        insertReaction(message, requester, "ping", NOW.plusMinutes(1), false);
+        insertReaction(message, recipient, "answer", NOW.plusMinutes(2), false);
+
+        assertThat(latest(recipient, conversation))
+                .extracting(MessageReaction::getEmoji)
+                .containsExactly("answer");
+        assertThat(latest(requester, conversation))
+                .extracting(MessageReaction::getEmoji)
+                .containsExactly("answer");
+    }
+
+    @Test
+    void latestVisible_requesterReactionAfterAcceptance_isShownToTheRecipient() {
+        UUID requester = insertUser("latest_acc_requester");
+        UUID recipient = insertUser("latest_acc_recipient");
+        UUID conversation = insertRequestConversation("accepted", recipient);
+        UUID message = insertMessage(conversation, requester, NOW.minusHours(1), false, false);
+        insertReaction(message, requester, "ping", NOW.plusMinutes(1), false);
+
+        assertThat(latest(recipient, conversation))
+                .extracting(MessageReaction::getEmoji)
+                .containsExactly("ping");
+    }
+
+    @Test
+    void latestVisible_olderReactionStillWins_whenTheNewestIsTheRequesters() {
+        UUID requester = insertUser("latest_mix_requester");
+        UUID recipient = insertUser("latest_mix_recipient");
+        UUID conversation = insertRequestConversation("pending", recipient);
+        UUID message = insertMessage(conversation, requester, NOW.minusHours(1), false, false);
+        UUID second = insertMessage(conversation, recipient, NOW.minusMinutes(30), false, false);
+        insertReaction(second, requester, "newest-but-requesters", NOW.plusMinutes(5), false);
+        insertReaction(message, recipient, "own", NOW.plusMinutes(1), false);
+
+        assertThat(latest(recipient, conversation))
+                .extracting(MessageReaction::getEmoji)
+                .containsExactly("own");
+    }
+
+    @Test
     void conversationColumn_followsTheMessageAndCascadesWithTheConversation() {
         UUID user = insertUser("column_user");
         UUID conversation = insertConversation();
@@ -226,6 +290,22 @@ class MessageReactionRepositoryIT {
 						""")
                 .param("username", username)
                 .param("email", username + "@example.com")
+                .query(UUID.class)
+                .single();
+    }
+
+    // A request names its recipient (chk_conversations_request_recipient); an accepted one keeps
+    // the recipient as history and carries no pending state.
+    private UUID insertRequestConversation(String status, UUID recipient) {
+        return jdbcClient
+                .sql(
+                        """
+						INSERT INTO conversations(request_status, request_recipient_id)
+						VALUES (CAST(:status AS conversation_request_status), :recipient)
+						RETURNING id
+						""")
+                .param("status", status)
+                .param("recipient", recipient)
                 .query(UUID.class)
                 .single();
     }

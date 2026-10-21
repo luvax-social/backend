@@ -79,6 +79,36 @@ class MessageInboxAudienceTest {
     }
 
     @Test
+    void reactionRecipients_requesterReactsWhilePending_isNobody() {
+        Conversation conversation = conversation(ConversationRequestStatus.PENDING, false);
+
+        assertThat(audience.reactionRecipients(conversation, requester)).isEmpty();
+    }
+
+    @Test
+    void reactionRecipients_requesterReactsWhileDeclined_isNobody() {
+        Conversation conversation = conversation(ConversationRequestStatus.DECLINED, false);
+
+        assertThat(audience.reactionRecipients(conversation, requester)).isEmpty();
+    }
+
+    @Test
+    void reactionRecipients_requestRecipientReactsWhilePending_reachesTheRequester() {
+        Conversation conversation = conversation(ConversationRequestStatus.PENDING, false);
+        stubParticipants(null, null);
+
+        assertThat(audience.reactionRecipients(conversation, recipient)).containsExactly(requester);
+    }
+
+    @Test
+    void reactionRecipients_acceptedConversation_behavesLikeRecipients() {
+        Conversation conversation = conversation(ConversationRequestStatus.ACCEPTED, false);
+        stubParticipants(null, null);
+
+        assertThat(audience.reactionRecipients(conversation, requester)).containsExactly(recipient);
+    }
+
+    @Test
     void folderOf_acceptedConversation_isPrimary() {
         assertThat(
                         MessageInboxAudience.folderOf(

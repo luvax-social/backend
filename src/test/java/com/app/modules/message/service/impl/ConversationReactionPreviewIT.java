@@ -183,6 +183,75 @@ class ConversationReactionPreviewIT {
         assertThat(row(alice, chat.id()).get("lastReaction")).isNull();
     }
 
+    @Test
+    void list_requesterReactionOnPendingRequest_doesNotReplaceTheRecipientsPreview() {
+        TestUser alice = registerUser("prev_req_alice");
+        TestUser bob = registerUser("prev_req_bob");
+        UUID conversation = createRequest(alice, bob);
+        UUID message = sendId(alice, conversation, "may I message you?");
+        ageMessage(message);
+
+        put(alice, conversation, message, THUMBS_UP);
+
+        assertThat(requestRow(bob, conversation, "requests").get("lastReaction")).isNull();
+        Map<?, ?> own = (Map<?, ?>) row(alice, conversation).get("lastReaction");
+        assertThat(own.get("emoji")).isEqualTo(THUMBS_UP);
+
+        put(bob, conversation, message, HEART);
+
+        Map<?, ?> shown = (Map<?, ?>) requestRow(bob, conversation, "requests").get("lastReaction");
+        assertThat(shown.get("emoji")).isEqualTo(HEART);
+        assertThat(shown.get("userId")).isEqualTo(bob.id().toString());
+    }
+
+    @Test
+    void list_requesterReactionOnDeclinedRequest_readsTheSameToTheRequester() {
+        TestUser alice = registerUser("prev_dec_alice");
+        TestUser bob = registerUser("prev_dec_bob");
+        UUID conversation = createRequest(alice, bob);
+        UUID message = sendId(alice, conversation, "may I message you?");
+        ageMessage(message);
+        put(alice, conversation, message, THUMBS_UP);
+        Map<?, ?> pending = (Map<?, ?>) row(alice, conversation).get("lastReaction");
+
+        jdbc.update(
+                "UPDATE conversations SET request_status = 'declined', request_resolved_at ="
+                        + " NOW() WHERE id = ?",
+                conversation);
+
+        Map<?, ?> declined = (Map<?, ?>) row(alice, conversation).get("lastReaction");
+        assertThat(declined).isEqualTo(pending);
+    }
+
+    private UUID createRequest(TestUser requester, TestUser recipient) {
+        ResponseEntity<Map> created =
+                rest.exchange(
+                        "/api/v1/conversations",
+                        HttpMethod.POST,
+                        new HttpEntity<>(
+                                Map.of("targetUserId", recipient.id()), authHeaders(requester)),
+                        Map.class);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        return UUID.fromString((String) ((Map<?, ?>) created.getBody().get("data")).get("id"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> requestRow(TestUser viewer, UUID conversationId, String folder) {
+        ResponseEntity<Map> response =
+                rest.exchange(
+                        "/api/v1/conversations?limit=50&folder=" + folder,
+                        HttpMethod.GET,
+                        new HttpEntity<>(authHeaders(viewer)),
+                        Map.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return ((List<Map<String, Object>>)
+                        ((Map<?, ?>) response.getBody().get("data")).get("content"))
+                .stream()
+                        .filter(r -> conversationId.toString().equals(r.get("id")))
+                        .findFirst()
+                        .orElseThrow();
+    }
+
     private Chat openAcceptedChat(TestUser alice, TestUser other) {
         ResponseEntity<Map> created =
                 rest.exchange(
