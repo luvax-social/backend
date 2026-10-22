@@ -416,7 +416,7 @@ class PostServiceImplTest {
 
         assertThat(post.getStatus()).isEqualTo(PostStatus.ARCHIVED);
         verify(captionHashtags).detach(postId);
-        verify(postIndexEventPublisher).enqueueDelete(postId, authorId);
+        verify(postIndexEventPublisher).enqueueDelete(post);
         verify(outboxService)
                 .enqueue(
                         eq(PostEventTypes.POST_ARCHIVED_V1),
@@ -477,7 +477,7 @@ class PostServiceImplTest {
         assertThat(post.getStatus()).isEqualTo(PostStatus.REMOVED);
         assertThat(post.getDeletedAt()).isNotNull();
         verify(captionHashtags).detach(postId);
-        verify(postIndexEventPublisher).enqueueDelete(postId, authorId);
+        verify(postIndexEventPublisher).enqueueDelete(post);
     }
 
     @Test
@@ -521,7 +521,7 @@ class PostServiceImplTest {
         assertThat(post.getStatus()).isEqualTo(PostStatus.REMOVED);
         assertThat(post.getDeletedAt()).isNotNull();
         verify(captionHashtags).detach(postId);
-        verify(postIndexEventPublisher).enqueueDelete(postId, authorId);
+        verify(postIndexEventPublisher).enqueueDelete(post);
     }
 
     @Test
@@ -530,7 +530,7 @@ class PostServiceImplTest {
 
         service.deletePost(authorId, postId);
 
-        verify(postIndexEventPublisher, never()).enqueueDelete(any(), any());
+        verify(postIndexEventPublisher, never()).enqueueDelete(any(Post.class));
     }
 
     @Test

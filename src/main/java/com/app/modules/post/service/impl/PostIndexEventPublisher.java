@@ -12,6 +12,7 @@ import com.app.common.outbox.service.OutboxService;
 import com.app.modules.hashtag.service.HashtagService;
 import com.app.modules.post.entity.Post;
 import com.app.modules.post.messaging.PostEventTypes;
+import com.app.modules.post.place.service.PlaceIndexEventPublisher;
 
 /**
  * Enqueues the search-index and recommender events of a post.
@@ -26,10 +27,29 @@ public class PostIndexEventPublisher {
 
     private final OutboxService outboxService;
     private final HashtagService hashtagService;
+    private final PlaceIndexEventPublisher placeIndexEventPublisher;
 
-    public PostIndexEventPublisher(OutboxService outboxService, HashtagService hashtagService) {
+    public PostIndexEventPublisher(
+            OutboxService outboxService,
+            HashtagService hashtagService,
+            PlaceIndexEventPublisher placeIndexEventPublisher) {
         this.outboxService = outboxService;
         this.hashtagService = hashtagService;
+        this.placeIndexEventPublisher = placeIndexEventPublisher;
+    }
+
+    /**
+     * Asks for the place's search document to be reconciled against its current post count.
+     *
+     * <p>A place is searchable only while a published post uses it, and its count is maintained by
+     * a trigger, so every change to what a post shows at a place must follow with this call.
+     *
+     * @param placeId the place the post names or named, or null for a post with none
+     */
+    public void syncPlace(UUID placeId) {
+        if (placeId != null) {
+            placeIndexEventPublisher.enqueueSync(placeId);
+        }
     }
 
     /**
@@ -41,6 +61,17 @@ public class PostIndexEventPublisher {
      */
     public void enqueueUpsert(Post post) {
         enqueueUpsert(post.getId(), post.getUserId(), post.getCreatedAt(), post.getPublishedAt());
+        syncPlace(post.getPlaceId());
+    }
+
+    /**
+     * Enqueues removal of the post's document and reconciles the document of its place.
+     *
+     * @param post the post that stops being published
+     */
+    public void enqueueDelete(Post post) {
+        enqueueDelete(post.getId(), post.getUserId());
+        syncPlace(post.getPlaceId());
     }
 
     /**

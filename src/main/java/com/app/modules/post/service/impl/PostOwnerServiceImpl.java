@@ -167,11 +167,14 @@ public class PostOwnerServiceImpl implements PostOwnerService {
         Post post = requireOwned(ownerId, postId);
         Place place =
                 placeService.resolveForPostWrite(ownerId, request.placeId(), request.placeName());
+        UUID previousPlaceId = post.getPlaceId();
         post.setPlaceId(place == null ? null : place.getId());
         postRepository.saveAndFlush(post);
         if (post.getStatus() == PostStatus.PUBLISHED) {
-            // The place name is part of the indexed document.
+            // The place name is part of the indexed document, and the place the post left loses a
+            // post from its count.
             postIndexEventPublisher.enqueueUpsert(post);
+            postIndexEventPublisher.syncPlace(previousPlaceId);
         }
         return postResponseAssembler.assemble(ownerId, post);
     }

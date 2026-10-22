@@ -251,7 +251,7 @@ public class PostServiceImpl implements PostService {
                     postRepository.saveAndFlush(post);
                     // Unpublishing removes hashtag associations (hashtag module data rules).
                     captionHashtags.detach(post.getId());
-                    postIndexEventPublisher.enqueueDelete(post.getId(), post.getUserId());
+                    postIndexEventPublisher.enqueueDelete(post);
                     enqueueLifecycle(PostEventTypes.POST_ARCHIVED_V1, post);
                 }
                 default -> {
@@ -294,6 +294,7 @@ public class PostServiceImpl implements PostService {
         captionHashtags.detach(postId);
         postRepository.applyModerationRemoval(postId, OffsetDateTime.now());
         postIndexEventPublisher.enqueueDelete(postId, post.getUserId());
+        postIndexEventPublisher.syncPlace(post.getPlaceId());
         log.info("Post removed by moderation: postId={}, from={}", postId, post.getStatus());
         return new PostModerationResult(post.getUserId(), PostStatus.REMOVED, List.of());
     }
@@ -347,6 +348,7 @@ public class PostServiceImpl implements PostService {
                     post.getPublishedAt() == null
                             ? null
                             : post.getPublishedAt().atOffset(ZoneOffset.UTC));
+            postIndexEventPublisher.syncPlace(post.getPlaceId());
         }
         log.info(
                 "Post restored by moderation: postId={}, to={}, remainingBannedHashtags={},"
@@ -597,7 +599,7 @@ public class PostServiceImpl implements PostService {
         post.setDeletedAt(OffsetDateTime.now());
         captionHashtags.detach(post.getId());
         if (wasPublished) {
-            postIndexEventPublisher.enqueueDelete(post.getId(), post.getUserId());
+            postIndexEventPublisher.enqueueDelete(post);
         }
     }
 
