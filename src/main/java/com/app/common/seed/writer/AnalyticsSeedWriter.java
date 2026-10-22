@@ -136,7 +136,21 @@ public class AnalyticsSeedWriter {
                     UserEventType.MESSAGE_REQUEST_DELETE,
                     UserEventType.COMMENT_HIDDEN,
                     UserEventType.COMMENT_UNHIDE,
-                    UserEventType.INTERACTION_LIMIT_CHANGE);
+                    UserEventType.INTERACTION_LIMIT_CHANGE,
+                    UserEventType.POST_PUBLISH,
+                    UserEventType.POST_SCHEDULE,
+                    UserEventType.POST_SCHEDULE_FAILED,
+                    UserEventType.POST_DRAFT_SAVE,
+                    UserEventType.POST_ARCHIVE,
+                    UserEventType.POST_UNARCHIVE,
+                    UserEventType.POST_TAG_ADD,
+                    UserEventType.POST_TAG_APPROVE,
+                    UserEventType.POST_TAG_REMOVE,
+                    UserEventType.POST_COLLAB_INVITE,
+                    UserEventType.POST_COLLAB_ACCEPT,
+                    UserEventType.POST_COLLAB_DECLINE,
+                    UserEventType.POST_COLLAB_LEAVE,
+                    UserEventType.POST_MENTION);
 
     // user_events keeps twelve months. A signal whose row is older than that (a reaction to a
     // message from the account's first year) is dated at the edge of the window instead of being

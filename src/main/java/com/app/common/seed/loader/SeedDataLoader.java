@@ -29,6 +29,7 @@ import com.app.common.seed.model.ModerationCaseSeed;
 import com.app.common.seed.model.ModerationSupplementaryAction;
 import com.app.common.seed.model.ModerationSupplementaryReport;
 import com.app.common.seed.model.PersonaSeed;
+import com.app.common.seed.model.PlaceSeed;
 import com.app.common.seed.model.PostSeed;
 import com.app.common.seed.model.SupportTicketPoolSeed;
 import com.app.common.seed.model.UserSeed;
@@ -80,6 +81,8 @@ public class SeedDataLoader {
         List<HashtagSeed> hashtags =
                 readList("content/hashtags.json", HashtagsFile.class, HashtagsFile::hashtags);
         List<PostSeed> posts = readList("content/posts.json", PostsFile.class, PostsFile::posts);
+        List<PlaceSeed> places =
+                readList("content/places.json", PlacesFile.class, PlacesFile::places);
         CommentPoolSeed commentPools = readCommentPools();
         List<ConversationSeed> conversations =
                 readList(
@@ -128,6 +131,7 @@ public class SeedDataLoader {
                 users,
                 hashtags,
                 posts,
+                places,
                 commentPools,
                 conversations,
                 moderationCases,
@@ -454,6 +458,8 @@ public class SeedDataLoader {
     private record HashtagsFile(List<HashtagSeed> hashtags) {}
 
     private record PostsFile(List<PostSeed> posts) {}
+
+    private record PlacesFile(List<PlaceSeed> places) {}
 
     private record ConversationsFile(List<ConversationSeed> conversations) {}
 

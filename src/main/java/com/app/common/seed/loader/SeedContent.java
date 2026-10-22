@@ -12,6 +12,7 @@ import com.app.common.seed.model.ModerationCaseSeed;
 import com.app.common.seed.model.ModerationSupplementaryAction;
 import com.app.common.seed.model.ModerationSupplementaryReport;
 import com.app.common.seed.model.PersonaSeed;
+import com.app.common.seed.model.PlaceSeed;
 import com.app.common.seed.model.PostSeed;
 import com.app.common.seed.model.SupportTicketPoolSeed;
 import com.app.common.seed.model.UserSeed;
@@ -25,6 +26,7 @@ public record SeedContent(
         List<UserSeed> users,
         List<HashtagSeed> hashtags,
         List<PostSeed> posts,
+        List<PlaceSeed> places,
         CommentPoolSeed commentPools,
         List<ConversationSeed> conversations,
         List<ModerationCaseSeed> moderationCases,

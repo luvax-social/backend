@@ -66,8 +66,8 @@ public class PostSeedWriter {
 
     private static final String INSERT_POST_SQL =
             "INSERT INTO posts (id, user_id, caption, post_type, status,"
-                    + " status_before_moderation, view_count, created_at) VALUES (?, ?, ?,"
-                    + " ?::post_type, ?::post_status, ?::post_status, ?, ?)";
+                    + " status_before_moderation, view_count, created_at, published_at) VALUES"
+                    + " (?, ?, ?, ?::post_type, ?::post_status, ?::post_status, ?, ?, ?)";
     private static final String INSERT_POST_MEDIA_SQL =
             "INSERT INTO post_media (id, post_id, media_asset_id, position, created_at) VALUES"
                     + " (?, ?, ?, ?, ?)";
@@ -134,6 +134,11 @@ public class PostSeedWriter {
             int viewCount = randomViewCount(post.engagementBand(), viewCountRandom);
             String statusBeforeModeration =
                     REMOVED_STATUS.equals(post.status()) ? PUBLISHED_STATUS : null;
+            // The trigger would stamp the insert time, which is not when a historic post went
+            // out. A post that is not a draft was published at its creation instant in the seed;
+            // a draft has never been published and carries none.
+            Timestamp publishedAt =
+                    "draft".equals(post.status()) ? null : Timestamp.from(createdAt);
 
             postRows.add(
                     new Object[] {
@@ -144,7 +149,8 @@ public class PostSeedWriter {
                         post.status(),
                         statusBeforeModeration,
                         viewCount,
-                        Timestamp.from(createdAt)
+                        Timestamp.from(createdAt),
+                        publishedAt
                     });
 
             List<String> mediaRefs = post.mediaRefs();
@@ -318,6 +324,7 @@ public class PostSeedWriter {
         ps.setString(6, (String) row[5]);
         ps.setInt(7, (Integer) row[6]);
         ps.setTimestamp(8, (Timestamp) row[7]);
+        ps.setTimestamp(9, (Timestamp) row[8]);
     }
 
     private void bindPostMediaRow(PreparedStatement ps, Object[] row) throws SQLException {

@@ -18,6 +18,7 @@ import com.app.modules.admin.messaging.PlatformStatsCollectedEvent;
 import com.app.modules.comment.consumer.CommentNotificationConsumer;
 import com.app.modules.post.consumer.PostNotificationConsumer;
 import com.app.modules.post.messaging.PostEventTypes;
+import com.app.modules.post.place.messaging.PlaceEventTypes;
 import com.app.modules.recommendation.enums.UserEventType;
 import com.app.modules.recommendation.messaging.RecommendationEventTypes;
 import com.app.modules.recommendation.messaging.UserEventImportedEvent;
@@ -54,6 +55,7 @@ public class SeedOutboxBatchWriter {
 
     private static final String POST_INDEX_UPSERT_V1 = "post.index.upsert.v1";
     private static final String HASHTAG_INDEX_UPSERT_V1 = "hashtag.index.upsert.v1";
+    private static final String AGGREGATE_TYPE_PLACE = "place";
     private static final String POST_LIKED_V1 = "post.liked.v1";
     private static final String POST_SAVED_V1 = "post.saved.v1";
     private static final String POST_VIEWED_V1 = "post.viewed.v1";
@@ -82,6 +84,11 @@ public class SeedOutboxBatchWriter {
     @Transactional
     void emitHashtagIndexBatch(List<UUID> batch) {
         batch.forEach(this::enqueueHashtagIndex);
+    }
+
+    @Transactional
+    void emitPlaceIndexBatch(List<UUID> batch) {
+        batch.forEach(this::enqueuePlaceIndex);
     }
 
     @Transactional
@@ -309,6 +316,18 @@ public class SeedOutboxBatchWriter {
                 hashtagId,
                 null,
                 Map.of("hashtagId", hashtagId.toString()));
+    }
+
+    // Payload shape mirrors PlaceIndexEventPublisher.enqueueSync: only the id travels, and the
+    // consumer reads name, post_count and status from the place row.
+    private void enqueuePlaceIndex(UUID placeId) {
+        outboxService.enqueue(
+                PlaceEventTypes.PLACE_INDEX_UPSERT_V1,
+                PlaceEventTypes.PLACE_INDEX_UPSERT_V1,
+                AGGREGATE_TYPE_PLACE,
+                placeId,
+                null,
+                Map.of("placeId", placeId.toString()));
     }
 
     // Payload shape mirrors PostLikeServiceImpl's enqueue call.

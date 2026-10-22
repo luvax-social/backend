@@ -51,6 +51,8 @@ import com.app.common.seed.writer.MediaSeedWriter;
 import com.app.common.seed.writer.MessageSeedWriter;
 import com.app.common.seed.writer.ModerationSeedWriter;
 import com.app.common.seed.writer.NotificationSeedWriter;
+import com.app.common.seed.writer.PlaceModerationSeedWriter;
+import com.app.common.seed.writer.PostCreationSeedWriter;
 import com.app.common.seed.writer.PostSeedWriter;
 import com.app.common.seed.writer.SocialGraphSeedWriter;
 import com.app.common.seed.writer.StorySeedWriter;
@@ -205,6 +207,8 @@ class SeedAnalyticsDrainIT {
     @Autowired private UserSeedWriter userSeedWriter;
     @Autowired private MediaSeedWriter mediaSeedWriter;
     @Autowired private PostSeedWriter postSeedWriter;
+    @Autowired private PostCreationSeedWriter postCreationSeedWriter;
+    @Autowired private PlaceModerationSeedWriter placeModerationSeedWriter;
     @Autowired private CommentSeedWriter commentSeedWriter;
     @Autowired private EngagementSeedWriter engagementSeedWriter;
     @Autowired private SocialGraphSeedWriter socialGraphSeedWriter;
@@ -303,10 +307,12 @@ class SeedAnalyticsDrainIT {
                 commentSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
         engagementSeedWriter.write(content, usersByUsername, postIdBySeedId, commentIds, timeline);
         socialGraphSeedWriter.write(content, usersByUsername, timeline);
+        postCreationSeedWriter.write(content, usersByUsername, timeline);
         storySeedWriter.write(content, usersByUsername, timeline);
         messageSeedWriter.write(
                 content, usersByUsername, mediaByCompositeKey, postIdBySeedId, timeline);
         moderationSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
+        placeModerationSeedWriter.write(content, timeline);
         notificationSeedWriter.write(timeline);
         analyticsSeedWriter.write(timeline);
         seedOutboxEmitter.emitFullVolume(content, usersByUsername, postIdBySeedId);

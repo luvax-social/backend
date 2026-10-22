@@ -97,7 +97,6 @@ public class NotificationSeedWriter {
     // than a share of the pool above, which it would otherwise dominate.
     private static final int LIKE_POST_SAMPLE_BUDGET = 800;
     private static final int LIKE_COMMENT_SAMPLE_BUDGET = 800;
-    private static final int MENTION_SAMPLE_SIZE = 30;
 
     static final String LIKES_SHOWCASE = "sophieg.design";
     static final String REQUESTS_SHOWCASE = "user_private";
@@ -165,8 +164,9 @@ public class NotificationSeedWriter {
         fixed.addAll(fetchModerationEvents());
         fixed.addAll(fetchSupportAnswerEvents());
         fixed.addAll(fetchFollowRequestEvents());
-        fixed.addAll(fetchMentionPostEvents(random));
-        fixed.addAll(fetchMentionCommentEvents(random));
+        fixed.addAll(fetchMentionPostEvents());
+        fixed.addAll(fetchMentionCommentEvents());
+        fixed.addAll(fetchPostInvolvementEvents(now));
 
         List<Event> pool = new ArrayList<>();
         pool.addAll(fetchFollowEvents());
@@ -908,67 +908,141 @@ public class NotificationSeedWriter {
         return events;
     }
 
-    // Synthetic: a published post's author mentions a random other account in it.
-    private List<Event> fetchMentionPostEvents(Random random) {
-        List<Object[]> posts = new ArrayList<>();
-        jdbc.query(
-                "SELECT id, user_id, created_at FROM posts WHERE status = 'published'"
-                        + " ORDER BY id",
-                rs -> {
-                    UUID id = (UUID) rs.getObject("id");
-                    posts.add(
-                            new Object[] {
-                                id, rs.getObject("user_id"), id, rs.getTimestamp("created_at")
-                            });
-                });
-        return synthesizeMentions(posts, NotificationType.MENTION_POST, POST_ENTITY_TYPE, random);
-    }
-
-    // Synthetic: a visible comment's author mentions a random other account in it.
-    private List<Event> fetchMentionCommentEvents(Random random) {
-        List<Object[]> comments = new ArrayList<>();
-        jdbc.query(
-                "SELECT id, user_id, post_id, created_at FROM comments WHERE deleted_at IS NULL"
-                        + " AND admin_removed_at IS NULL AND moderation_status = 'approved'"
-                        + " ORDER BY id",
-                rs -> {
-                    comments.add(
-                            new Object[] {
-                                rs.getObject("id"),
-                                rs.getObject("user_id"),
-                                rs.getObject("post_id"),
-                                rs.getTimestamp("created_at")
-                            });
-                });
-        return synthesizeMentions(
-                comments, NotificationType.MENTION_COMMENT, COMMENT_ENTITY_TYPE, random);
-    }
-
-    // Rows are {entityId, authorId, postId, createdAt}.
-    private List<Event> synthesizeMentions(
-            List<Object[]> sources, NotificationType type, String entityType, Random random) {
+    // The mentions PostCreationSeedWriter stored on captions; each notifies the mentioned account
+    // the way the publication flow does, never the author about themself.
+    private List<Event> fetchMentionPostEvents() {
         List<Event> events = new ArrayList<>();
-        List<UUID> users = jdbc.queryForList("SELECT id FROM users ORDER BY id", UUID.class);
-        if (sources.isEmpty() || users.size() < 2) {
-            return events;
-        }
-        for (int i = 0; i < MENTION_SAMPLE_SIZE; i++) {
-            Object[] source = sources.get(random.nextInt(sources.size()));
-            UUID author = (UUID) source[1];
-            UUID mentioned = users.get(random.nextInt(users.size()));
-            if (mentioned.equals(author)) {
-                continue;
-            }
+        jdbc.query(
+                "SELECT m.post_id, m.mentioned_user_id, m.created_at, p.user_id AS author_id"
+                        + " FROM post_mentions m JOIN posts p ON p.id = m.post_id"
+                        + " JOIN users u ON u.id = m.mentioned_user_id AND "
+                        + ACTIVE_USER
+                        + " WHERE p.status = 'published' AND p.deleted_at IS NULL"
+                        + " AND m.mentioned_user_id <> p.user_id",
+                rs -> {
+                    UUID postId = (UUID) rs.getObject("post_id");
+                    events.add(
+                            event(
+                                    NotificationDraft.of(
+                                            (UUID) rs.getObject("author_id"),
+                                            (UUID) rs.getObject("mentioned_user_id"),
+                                            NotificationType.MENTION_POST,
+                                            POST_ENTITY_TYPE,
+                                            postId,
+                                            postId),
+                                    rs.getTimestamp("created_at")));
+                });
+        return events;
+    }
+
+    // The mentions stored on comments, notifying the mentioned account about the comment.
+    private List<Event> fetchMentionCommentEvents() {
+        List<Event> events = new ArrayList<>();
+        jdbc.query(
+                "SELECT m.comment_id, m.mentioned_user_id, m.created_at, c.user_id AS author_id,"
+                        + " c.post_id FROM comment_mentions m JOIN comments c ON c.id = m.comment_id"
+                        + " JOIN users u ON u.id = m.mentioned_user_id AND "
+                        + ACTIVE_USER
+                        + " WHERE c.deleted_at IS NULL AND c.admin_removed_at IS NULL"
+                        + " AND c.moderation_status = 'approved'"
+                        + " AND m.mentioned_user_id <> c.user_id",
+                rs -> {
+                    events.add(
+                            event(
+                                    NotificationDraft.of(
+                                            (UUID) rs.getObject("author_id"),
+                                            (UUID) rs.getObject("mentioned_user_id"),
+                                            NotificationType.MENTION_COMMENT,
+                                            COMMENT_ENTITY_TYPE,
+                                            (UUID) rs.getObject("comment_id"),
+                                            (UUID) rs.getObject("post_id")),
+                                    rs.getTimestamp("created_at")));
+                });
+        return events;
+    }
+
+    // Tags, collaboration invitations and their acceptances, and the scheduled posts that went
+    // back to drafts, read from the rows PostCreationSeedWriter stored.
+    private List<Event> fetchPostInvolvementEvents(Instant now) {
+        List<Event> events = new ArrayList<>();
+        jdbc.query(
+                "SELECT t.post_id, t.tagged_user_id, t.created_by, t.created_at,"
+                        + " t.status::text AS status FROM post_user_tags t JOIN posts p ON p.id ="
+                        + " t.post_id JOIN users u ON u.id = t.tagged_user_id AND "
+                        + ACTIVE_USER
+                        + " WHERE p.status = 'published' AND p.deleted_at IS NULL",
+                rs -> {
+                    UUID postId = (UUID) rs.getObject("post_id");
+                    events.add(
+                            event(
+                                    NotificationDraft.of(
+                                            (UUID) rs.getObject("created_by"),
+                                            (UUID) rs.getObject("tagged_user_id"),
+                                            "approved".equals(rs.getString("status"))
+                                                    ? NotificationType.POST_TAG
+                                                    : NotificationType.POST_TAG_REQUEST,
+                                            POST_ENTITY_TYPE,
+                                            postId,
+                                            postId),
+                                    rs.getTimestamp("created_at")));
+                });
+        jdbc.query(
+                "SELECT c.post_id, c.user_id, c.invited_by, c.invited_at, c.accepted_at FROM"
+                        + " post_collaborators c JOIN posts p ON p.id = c.post_id WHERE p.status ="
+                        + " 'published' AND p.deleted_at IS NULL",
+                rs -> {
+                    UUID postId = (UUID) rs.getObject("post_id");
+                    UUID collaborator = (UUID) rs.getObject("user_id");
+                    UUID owner = (UUID) rs.getObject("invited_by");
+                    events.add(
+                            event(
+                                    NotificationDraft.of(
+                                            owner,
+                                            collaborator,
+                                            NotificationType.POST_COLLABORATION_INVITE,
+                                            POST_ENTITY_TYPE,
+                                            postId,
+                                            postId),
+                                    rs.getTimestamp("invited_at")));
+                    Timestamp acceptedAt = rs.getTimestamp("accepted_at");
+                    if (acceptedAt != null) {
+                        events.add(
+                                event(
+                                        NotificationDraft.of(
+                                                collaborator,
+                                                owner,
+                                                NotificationType.POST_COLLABORATION_ACCEPTED,
+                                                POST_ENTITY_TYPE,
+                                                postId,
+                                                postId),
+                                        acceptedAt));
+                    }
+                });
+        List<UUID> failedDrafts = new ArrayList<>();
+        List<UUID> owners = new ArrayList<>();
+        List<Timestamp> failedAt = new ArrayList<>();
+        jdbc.query(
+                PostCreationSeedWriter.FAILED_SCHEDULE_DRAFTS_SQL,
+                rs -> {
+                    failedDrafts.add((UUID) rs.getObject("id"));
+                    owners.add((UUID) rs.getObject("user_id"));
+                    // A draft's updated_at is stamped by the database clock, which can sit after
+                    // the seed clock.
+                    Instant stamped = rs.getTimestamp("updated_at").toInstant();
+                    failedAt.add(Timestamp.from(stamped.isAfter(now) ? now : stamped));
+                });
+        for (int i = 0; i < failedDrafts.size(); i++) {
             events.add(
                     event(
-                            NotificationDraft.of(
-                                    author,
-                                    mentioned,
-                                    type,
-                                    entityType,
-                                    (UUID) source[0],
-                                    (UUID) source[2]),
-                            (Timestamp) source[3]));
+                            NotificationDraft.systemNotice(
+                                    owners.get(i),
+                                    NotificationType.SCHEDULED_POST_FAILED,
+                                    POST_ENTITY_TYPE,
+                                    failedDrafts.get(i),
+                                    failedDrafts.get(i),
+                                    PostCreationSeedWriter.FAILED_SCHEDULE_REASONS.get(i),
+                                    null),
+                            failedAt.get(i)));
         }
         return events;
     }

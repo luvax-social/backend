@@ -33,6 +33,8 @@ import com.app.common.seed.writer.MediaSeedWriter;
 import com.app.common.seed.writer.MessageSeedWriter;
 import com.app.common.seed.writer.ModerationSeedWriter;
 import com.app.common.seed.writer.NotificationSeedWriter;
+import com.app.common.seed.writer.PlaceModerationSeedWriter;
+import com.app.common.seed.writer.PostCreationSeedWriter;
 import com.app.common.seed.writer.PostSeedWriter;
 import com.app.common.seed.writer.SocialGraphSeedWriter;
 import com.app.common.seed.writer.StorySeedWriter;
@@ -101,6 +103,8 @@ class DomainWritersSeedWriterIT {
     @Autowired private UserSeedWriter userSeedWriter;
     @Autowired private MediaSeedWriter mediaSeedWriter;
     @Autowired private PostSeedWriter postSeedWriter;
+    @Autowired private PostCreationSeedWriter postCreationSeedWriter;
+    @Autowired private PlaceModerationSeedWriter placeModerationSeedWriter;
     @Autowired private CommentSeedWriter commentSeedWriter;
     @Autowired private EngagementSeedWriter engagementSeedWriter;
     @Autowired private SocialGraphSeedWriter socialGraphSeedWriter;
@@ -128,6 +132,7 @@ class DomainWritersSeedWriterIT {
                 commentSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
         engagementSeedWriter.write(content, usersByUsername, postIdBySeedId, commentIds, timeline);
         socialGraphSeedWriter.write(content, usersByUsername, timeline);
+        postCreationSeedWriter.write(content, usersByUsername, timeline);
         storySeedWriter.write(content, usersByUsername, timeline);
         messageSeedWriter.write(
                 content, usersByUsername, mediaByCompositeKey, postIdBySeedId, timeline);
@@ -135,6 +140,7 @@ class DomainWritersSeedWriterIT {
         // user_warnings, which this call is what populates. Matches SeedRunner.runWriterChain().
         List<UUID> reportIds =
                 moderationSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
+        placeModerationSeedWriter.write(content, timeline);
         notificationSeedWriter.write(timeline);
         analyticsSeedWriter.write(timeline);
 
@@ -560,7 +566,8 @@ class DomainWritersSeedWriterIT {
         assertThat(
                         count(
                                 "SELECT COUNT(*) FROM notifications WHERE category = 'system'"
-                                        + " AND type <> 'support_ticket_update'"
+                                        + " AND type NOT IN ('support_ticket_update',"
+                                        + " 'scheduled_post_failed')"
                                         + " AND admin_action_id IS NULL"))
                 .isZero();
         assertThat(
@@ -672,8 +679,11 @@ class DomainWritersSeedWriterIT {
     private void assertModerationReportIds(List<UUID> reportIds) {
         assertThat(reportIds).isNotEmpty();
         assertThat(reportIds).doesNotHaveDuplicates();
+        // Place reports belong to PlaceModerationSeedWriter, which runs after the moderation
+        // writer and is covered by SeedRunnerIT's enum coverage.
         Integer reportCount =
-                jdbcTemplate.queryForObject("SELECT COUNT(*) FROM reports", Integer.class);
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM reports WHERE report_type <> 'place'", Integer.class);
         assertThat(reportCount).isEqualTo(reportIds.size());
         assertThat(reportCount).isGreaterThan(100);
 

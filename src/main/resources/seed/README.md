@@ -142,6 +142,16 @@ run starts, so a Spring Boot DevTools hot restart (which reuses the same JVM and
 search, and recommender state) does not silently trigger a second reset and reseed on top of
 whatever the first run already wrote. Stop and start the application to force a genuinely new run.
 
+## Post creation data
+
+`PostCreationSeedWriter` runs after `SocialGraphSeedWriter`, because every tag, invitation and mention follows the follow and block relationships that writer produced.
+It derives all of its rows from posts, comments, follows and blocks the earlier writers wrote, with one seeded random stream, so a run is repeatable and no row points at an account or post that does not exist.
+It writes the places, a place on about a quarter of the published posts (some of them at a place an administrator later removed), alt text on about two media items in five, the tag settings of the accounts (a tenth allow only people they follow, one in fourteen allow no one, one in seven review tags), people tags in every state, co-authors in every state, caption and comment mentions, ten scheduled posts and five drafts that were once scheduled and failed.
+Seeded scheduled posts are due at least four minutes ahead, and the first is due soon enough to watch the publisher take it, so run the application with `APP_POST_SCHEDULED_PUBLISH_ENABLED=true`.
+`PlaceModerationSeedWriter` runs after `ModerationSeedWriter` and writes the `ban_place`, `unban_place` and `delete_place` audit rows that explain the state of each place, with reports against places that were banned or removed resolved by those rows and a few left pending, in review or dismissed.
+`NotificationSeedWriter` reads the stored tags, invitations, mentions and failed drafts back instead of drawing them at random, and the fourteen behavioural event types of the feature come from signals `PostCreationSeedWriter` records, so the five-row floors hold for every new enum value, notification type, report type and audit action.
+Place index events are emitted for every place, and the index keeps only the active places a published post uses.
+
 ## QA accounts
 
 Every seeded account shares the plaintext password `Password123!`.
@@ -305,6 +315,7 @@ describes.
 | `users.json` | The 140 seed users, including the 8 fixed QA accounts, and the message permission and platform word toggle of the accounts that differ from the defaults | `UserSeedWriter`, and read by nearly every other writer |
 | `content/posts.json` | 722 authored posts (image/video/carousel/text) | `PostSeedWriter` |
 | `content/hashtags.json` | The hashtag catalog posts reference | `PostSeedWriter` |
+| `content/places.json` | 25 places: 10 active, 5 active after a ban was lifted, 5 banned and 5 deleted, each with the administrator note recorded for its state | `PostCreationSeedWriter` (the rows), `PlaceModerationSeedWriter` (the audit history and reports) |
 | `content/comment_pools.json` | 900 pooled comment lines across 22 topics, plus scripted comment chains | `CommentSeedWriter` |
 | `messaging/conversations.json` | 85 conversations and their message history (60 between generated accounts, 25 involving `admin`) | `MessageSeedWriter` |
 | `moderation/moderation_cases.json` | 6 narrative moderation cases plus supplementary actions and reports | `ModerationSeedWriter` |
