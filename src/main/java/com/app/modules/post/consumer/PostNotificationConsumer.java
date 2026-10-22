@@ -188,10 +188,15 @@ public class PostNotificationConsumer {
             throw new PermanentMessageException("Event type is missing");
         }
         Map<String, Object> data = event.data();
-        if (data == null
-                || data.get("postId") == null
-                || data.get("postOwnerId") == null
-                || data.get("userId") == null) {
+        if (data == null || data.get("postId") == null) {
+            throw new PermanentMessageException("Post id is missing");
+        }
+        // Only a like names an owner and a liker; the involvement events carry their own keys,
+        // which PostInvolvementNotifier reads.
+        boolean likeEvent =
+                PostEventTypes.POST_LIKED_V1.equals(event.eventType())
+                        || PostEventTypes.POST_UNLIKED_V1.equals(event.eventType());
+        if (likeEvent && (data.get("postOwnerId") == null || data.get("userId") == null)) {
             throw new PermanentMessageException("Post, owner or liker id is missing");
         }
     }

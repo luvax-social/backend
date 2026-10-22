@@ -141,6 +141,21 @@ class PostNotificationConsumerTest {
     }
 
     @Test
+    void consume_involvementEventWithoutOwnerOrLikerKeys_isHandedToTheNotifier() throws Exception {
+        runHandlers();
+        Map<String, Object> data = Map.of("postId", POST.toString(), "inviteeId", LIKER.toString());
+        when(involvementNotifier.dispatch(PostEventTypes.POST_COLLABORATION_INVITED_V1, data))
+                .thenReturn(true);
+
+        consumer.consume(
+                message(envelope(PostEventTypes.POST_COLLABORATION_INVITED_V1, data)), channel);
+
+        verify(involvementNotifier).dispatch(PostEventTypes.POST_COLLABORATION_INVITED_V1, data);
+        verify(channel).basicAck(1L, false);
+        verify(channel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
+    }
+
+    @Test
     void consume_transientFailureExhaustsRetry_deadLettersWithoutRequeue() throws Exception {
         when(processedMessageService.processOnce(any(), any(), any(), any()))
                 .thenThrow(new QueryTimeoutException("db down"));
