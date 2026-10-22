@@ -93,7 +93,7 @@ class GorseRebuildNegativeFeedbackTest {
                                 new PostRow(livePreferencePost, false, NOW),
                                 new PostRow(undonePreferencePost, false, NOW)));
         lenient()
-                .when(source.findExistingPostIds(any()))
+                .when(source.findEverPublishedPostIds(any()))
                 .thenReturn(Set.of(likedPost, livePreferencePost, undonePreferencePost));
         lenient().when(hashtagService.getHashtagNamesForPosts(any())).thenReturn(Map.of());
         lenient()

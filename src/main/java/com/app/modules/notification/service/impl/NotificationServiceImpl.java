@@ -442,7 +442,12 @@ public class NotificationServiceImpl implements NotificationService {
             case FOLLOW, FOLLOW_REQUEST -> preferences(recipientId).follows();
             case LIKE_POST, LIKE_COMMENT -> preferences(recipientId).likes();
             case COMMENT_POST, REPLY_COMMENT -> preferences(recipientId).comments();
-            case MENTION_POST, MENTION_COMMENT -> preferences(recipientId).mentions();
+            case MENTION_POST,
+                            MENTION_COMMENT,
+                            POST_TAG,
+                            POST_TAG_REQUEST,
+                            POST_COLLABORATION_ACCEPTED ->
+                    preferences(recipientId).mentions();
             case MESSAGE -> preferences(recipientId).messages();
             // STORY_VIEW has no user_settings toggle; it is never preference-suppressed.
             case STORY_VIEW -> true;
@@ -462,7 +467,9 @@ public class NotificationServiceImpl implements NotificationService {
                             REPORT_POST_REMOVED,
                             POST_RESTORED,
                             REPORT_DISMISSED,
-                            SUPPORT_TICKET_UPDATE ->
+                            SUPPORT_TICKET_UPDATE,
+                            POST_COLLABORATION_INVITE,
+                            SCHEDULED_POST_FAILED ->
                     true;
         };
     }

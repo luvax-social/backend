@@ -13,4 +13,11 @@ public record PreviewMediaResponse(
                 String blurhash,
         @Schema(description = "image or video", requiredMode = REQUIRED) String mediaType,
         @Schema(description = "Width in pixels", nullable = true) Integer width,
-        @Schema(description = "Height in pixels", nullable = true) Integer height) {}
+        @Schema(description = "Height in pixels", nullable = true) Integer height,
+        @Schema(
+                        description =
+                                "Alt text the author wrote for the item. Null when none was"
+                                        + " written, and always null for a story, which has no alt"
+                                        + " text; the client then generates a label.",
+                        nullable = true)
+                String altText) {}

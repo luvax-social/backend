@@ -2,6 +2,7 @@ package com.app.modules.recommendation.messaging;
 
 import static java.util.Map.entry;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -15,6 +16,8 @@ import com.app.modules.comment.enums.CommentHiddenReason;
 import com.app.modules.comment.messaging.CommentEventTypes;
 import com.app.modules.message.messaging.MessageEventTypes;
 import com.app.modules.message.util.ReactionEmojiValidator;
+import com.app.modules.post.messaging.PostEventTypes;
+import com.app.modules.post.service.PostPublicationException;
 import com.app.modules.recommendation.enums.UserEventType;
 import com.app.modules.social.messaging.SocialEventTypes;
 
@@ -42,6 +45,14 @@ public final class DomainSignalMappings {
     private static final String ENTITY_COMMENT = "comment";
     private static final String ENTITY_CONVERSATION = "conversation";
     private static final String ENTITY_MESSAGE = "message";
+    private static final String ENTITY_POST = "post";
+
+    private static final Set<String> PUBLISH_SOURCES = Set.of("owner", "scheduler");
+
+    private static final Set<String> SCHEDULE_FAILURE_REASONS =
+            Stream.of(PostPublicationException.Reason.values())
+                    .map(reason -> reason.name().toLowerCase(Locale.ROOT))
+                    .collect(Collectors.toUnmodifiableSet());
 
     private static final Set<String> HIDDEN_REASONS =
             Stream.of(CommentHiddenReason.values())
@@ -113,7 +124,105 @@ public final class DomainSignalMappings {
                                     DomainSignalMappings::requestResolutionType,
                                     ENTITY_CONVERSATION,
                                     dataId("conversationId"),
-                                    DomainSignalMappings::requestResolutionMetadata)));
+                                    DomainSignalMappings::requestResolutionMetadata)),
+                    entry(
+                            PostEventTypes.POST_PUBLISHED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_PUBLISH,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    DomainSignalMappings::publishedMetadata)),
+                    entry(
+                            PostEventTypes.POST_SCHEDULED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_SCHEDULE,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    DomainSignalMappings::scheduledMetadata)),
+                    entry(
+                            PostEventTypes.POST_SCHEDULE_FAILED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_SCHEDULE_FAILED,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    DomainSignalMappings::scheduleFailedMetadata)),
+                    entry(
+                            PostEventTypes.POST_DRAFT_SAVED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_DRAFT_SAVE,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_ARCHIVED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_ARCHIVE,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_UNARCHIVED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_UNARCHIVE,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_TAG_CREATED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_TAG_ADD,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_TAG_APPROVED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_TAG_APPROVE,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_TAG_REMOVED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_TAG_REMOVE,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_COLLABORATION_INVITED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_COLLAB_INVITE,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_COLLABORATION_ACCEPTED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_COLLAB_ACCEPT,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_COLLABORATION_DECLINED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_COLLAB_DECLINE,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_COLLABORATION_LEFT_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_COLLAB_LEAVE,
+                                    ENTITY_POST,
+                                    dataId("postId"),
+                                    noMetadata())),
+                    entry(
+                            PostEventTypes.POST_MENTION_CREATED_V1,
+                            new SignalMapping(
+                                    UserEventType.POST_MENTION,
+                                    ENTITY_USER,
+                                    dataId("mentionedUserId"),
+                                    noMetadata())));
 
     private DomainSignalMappings() {}
 
@@ -135,6 +244,39 @@ public final class DomainSignalMappings {
 
     private static Function<DomainEventEnvelope, String> noMetadata() {
         return event -> "";
+    }
+
+    // Whether the owner pressed publish or the scheduler did is the owner's own choice, and it is
+    // checked against the closed set before it is spliced into JSON.
+    private static String publishedMetadata(DomainEventEnvelope event) {
+        Object source = data(event).get("source");
+        if (source == null || !PUBLISH_SOURCES.contains(source.toString())) {
+            throw new PermanentMessageException(
+                    "Signal " + event.eventType() + " has an unknown source");
+        }
+        return "{\"source\":\"" + source + "\"}";
+    }
+
+    // The lead time is the owner's own choice of when the post goes out. Only a whole number of
+    // minutes reaches the row.
+    private static String scheduledMetadata(DomainEventEnvelope event) {
+        Object lead = data(event).get("leadMinutes");
+        if (!(lead instanceof Number number)) {
+            throw new PermanentMessageException(
+                    "Signal " + event.eventType() + " has no leadMinutes");
+        }
+        return "{\"leadMinutes\":" + number.longValue() + "}";
+    }
+
+    // Checked against the closed set before it is spliced into JSON, so a malformed event can never
+    // inject structure into a stored row.
+    private static String scheduleFailedMetadata(DomainEventEnvelope event) {
+        Object reason = data(event).get("reason");
+        if (reason == null || !SCHEDULE_FAILURE_REASONS.contains(reason.toString())) {
+            throw new PermanentMessageException(
+                    "Signal " + event.eventType() + " has an unknown reason");
+        }
+        return "{\"reason\":\"" + reason + "\"}";
     }
 
     private static String muteMetadata(DomainEventEnvelope event) {

@@ -38,6 +38,9 @@ app:
   hashtag:
     consumer:
       enabled: true
+  place:
+    consumer:
+      enabled: true
   post:
     consumer:
       enabled: true

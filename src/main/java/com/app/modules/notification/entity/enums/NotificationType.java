@@ -36,14 +36,33 @@ public enum NotificationType {
     REACTION_REMOVED,
     REPORT_POST_REMOVED,
     POST_RESTORED,
-    REPORT_DISMISSED;
+    REPORT_DISMISSED,
+    // Being tagged in a post. The tag is shown at once (POST_TAG) or waits for the tagged account's
+    // approval (POST_TAG_REQUEST). Both follow the recipient's mentions preference, because each
+    // is someone involving the recipient in a post.
+    POST_TAG,
+    POST_TAG_REQUEST,
+    // An invitation to co-author a post. Not user-toggleable: it asks a question, and an account
+    // that could switch it off would never see the question.
+    POST_COLLABORATION_INVITE,
+    POST_COLLABORATION_ACCEPTED,
+    // A scheduled post that could not be published and went back to drafts. A platform notice with
+    // no actor, and not user-toggleable, because it is the only way the owner learns the post did
+    // not go out.
+    SCHEDULED_POST_FAILED;
 
     /** The feed filter this type belongs to; written to {@code notifications.category}. */
     public NotificationCategory category() {
         return switch (this) {
             case LIKE_POST, LIKE_COMMENT -> NotificationCategory.LIKE;
             case COMMENT_POST, REPLY_COMMENT -> NotificationCategory.COMMENT;
-            case MENTION_POST, MENTION_COMMENT -> NotificationCategory.MENTION;
+            case MENTION_POST,
+                            MENTION_COMMENT,
+                            POST_TAG,
+                            POST_TAG_REQUEST,
+                            POST_COLLABORATION_INVITE,
+                            POST_COLLABORATION_ACCEPTED ->
+                    NotificationCategory.MENTION;
             case FOLLOW, FOLLOW_REQUEST -> NotificationCategory.FOLLOW;
             case STORY_VIEW -> NotificationCategory.STORY;
             case MESSAGE -> NotificationCategory.MESSAGE;
@@ -56,7 +75,8 @@ public enum NotificationType {
                             REACTION_REMOVED,
                             REPORT_POST_REMOVED,
                             POST_RESTORED,
-                            REPORT_DISMISSED ->
+                            REPORT_DISMISSED,
+                            SCHEDULED_POST_FAILED ->
                     NotificationCategory.SYSTEM;
         };
     }

@@ -38,6 +38,13 @@ package com.app.modules.social.policy;
  * lets straight through. The reported reason is the first deny, else the first hide that took
  * effect, else the reason the base outcome was chosen, else {@link InteractionReason#NONE}.
  *
+ * <p>A tag runs the block, limit and tag permission rules. The tagged account's setting decides the
+ * base: {@code nobody}, and an unfollowed tagger under {@code following}, deny; manual approval
+ * routes the tag to the requests outcome (pending, and the tagged account is told); anything else
+ * allows it. An interaction limit on the tagged account converts an allowed tag, or one awaiting
+ * approval, into {@link InteractionOutcome#ROUTE_TO_HIDDEN_REQUESTS}: pending, and the tagged
+ * account is not notified. Inviting a co-author runs the block rule only.
+ *
  * <p>An actor acting on themselves is allowed with {@link InteractionReason#SELF}, after only a
  * block check against the secondary targets.
  */
@@ -51,8 +58,8 @@ public interface InteractionPolicyService {
      *
      * @param request the interaction to evaluate
      * @return the outcome and the reason for it
-     * @throws IllegalArgumentException when the type is one no rule handles yet ({@code TAG},
-     *     {@code STORY_REPLY}, {@code STORY_RESPONSE}), or a message send carries no conversation
+     * @throws IllegalArgumentException when the type is one no rule handles yet ({@code
+     *     STORY_REPLY}, {@code STORY_RESPONSE}), or a message send carries no conversation
      */
     InteractionDecision evaluate(InteractionRequest request);
 }

@@ -157,7 +157,8 @@ public class AdminServiceImpl implements AdminService {
             UUID actorId, UUID postId, AdminActionRequest request) {
         ModerationOutcome outcome =
                 moderatePostAndReport(actorId, postId, AdminActionType.RESTORE_POST, request);
-        return new AdminPostRestoreResponse(outcome.action(), outcome.remainingBannedHashtags());
+        return new AdminPostRestoreResponse(
+                outcome.action(), outcome.remainingBannedHashtags(), outcome.strippedPlaceName());
     }
 
     @Override
@@ -429,6 +430,9 @@ public class AdminServiceImpl implements AdminService {
         if (!result.remainingBannedHashtags().isEmpty()) {
             metadata.put("remainingBannedHashtags", result.remainingBannedHashtags());
         }
+        if (result.strippedPlaceName() != null) {
+            metadata.put("strippedPlace", result.strippedPlaceName());
+        }
         AdminActionResponse action =
                 adminActionRecorder.record(
                         actorId,
@@ -470,13 +474,16 @@ public class AdminServiceImpl implements AdminService {
                         action.id());
             }
         }
-        return new ModerationOutcome(action, result.remainingBannedHashtags());
+        return new ModerationOutcome(
+                action, result.remainingBannedHashtags(), result.strippedPlaceName());
     }
 
     // The audit row plus the one side effect a moderator has to be told about. The audit row alone
     // cannot carry it in a declared shape: metadata is a free-form map shared by every action.
     private record ModerationOutcome(
-            AdminActionResponse action, List<String> remainingBannedHashtags) {}
+            AdminActionResponse action,
+            List<String> remainingBannedHashtags,
+            String strippedPlaceName) {}
 
     private AdminActionResponse moderateComment(
             UUID actorId, UUID commentId, AdminActionType actionType, AdminActionRequest request) {

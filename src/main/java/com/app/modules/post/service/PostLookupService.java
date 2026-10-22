@@ -2,6 +2,7 @@ package com.app.modules.post.service;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import com.app.modules.post.dto.response.FeedPostResponse;
@@ -25,6 +26,17 @@ public interface PostLookupService {
      * @return matching posts, at most one per requested id
      */
     List<Post> findActiveByIds(Collection<UUID> ids);
+
+    /**
+     * Returns the accepted co-authors of each post, owner excluded.
+     *
+     * <p>For callers that apply a viewer's follow, mute or show-fewer preferences to every author
+     * of a post rather than to its owner alone.
+     *
+     * @param postIds posts to look up
+     * @return accepted co-author ids keyed by post id; absent for a post with none
+     */
+    Map<UUID, List<UUID>> findAcceptedCoAuthors(Collection<UUID> postIds);
 
     /**
      * Batch-assembles feed responses with author, media, and viewer-state hydration.

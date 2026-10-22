@@ -11,17 +11,17 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/** Composite primary key for {@link PostUserTag} {@code (post_id, tagged_user_id)}. */
+/** Composite primary key for {@link PostCollaborator} {@code (post_id, user_id)}. */
 @Embeddable
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode
-public class PostUserTagId implements Serializable {
+public class PostCollaboratorId implements Serializable {
 
     @Column(name = "post_id")
     private UUID postId;
 
-    @Column(name = "tagged_user_id")
-    private UUID taggedUserId;
+    @Column(name = "user_id")
+    private UUID userId;
 }

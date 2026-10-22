@@ -16,13 +16,14 @@ import com.fasterxml.jackson.annotation.JsonValue;
  * means adding it here and, in the same commit, extending the column with a new ClickHouse
  * migration script; the declaration order is the column's ordinal order.
  *
- * <p>Sixteen values have a producer today. {@link #SESSION_START}, {@link #SEARCH} and {@link
+ * <p>Thirty values have a producer today. {@link #SESSION_START}, {@link #SEARCH} and {@link
  * #PROFILE_VIEW} are written by {@code UserEventRecorder}; the six engagement values ({@link
  * #POST_LIKE}, {@link #POST_SAVE}, {@link #POST_VIEW}, {@link #POST_COMMENT}, {@link #POST_SHARE}
- * and {@link #COMMENT_LIKE}) by the feedback consumer; and the seven interaction control values
- * that map a domain event by the import consumer. The remaining values exist in the column and are
- * not produced yet. See {@code UserEventRecorder} for why the recorder's write set is deliberately
- * small.
+ * and {@link #COMMENT_LIKE}) by the feedback consumer; and the seven interaction control values and
+ * the fourteen post creation values (publishing, scheduling, drafts, archiving, tags, collaboration
+ * and mentions) that map a domain event by the import consumer. The remaining values exist in the
+ * column and are not produced yet. See {@code UserEventRecorder} for why the recorder's write set
+ * is deliberately small.
  */
 public enum UserEventType {
     POST_VIEW,
@@ -57,7 +58,21 @@ public enum UserEventType {
     MESSAGE_REQUEST_DELETE,
     COMMENT_HIDDEN,
     COMMENT_UNHIDE,
-    INTERACTION_LIMIT_CHANGE;
+    INTERACTION_LIMIT_CHANGE,
+    POST_PUBLISH,
+    POST_SCHEDULE,
+    POST_SCHEDULE_FAILED,
+    POST_DRAFT_SAVE,
+    POST_ARCHIVE,
+    POST_UNARCHIVE,
+    POST_TAG_ADD,
+    POST_TAG_APPROVE,
+    POST_TAG_REMOVE,
+    POST_COLLAB_INVITE,
+    POST_COLLAB_ACCEPT,
+    POST_COLLAB_DECLINE,
+    POST_COLLAB_LEAVE,
+    POST_MENTION;
 
     /**
      * The signals that record an account's private interaction preferences.

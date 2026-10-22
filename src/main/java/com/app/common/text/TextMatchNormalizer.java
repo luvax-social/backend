@@ -19,6 +19,7 @@ import java.util.regex.Pattern;
 public final class TextMatchNormalizer {
     private static final Pattern MARKS = Pattern.compile("\\p{M}+");
     private static final Pattern TOKEN = Pattern.compile("[\\p{L}\\p{N}@$!]+");
+    private static final Pattern NAME_WORD = Pattern.compile("[\\p{L}\\p{N}]+");
     private static final Map<Character, Character> LEET =
             Map.of(
                     '0', 'o',
@@ -57,6 +58,36 @@ public final class TextMatchNormalizer {
 
     public static String normalizePhrase(String raw) {
         return String.join(" ", tokens(raw));
+    }
+
+    /**
+     * Normalises a place name to the key the places registry deduplicates on.
+     *
+     * <p>Shares the folding steps of the Hidden Words contract (NFD, marks removed, the stroked d
+     * mapped to d, lower case) and joins runs of letters and digits with one space, but never maps
+     * digits to letters. That step is right for matching hostile spellings and wrong for naming: it
+     * would merge "B4 Cafe" with "Ba Cafe". The same contract is implemented in SQL by {@code
+     * fn_normalise_place_name} (V153), and a parity test pins the two to the shared vectors.
+     *
+     * @param raw the place name as typed; may be null
+     * @return the normalised key, or an empty string when the name holds no letter or digit
+     */
+    public static String normalizeName(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        String folded =
+                MARKS.matcher(Normalizer.normalize(raw, Normalizer.Form.NFD))
+                        .replaceAll("")
+                        .replace('đ', 'd')
+                        .replace('Đ', 'd')
+                        .toLowerCase(Locale.ROOT);
+        List<String> words = new ArrayList<>();
+        Matcher matcher = NAME_WORD.matcher(folded);
+        while (matcher.find()) {
+            words.add(matcher.group());
+        }
+        return String.join(" ", words);
     }
 
     private static String stripMarkers(String token) {

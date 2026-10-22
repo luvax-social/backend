@@ -103,7 +103,7 @@ public interface HashtagTrendingRepository
                             + "     AND au.is_private = FALSE"
                             + "     AND au.deleted_at IS NULL"
                             + "     AND au.status = 'active'"
-                            + "   ORDER BY p.created_at DESC, pm.\"position\" ASC"
+                            + "   ORDER BY p.published_at DESC, pm.\"position\" ASC"
                             + "   LIMIT 1"
                             + " ) cover ON TRUE"
                             + " WHERE h.id IN (:ids)",

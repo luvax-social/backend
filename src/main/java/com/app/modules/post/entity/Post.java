@@ -1,6 +1,5 @@
 package com.app.modules.post.entity;
 
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -87,14 +86,23 @@ public class Post {
     @Column(name = "view_count", insertable = false, updatable = false)
     private int viewCount;
 
-    @Column(name = "location_name", length = 255)
-    private String locationName;
+    /** The place this post is tagged at, or {@code null}; a plain reference to the places table. */
+    @Column(name = "place_id")
+    private UUID placeId;
 
-    @Column(name = "latitude", precision = 10, scale = 8)
-    private BigDecimal latitude;
+    /**
+     * When the post is due to be published; set while the status is {@code scheduled}, and kept
+     * after a moderation removal so a restore can tell whether the time has passed.
+     */
+    @Column(name = "scheduled_at")
+    private OffsetDateTime scheduledAt;
 
-    @Column(name = "longitude", precision = 11, scale = 8)
-    private BigDecimal longitude;
+    // Written only by trigger fn_posts_published_at (V151): the instant the status first became
+    // published, null until then and never cleared. Hibernate re-reads it after every insert and
+    // update so the entity reflects the trigger-written value.
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "published_at", insertable = false, updatable = false)
+    private OffsetDateTime publishedAt;
 
     // Database-generated like updated_at, rather than @CreationTimestamp. The column's DEFAULT
     // NOW() and the sibling updated_at default both resolve to the same transaction timestamp, so

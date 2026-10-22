@@ -17,6 +17,7 @@ import com.app.common.messaging.exception.PermanentMessageException;
 import com.app.common.outbox.model.DomainEventEnvelope;
 import com.app.modules.comment.messaging.CommentEventTypes;
 import com.app.modules.message.messaging.MessageEventTypes;
+import com.app.modules.post.messaging.PostEventTypes;
 import com.app.modules.recommendation.enums.UserEventType;
 import com.app.modules.social.messaging.SocialEventTypes;
 
@@ -46,7 +47,139 @@ class DomainSignalMappingsTest {
                         CommentEventTypes.COMMENT_UNHIDDEN_V1,
                         CommentEventTypes.COMMENT_HIDDEN_V1,
                         MessageEventTypes.MESSAGE_REQUEST_RESOLVED_V1,
-                        MessageEventTypes.MESSAGE_REACTION_CHANGED_V1);
+                        MessageEventTypes.MESSAGE_REACTION_CHANGED_V1,
+                        PostEventTypes.POST_PUBLISHED_V1,
+                        PostEventTypes.POST_SCHEDULED_V1,
+                        PostEventTypes.POST_SCHEDULE_FAILED_V1,
+                        PostEventTypes.POST_DRAFT_SAVED_V1,
+                        PostEventTypes.POST_ARCHIVED_V1,
+                        PostEventTypes.POST_UNARCHIVED_V1,
+                        PostEventTypes.POST_TAG_CREATED_V1,
+                        PostEventTypes.POST_TAG_APPROVED_V1,
+                        PostEventTypes.POST_TAG_REMOVED_V1,
+                        PostEventTypes.POST_COLLABORATION_INVITED_V1,
+                        PostEventTypes.POST_COLLABORATION_ACCEPTED_V1,
+                        PostEventTypes.POST_COLLABORATION_DECLINED_V1,
+                        PostEventTypes.POST_COLLABORATION_LEFT_V1,
+                        PostEventTypes.POST_MENTION_CREATED_V1);
+    }
+
+    @Test
+    void published_recordsTheOwnerAndHowTheyPublished() {
+        ResolvedSignal signal =
+                resolve(
+                        PostEventTypes.POST_PUBLISHED_V1,
+                        Map.of("postId", post.toString(), "source", "scheduler"));
+
+        assertThat(signal.userId()).isEqualTo(actor);
+        assertThat(signal.eventType()).isEqualTo(UserEventType.POST_PUBLISH);
+        assertThat(signal.entityType()).isEqualTo("post");
+        assertThat(signal.entityId()).isEqualTo(post);
+        assertThat(signal.metadata()).isEqualTo("{\"source\":\"scheduler\"}");
+    }
+
+    @Test
+    void published_unknownSource_isRejectedAsPermanent() {
+        assertThatThrownBy(
+                        () ->
+                                resolve(
+                                        PostEventTypes.POST_PUBLISHED_V1,
+                                        Map.of("postId", post.toString(), "source", "x\"}")))
+                .isInstanceOf(PermanentMessageException.class);
+    }
+
+    @Test
+    void scheduled_recordsOnlyTheLeadTimeInWholeMinutes() {
+        ResolvedSignal signal =
+                resolve(
+                        PostEventTypes.POST_SCHEDULED_V1,
+                        Map.of(
+                                "postId",
+                                post.toString(),
+                                "scheduledAt",
+                                "2026-11-01T10:00:00Z",
+                                "leadMinutes",
+                                180));
+
+        assertThat(signal.eventType()).isEqualTo(UserEventType.POST_SCHEDULE);
+        assertThat(signal.metadata()).isEqualTo("{\"leadMinutes\":180}");
+    }
+
+    @Test
+    void scheduleFailed_recordsTheReasonFromTheClosedSet() {
+        ResolvedSignal signal =
+                resolve(
+                        PostEventTypes.POST_SCHEDULE_FAILED_V1,
+                        Map.of("postId", post.toString(), "reason", "banned_hashtag"));
+
+        assertThat(signal.eventType()).isEqualTo(UserEventType.POST_SCHEDULE_FAILED);
+        assertThat(signal.metadata()).isEqualTo("{\"reason\":\"banned_hashtag\"}");
+    }
+
+    @Test
+    void scheduleFailed_unknownReason_isRejectedAsPermanent() {
+        assertThatThrownBy(
+                        () ->
+                                resolve(
+                                        PostEventTypes.POST_SCHEDULE_FAILED_V1,
+                                        Map.of("postId", post.toString(), "reason", "because")))
+                .isInstanceOf(PermanentMessageException.class);
+    }
+
+    @Test
+    void lifecycleTagAndCollaborationEvents_mapToTheirPostWithNoMetadata() {
+        Map<String, UserEventType> expected =
+                Map.ofEntries(
+                        Map.entry(
+                                PostEventTypes.POST_DRAFT_SAVED_V1, UserEventType.POST_DRAFT_SAVE),
+                        Map.entry(PostEventTypes.POST_ARCHIVED_V1, UserEventType.POST_ARCHIVE),
+                        Map.entry(PostEventTypes.POST_UNARCHIVED_V1, UserEventType.POST_UNARCHIVE),
+                        Map.entry(PostEventTypes.POST_TAG_CREATED_V1, UserEventType.POST_TAG_ADD),
+                        Map.entry(
+                                PostEventTypes.POST_TAG_APPROVED_V1,
+                                UserEventType.POST_TAG_APPROVE),
+                        Map.entry(
+                                PostEventTypes.POST_TAG_REMOVED_V1, UserEventType.POST_TAG_REMOVE),
+                        Map.entry(
+                                PostEventTypes.POST_COLLABORATION_INVITED_V1,
+                                UserEventType.POST_COLLAB_INVITE),
+                        Map.entry(
+                                PostEventTypes.POST_COLLABORATION_ACCEPTED_V1,
+                                UserEventType.POST_COLLAB_ACCEPT),
+                        Map.entry(
+                                PostEventTypes.POST_COLLABORATION_DECLINED_V1,
+                                UserEventType.POST_COLLAB_DECLINE),
+                        Map.entry(
+                                PostEventTypes.POST_COLLABORATION_LEFT_V1,
+                                UserEventType.POST_COLLAB_LEAVE));
+
+        expected.forEach(
+                (eventType, userEventType) -> {
+                    ResolvedSignal signal = resolve(eventType, Map.of("postId", post.toString()));
+                    assertThat(signal.eventType()).as(eventType).isEqualTo(userEventType);
+                    assertThat(signal.entityType()).as(eventType).isEqualTo("post");
+                    assertThat(signal.entityId()).as(eventType).isEqualTo(post);
+                    assertThat(signal.metadata()).as(eventType).isEmpty();
+                });
+    }
+
+    @Test
+    void mention_isAboutTheMentionedAccountAndNeverRecordsWhetherTheyWereNotified() {
+        ResolvedSignal signal =
+                resolve(
+                        PostEventTypes.POST_MENTION_CREATED_V1,
+                        Map.of(
+                                "postId",
+                                post.toString(),
+                                "mentionedUserId",
+                                target.toString(),
+                                "notify",
+                                false));
+
+        assertThat(signal.eventType()).isEqualTo(UserEventType.POST_MENTION);
+        assertThat(signal.entityType()).isEqualTo("user");
+        assertThat(signal.entityId()).isEqualTo(target);
+        assertThat(signal.metadata()).isEmpty();
     }
 
     @Test

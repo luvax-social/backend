@@ -49,7 +49,10 @@ public enum AdminActionType {
     REVOKE_VERIFICATION,
     CREATE_HIDDEN_WORD,
     EDIT_HIDDEN_WORD,
-    DELETE_HIDDEN_WORD;
+    DELETE_HIDDEN_WORD,
+    BAN_PLACE,
+    UNBAN_PLACE,
+    DELETE_PLACE;
 
     @JsonCreator
     public static AdminActionType fromJson(String value) {

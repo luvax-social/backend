@@ -3,6 +3,7 @@ package com.app.modules.users.dto.response;
 import java.time.OffsetDateTime;
 
 import com.app.modules.users.enums.MessagePermission;
+import com.app.modules.users.enums.TagPermission;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -38,4 +39,10 @@ public record UserSettingsResponse(
                                         + " account",
                         example = "true")
                 boolean hiddenWordsSystemEnabled,
+        @Schema(description = "Who may tag this account in a post", example = "everyone")
+                TagPermission tagPermission,
+        @Schema(
+                        description = "Whether each tag of this account waits for its approval",
+                        example = "false")
+                boolean manualTagApproval,
         @Schema(description = "Last updated timestamp") OffsetDateTime updatedAt) {}

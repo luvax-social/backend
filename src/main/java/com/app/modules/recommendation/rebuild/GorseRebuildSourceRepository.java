@@ -32,9 +32,10 @@ public class GorseRebuildSourceRepository {
      *
      * @param id the post
      * @param hidden true when the post is not published or is soft-deleted
-     * @param createdAt creation time, the item's timestamp
+     * @param timestamp publication time, the item's timestamp; the creation time for a post never
+     *     published
      */
-    public record PostRow(UUID id, boolean hidden, OffsetDateTime createdAt) {}
+    public record PostRow(UUID id, boolean hidden, OffsetDateTime timestamp) {}
 
     /** One standing not-interested mark. */
     public record UserPost(UUID userId, UUID postId) {}
@@ -54,12 +55,13 @@ public class GorseRebuildSourceRepository {
     public List<PostRow> findPostsAfter(UUID after, int limit) {
         return jdbc.query(
                 "SELECT id, (status::text <> 'published' OR deleted_at IS NOT NULL) AS hidden,"
-                        + " created_at FROM posts WHERE id > ? ORDER BY id LIMIT ?",
+                        + " COALESCE(published_at, created_at) AS item_time FROM posts WHERE id > ?"
+                        + " ORDER BY id LIMIT ?",
                 (rs, row) ->
                         new PostRow(
                                 rs.getObject("id", UUID.class),
                                 rs.getBoolean("hidden"),
-                                rs.getObject("created_at", OffsetDateTime.class)),
+                                rs.getObject("item_time", OffsetDateTime.class)),
                 after == null ? BEFORE_FIRST : after,
                 limit);
     }
@@ -78,8 +80,14 @@ public class GorseRebuildSourceRepository {
         }
     }
 
-    /** Returns which of the given posts exist, deleted ones included. */
-    public Set<UUID> findExistingPostIds(Collection<UUID> ids) {
+    /**
+     * Returns which of the given posts have ever been published, deleted and archived ones
+     * included.
+     *
+     * <p>Feedback on a post that was never published can only have come from its owner, who could
+     * like or save a draft before publication was required, and it must not seed the recommender.
+     */
+    public Set<UUID> findEverPublishedPostIds(Collection<UUID> ids) {
         if (ids.isEmpty()) {
             return Set.of();
         }
@@ -91,7 +99,7 @@ public class GorseRebuildSourceRepository {
                         connection -> {
                             var statement =
                                     connection.prepareStatement(
-                                            "SELECT id FROM posts WHERE id = ANY (?)");
+                                            "SELECT id FROM posts WHERE id = ANY (?) AND published_at IS NOT NULL");
                             statement.setArray(1, connection.createArrayOf("uuid", array));
                             return statement;
                         },

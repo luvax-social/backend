@@ -1,6 +1,7 @@
 package com.app.modules.post.service.impl;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.app.common.response.ViewerRelationshipResponse;
 import com.app.modules.post.entity.Post;
+import com.app.modules.post.entity.PostCollaborator;
+import com.app.modules.post.enums.CollaborationStatus;
+import com.app.modules.post.repository.PostCollaboratorRepository;
 import com.app.modules.post.repository.PostUserRepository;
 import com.app.modules.post.service.PostVisibilityService;
 import com.app.modules.social.service.SocialService;
@@ -24,11 +28,15 @@ public class PostVisibilityServiceImpl implements PostVisibilityService {
 
     private final PostUserRepository postUserRepository;
     private final SocialService socialService;
+    private final PostCollaboratorRepository postCollaboratorRepository;
 
     public PostVisibilityServiceImpl(
-            PostUserRepository postUserRepository, SocialService socialService) {
+            PostUserRepository postUserRepository,
+            SocialService socialService,
+            PostCollaboratorRepository postCollaboratorRepository) {
         this.postUserRepository = postUserRepository;
         this.socialService = socialService;
+        this.postCollaboratorRepository = postCollaboratorRepository;
     }
 
     @Override
@@ -38,8 +46,20 @@ public class PostVisibilityServiceImpl implements PostVisibilityService {
         if (viewerId.equals(ownerId)) {
             return true;
         }
+        // A co-author is an author of the post and always sees it. For everyone else a block with
+        // any author hides it, because the viewer would otherwise meet an account that blocked
+        // them, or that they blocked, through a post the other account holds a share of.
+        List<UUID> coAuthorIds = postCollaboratorRepository.findAcceptedUserIds(post.getId());
+        if (coAuthorIds.contains(viewerId)) {
+            return true;
+        }
         if (socialService.isBlockedBetween(viewerId, ownerId)) {
             return false;
+        }
+        for (UUID coAuthorId : coAuthorIds) {
+            if (socialService.isBlockedBetween(viewerId, coAuthorId)) {
+                return false;
+            }
         }
         // A soft-deleted owner hides all of their content even though the post rows remain live.
         User owner = postUserRepository.findByIdAndDeletedAtIsNull(ownerId).orElse(null);
@@ -90,6 +110,47 @@ public class PostVisibilityServiceImpl implements PostVisibilityService {
                 continue;
             }
             visible.add(ownerId);
+        }
+        return visible;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> filterVisiblePostIds(UUID viewerId, Map<UUID, UUID> ownerByPostId) {
+        if (ownerByPostId.isEmpty()) {
+            return Set.of();
+        }
+        Set<UUID> visibleOwners = filterVisibleOwnerIds(viewerId, ownerByPostId.values());
+        Map<UUID, Set<UUID>> coAuthorsByPost = new HashMap<>();
+        for (PostCollaborator row :
+                postCollaboratorRepository.findByPostIdIn(ownerByPostId.keySet())) {
+            if (row.getStatus() == CollaborationStatus.ACCEPTED) {
+                coAuthorsByPost
+                        .computeIfAbsent(row.getPostId(), id -> new HashSet<>())
+                        .add(row.getUserId());
+            }
+        }
+        // Read only when some candidate has a co-author, so a page of ordinary posts pays nothing.
+        Set<UUID> blocked =
+                coAuthorsByPost.isEmpty()
+                        ? Set.of()
+                        : socialService.findBlockedEitherDirection(viewerId);
+        Set<UUID> visible = new HashSet<>();
+        for (Map.Entry<UUID, UUID> entry : ownerByPostId.entrySet()) {
+            UUID postId = entry.getKey();
+            UUID ownerId = entry.getValue();
+            Set<UUID> coAuthors = coAuthorsByPost.getOrDefault(postId, Set.of());
+            if (viewerId.equals(ownerId) || coAuthors.contains(viewerId)) {
+                visible.add(postId);
+                continue;
+            }
+            if (!visibleOwners.contains(ownerId)) {
+                continue;
+            }
+            if (coAuthors.stream().anyMatch(blocked::contains)) {
+                continue;
+            }
+            visible.add(postId);
         }
         return visible;
     }

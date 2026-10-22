@@ -1,9 +1,11 @@
 package com.app.modules.comment.dto.response;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import com.app.common.response.UserSummaryResponse;
+import com.app.modules.post.dto.response.PostMentionResponse;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -59,7 +61,17 @@ public record CommentResponse(
                                         + " top-comments block. Only ever true on the first page of a"
                                         + " post's comment list; always false elsewhere, including on"
                                         + " single-comment responses.")
-                boolean pinned) {
+                boolean pinned,
+        @Schema(
+                        description =
+                                "Mentions stored for the comment. Link an @handle only when it is"
+                                        + " listed here, using the username given; every other @name is"
+                                        + " plain text.")
+                List<PostMentionResponse> mentions) {
+
+    public CommentResponse {
+        mentions = mentions == null ? List.of() : mentions;
+    }
 
     /**
      * Returns a copy marked as part of the pinned top-comments block.
@@ -82,6 +94,33 @@ public record CommentResponse(
                 createdAt,
                 updatedAt,
                 editedAt,
-                true);
+                true,
+                mentions);
+    }
+
+    /**
+     * Returns a copy carrying the given stored mentions.
+     *
+     * @param stored the mentions to show; null is read as none
+     * @return the same comment with its mentions replaced
+     */
+    public CommentResponse withMentions(List<PostMentionResponse> stored) {
+        return new CommentResponse(
+                id,
+                postId,
+                author,
+                parentId,
+                rootId,
+                depth,
+                content,
+                likeCount,
+                isLiked,
+                hasReported,
+                replyCount,
+                createdAt,
+                updatedAt,
+                editedAt,
+                pinned,
+                stored);
     }
 }

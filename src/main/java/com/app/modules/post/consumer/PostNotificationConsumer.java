@@ -32,7 +32,9 @@ import com.app.modules.post.repository.PostLikeRepository;
 import com.rabbitmq.client.Channel;
 
 /**
- * RabbitMQ consumer that turns post likes into like notifications and withdraws them on unlike.
+ * RabbitMQ consumer that turns post likes into like notifications and withdraws them on unlike. The
+ * events that involve another account in a post, a tag, an invitation to co-author, a mention and a
+ * failed scheduled publication, are handed to {@link PostInvolvementNotifier}.
  *
  * <p>The single notification producer for the post module, following the comment module's consumer.
  * {@code NotificationService} aggregates the likes on one post into one group and applies the self,
@@ -64,6 +66,7 @@ public class PostNotificationConsumer {
     private final NotificationService notificationService;
     private final ConsumerRetryProperties retryProperties;
     private final PostLikeRepository postLikeRepository;
+    private final PostInvolvementNotifier involvementNotifier;
     private final Sleeper sleeper;
 
     @Autowired
@@ -72,13 +75,15 @@ public class PostNotificationConsumer {
             ProcessedMessageService processedMessageService,
             NotificationService notificationService,
             ConsumerRetryProperties retryProperties,
-            PostLikeRepository postLikeRepository) {
+            PostLikeRepository postLikeRepository,
+            PostInvolvementNotifier involvementNotifier) {
         this(
                 parser,
                 processedMessageService,
                 notificationService,
                 retryProperties,
                 postLikeRepository,
+                involvementNotifier,
                 Thread::sleep);
     }
 
@@ -88,12 +93,14 @@ public class PostNotificationConsumer {
             NotificationService notificationService,
             ConsumerRetryProperties retryProperties,
             PostLikeRepository postLikeRepository,
+            PostInvolvementNotifier involvementNotifier,
             Sleeper sleeper) {
         this.parser = parser;
         this.processedMessageService = processedMessageService;
         this.notificationService = notificationService;
         this.retryProperties = retryProperties;
         this.postLikeRepository = postLikeRepository;
+        this.involvementNotifier = involvementNotifier;
         this.sleeper = sleeper;
     }
 
@@ -142,6 +149,9 @@ public class PostNotificationConsumer {
 
     void dispatch(DomainEventEnvelope event) {
         Map<String, Object> data = event.data();
+        if (involvementNotifier.dispatch(event.eventType(), data)) {
+            return;
+        }
         UUID postId = uuid(data.get("postId"));
         UUID ownerId = uuid(data.get("postOwnerId"));
         UUID likerId = uuid(data.get("userId"));

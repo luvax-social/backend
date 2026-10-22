@@ -1,6 +1,7 @@
 package com.app.modules.users.dto.request;
 
 import com.app.modules.users.enums.MessagePermission;
+import com.app.modules.users.enums.TagPermission;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -39,4 +40,14 @@ public record UpdateSettingsRequest(
                                 "Set false to stop the platform-wide hidden word list applying to"
                                         + " this account; the personal list is unaffected",
                         nullable = true)
-                Boolean hiddenWordsSystemEnabled) {}
+                Boolean hiddenWordsSystemEnabled,
+        @Schema(
+                        description = "Who may tag this account in a post",
+                        example = "everyone",
+                        nullable = true)
+                TagPermission tagPermission,
+        @Schema(
+                        description =
+                                "Set true to approve each tag of this account before it is shown",
+                        nullable = true)
+                Boolean manualTagApproval) {}

@@ -150,7 +150,15 @@ public class NotificationItemAssembler {
             Set<UUID> storyIds,
             Set<UUID> ticketIds) {
         switch (row.type()) {
-            case LIKE_POST, MENTION_POST, POST_RESTORED -> addIfPresent(postIds, postIdOf(row));
+            case LIKE_POST,
+                            MENTION_POST,
+                            POST_RESTORED,
+                            POST_TAG,
+                            POST_TAG_REQUEST,
+                            POST_COLLABORATION_INVITE,
+                            POST_COLLABORATION_ACCEPTED,
+                            SCHEDULED_POST_FAILED ->
+                    addIfPresent(postIds, postIdOf(row));
             case LIKE_COMMENT, COMMENT_POST, REPLY_COMMENT, MENTION_COMMENT -> {
                 addIfPresent(commentIds, row.entityId());
                 addIfPresent(postIds, row.postId());
@@ -205,13 +213,21 @@ public class NotificationItemAssembler {
 
     private Resolved resolve(FeedRow row, Lookups lookups, List<UUID> visibleActorIds) {
         return switch (row.type()) {
-            case LIKE_POST, MENTION_POST -> postTarget(row, lookups);
+            case LIKE_POST,
+                            MENTION_POST,
+                            POST_TAG,
+                            POST_TAG_REQUEST,
+                            POST_COLLABORATION_INVITE,
+                            POST_COLLABORATION_ACCEPTED ->
+                    postTarget(row, lookups);
             case LIKE_COMMENT, COMMENT_POST, REPLY_COMMENT, MENTION_COMMENT ->
                     commentTarget(row, lookups);
             case STORY_VIEW -> storyTarget(row, lookups);
             case FOLLOW, FOLLOW_REQUEST -> userTarget(visibleActorIds, lookups);
             case SUPPORT_TICKET_UPDATE -> ticketTarget(row, lookups);
-            case POST_RESTORED -> {
+            // The reason the schedule failed travels as the notice message, which the client shows
+            // beside the link to the draft; the row has no audit action behind it.
+            case POST_RESTORED, SCHEDULED_POST_FAILED -> {
                 Resolved post = postTarget(row, lookups);
                 yield new Resolved(post.target(), post.preview(), moderation(row, lookups), null);
             }

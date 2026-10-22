@@ -200,12 +200,15 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
         Map<UUID, Post> postsById =
                 postLookupService.findActiveByIds(parseIds(scores)).stream()
                         .collect(Collectors.toMap(Post::getId, Function.identity()));
-        // One fixed-cost batched visibility check for every candidate owner in this round, instead
-        // of a separate block/owner/follow query set per candidate post.
-        Set<UUID> candidateOwnerIds =
-                postsById.values().stream().map(Post::getUserId).collect(Collectors.toSet());
-        Set<UUID> visibleOwnerIds =
-                postVisibilityService.filterVisibleOwnerIds(viewerId, candidateOwnerIds);
+        // One fixed-cost batched visibility check for every candidate post in this round, instead
+        // of a separate block/owner/follow query set per candidate post. It is per post rather than
+        // per owner because a block with a co-author hides a post whose owner the viewer may see.
+        Map<UUID, UUID> ownerByPostId =
+                postsById.values().stream().collect(Collectors.toMap(Post::getId, Post::getUserId));
+        Set<UUID> visiblePostIds =
+                postVisibilityService.filterVisiblePostIds(viewerId, ownerByPostId);
+        Map<UUID, List<UUID>> coAuthorsByPostId =
+                postLookupService.findAcceptedCoAuthors(postsById.keySet());
         // The viewer's own preferences are applied here in the application and never through the
         // recommender's IsHidden flag, which is global to an item and would hide the post from
         // everyone. Both reads are one batched query per round, whatever the candidate source: the
@@ -213,9 +216,8 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
         // method. They add to the visibility filters above and never replace them.
         Set<UUID> notInterestedPostIds =
                 postFeedbackService.findNotInterested(viewerId, postsById.keySet());
-        Set<UUID> suppressedOwnerIds =
-                socialService.findFeedSuppressedAuthors(
-                        viewerId, candidateOwnerIds, FeedSurface.FOR_YOU);
+        Set<UUID> suppressedAuthorIds =
+                socialService.findAllFeedSuppressedAuthors(viewerId, FeedSurface.FOR_YOU);
 
         List<Post> accepted = new ArrayList<>();
         List<Double> acceptedScores = new ArrayList<>();
@@ -230,10 +232,18 @@ public class RecommendationFeedServiceImpl implements RecommendationFeedService 
             if (post == null
                     || post.getStatus() != PostStatus.PUBLISHED
                     || viewerId.equals(post.getUserId())
-                    || !visibleOwnerIds.contains(post.getUserId())
-                    || excludedOwnerIds.contains(post.getUserId())
-                    || notInterestedPostIds.contains(postId)
-                    || suppressedOwnerIds.contains(post.getUserId())) {
+                    || !visiblePostIds.contains(postId)
+                    || notInterestedPostIds.contains(postId)) {
+                continue;
+            }
+            // Every author of the post counts: a viewer who follows, muted or asked for fewer posts
+            // from a co-author sees the post exactly as if that account owned it.
+            List<UUID> authorIds = new ArrayList<>();
+            authorIds.add(post.getUserId());
+            authorIds.addAll(coAuthorsByPostId.getOrDefault(postId, List.of()));
+            if (authorIds.contains(viewerId)
+                    || authorIds.stream().anyMatch(excludedOwnerIds::contains)
+                    || authorIds.stream().anyMatch(suppressedAuthorIds::contains)) {
                 continue;
             }
             accepted.add(post);

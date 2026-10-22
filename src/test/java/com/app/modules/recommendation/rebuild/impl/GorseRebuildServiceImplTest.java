@@ -129,7 +129,7 @@ class GorseRebuildServiceImplTest {
         lenient()
                 .when(userEvents.findFeedbackTotals(any()))
                 .thenReturn(List.of(new FeedbackTotal("like", user, post, 2.0, NOW)));
-        lenient().when(source.findExistingPostIds(any())).thenReturn(Set.of(post));
+        lenient().when(source.findEverPublishedPostIds(any())).thenReturn(Set.of(post));
         lenient()
                 .when(gorseClient.getFeedback("like", user.toString(), post.toString()))
                 .thenReturn(

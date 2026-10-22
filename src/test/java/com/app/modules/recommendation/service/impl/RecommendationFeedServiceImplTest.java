@@ -3,8 +3,10 @@ package com.app.modules.recommendation.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyChar;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -14,9 +16,12 @@ import static org.mockito.Mockito.when;
 
 import java.time.OffsetDateTime;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,6 +62,11 @@ class RecommendationFeedServiceImplTest {
 
     private final UUID viewerId = UUID.randomUUID();
 
+    // The accounts the stubbed visibility chain hides, and the authors the viewer muted or asked
+    // for fewer posts from. Tests add to them instead of stubbing the batch services themselves.
+    private final Set<UUID> invisibleOwners = new HashSet<>();
+    private final Set<UUID> suppressedAuthors = new HashSet<>();
+
     @BeforeEach
     void setUp() {
         gorseProperties = new GorseProperties();
@@ -71,6 +81,22 @@ class RecommendationFeedServiceImplTest {
                         socialService,
                         gorseProperties,
                         recommendationMetrics);
+        lenient()
+                .when(postVisibilityService.filterVisiblePostIds(any(), anyMap()))
+                .thenAnswer(
+                        inv -> {
+                            Map<UUID, UUID> ownerByPostId = inv.getArgument(1);
+                            return ownerByPostId.entrySet().stream()
+                                    .filter(entry -> !invisibleOwners.contains(entry.getValue()))
+                                    .map(Map.Entry::getKey)
+                                    .collect(Collectors.toSet());
+                        });
+        lenient()
+                .when(postLookupService.findAcceptedCoAuthors(anyCollection()))
+                .thenReturn(Map.of());
+        lenient()
+                .when(socialService.findAllFeedSuppressedAuthors(eq(viewerId), any()))
+                .thenAnswer(inv -> Set.copyOf(suppressedAuthors));
         // Feed assembly is a pass-through in these tests; only ranking-score attachment matters.
         // Fallback-path tests never reach the assembler, so this stub is lenient.
         lenient()
@@ -106,10 +132,12 @@ class RecommendationFeedServiceImplTest {
                 false,
                 0,
                 null,
-                null,
-                null,
                 List.of(),
                 List.of(),
+                List.of(),
+                List.of(),
+                null,
+                OffsetDateTime.now(),
                 OffsetDateTime.now(),
                 OffsetDateTime.now(),
                 null);
@@ -131,8 +159,6 @@ class RecommendationFeedServiceImplTest {
                         new SourceBatch(
                                 'g', List.of(new GorseScore(postId.toString(), 5.0)), 1, 0));
         when(postLookupService.findActiveByIds(anyList())).thenReturn(List.of(post));
-        when(postVisibilityService.filterVisibleOwnerIds(viewerId, Set.of(ownerId)))
-                .thenReturn(Set.of(ownerId));
 
         CursorPageResponse<FeedPostResponse> page =
                 service.getRecommendedFeed(viewerId, null, 1, false);
@@ -187,11 +213,9 @@ class RecommendationFeedServiceImplTest {
                                 0));
         when(postLookupService.findActiveByIds(List.of(ownedByViewer, blockedPost, okPost1)))
                 .thenReturn(List.of(viewerOwned, blocked, ok1));
-        // The batch visibility check runs once for the round's distinct owner set; blockedOwnerId
-        // is excluded from the visible result, ok1OwnerId (and the viewer's own id) is included.
-        when(postVisibilityService.filterVisibleOwnerIds(
-                        viewerId, Set.of(viewerId, blockedOwnerId, ok1OwnerId)))
-                .thenReturn(Set.of(viewerId, ok1OwnerId));
+        // The batch visibility check runs once for the round's candidate posts; blockedOwnerId is
+        // excluded from the visible result.
+        invisibleOwners.add(blockedOwnerId);
 
         // Second round starts at gorseOffset 3 (all 3 raw candidates from round 1 were consumed);
         // trendingOffset stays 0 since topup was never reached.
@@ -200,8 +224,6 @@ class RecommendationFeedServiceImplTest {
                         new SourceBatch(
                                 'g', List.of(new GorseScore(okPost2.toString(), 6.0)), 1, 0));
         when(postLookupService.findActiveByIds(List.of(okPost2))).thenReturn(List.of(ok2));
-        when(postVisibilityService.filterVisibleOwnerIds(viewerId, Set.of(ok2OwnerId)))
-                .thenReturn(Set.of(ok2OwnerId));
 
         CursorPageResponse<FeedPostResponse> page =
                 service.getRecommendedFeed(viewerId, null, 2, false);
@@ -273,8 +295,6 @@ class RecommendationFeedServiceImplTest {
                         new SourceBatch(
                                 'p', List.of(new GorseScore(postId.toString(), null)), 1, 0));
         when(postLookupService.findActiveByIds(anyList())).thenReturn(List.of(post));
-        when(postVisibilityService.filterVisibleOwnerIds(viewerId, Set.of(ownerId)))
-                .thenReturn(Set.of(ownerId));
 
         CursorPageResponse<FeedPostResponse> page =
                 service.getRecommendedFeed(viewerId, null, 1, false);
@@ -293,8 +313,6 @@ class RecommendationFeedServiceImplTest {
                         new SourceBatch(
                                 'g', List.of(new GorseScore(postId.toString(), null)), 1, 0));
         when(postLookupService.findActiveByIds(anyList())).thenReturn(List.of(post));
-        when(postVisibilityService.filterVisibleOwnerIds(viewerId, Set.of(ownerId)))
-                .thenReturn(Set.of(ownerId));
 
         CursorPageResponse<FeedPostResponse> page =
                 service.getRecommendedFeed(viewerId, null, 1, false);
@@ -341,9 +359,6 @@ class RecommendationFeedServiceImplTest {
                                 3));
         when(postLookupService.findActiveByIds(anyList()))
                 .thenReturn(List.of(gorsePost, topUpPostEntity));
-        when(postVisibilityService.filterVisibleOwnerIds(
-                        viewerId, Set.of(gorseOnlyOwner, topUpOwner)))
-                .thenReturn(Set.of(gorseOnlyOwner, topUpOwner));
 
         CursorPageResponse<FeedPostResponse> page =
                 service.getRecommendedFeed(viewerId, null, 2, false);
@@ -366,8 +381,6 @@ class RecommendationFeedServiceImplTest {
                         new SourceBatch(
                                 'g', List.of(new GorseScore(onlyPost.toString(), 9.0)), 1, 4));
         when(postLookupService.findActiveByIds(anyList())).thenReturn(List.of(post));
-        when(postVisibilityService.filterVisibleOwnerIds(viewerId, Set.of(onlyOwner)))
-                .thenReturn(Set.of(onlyOwner));
 
         CursorPageResponse<FeedPostResponse> page =
                 service.getRecommendedFeed(viewerId, null, 1, false);
@@ -398,9 +411,6 @@ class RecommendationFeedServiceImplTest {
                                 0));
         when(postLookupService.findActiveByIds(anyList()))
                 .thenReturn(List.of(followedPost, otherPost));
-        when(postVisibilityService.filterVisibleOwnerIds(
-                        viewerId, Set.of(followedOwnerId, otherOwnerId)))
-                .thenReturn(Set.of(followedOwnerId, otherOwnerId));
         // Excluding the followed post leaves the page short of its limit of 2, so a second round
         // runs at the advanced gorseOffset; an empty batch ends it there.
         when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(4), eq(2), eq(0)))
@@ -438,12 +448,9 @@ class RecommendationFeedServiceImplTest {
                                 publishedPost(notInterestedPost, notInterestedOwner),
                                 publishedPost(suppressedAuthorPost, suppressedOwner),
                                 publishedPost(keptPost, keptOwner)));
-        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
-                .thenReturn(Set.of(keptOwner, notInterestedOwner, suppressedOwner));
         when(postFeedbackService.findNotInterested(eq(viewerId), any()))
                 .thenReturn(Set.of(notInterestedPost));
-        when(socialService.findFeedSuppressedAuthors(eq(viewerId), any(), eq(FeedSurface.FOR_YOU)))
-                .thenReturn(Set.of(suppressedOwner));
+        suppressedAuthors.add(suppressedOwner);
         // The page of 2 is not full after the round, so a second one runs and finds nothing.
         when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(4), eq(3), eq(0)))
                 .thenReturn(new SourceBatch('g', List.of(), 0, 0));
@@ -473,14 +480,11 @@ class RecommendationFeedServiceImplTest {
                                 0));
         when(postLookupService.findActiveByIds(anyList()))
                 .thenReturn(List.of(publishedPost(postA, ownerA), publishedPost(postB, ownerB)));
-        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
-                .thenReturn(Set.of(ownerA, ownerB));
 
         service.getRecommendedFeed(viewerId, null, 2, false);
 
         verify(postFeedbackService, times(1)).findNotInterested(viewerId, Set.of(postA, postB));
-        verify(socialService, times(1))
-                .findFeedSuppressedAuthors(viewerId, Set.of(ownerA, ownerB), FeedSurface.FOR_YOU);
+        verify(socialService, times(1)).findAllFeedSuppressedAuthors(viewerId, FeedSurface.FOR_YOU);
     }
 
     @Test
@@ -512,12 +516,9 @@ class RecommendationFeedServiceImplTest {
                                 publishedPost(topUpNotInterested, notInterestedOwner),
                                 publishedPost(topUpSuppressed, suppressedOwner),
                                 publishedPost(topUpKept, keptOwner)));
-        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
-                .thenReturn(Set.of(primaryOwner, keptOwner, notInterestedOwner, suppressedOwner));
         when(postFeedbackService.findNotInterested(eq(viewerId), any()))
                 .thenReturn(Set.of(topUpNotInterested));
-        when(socialService.findFeedSuppressedAuthors(eq(viewerId), any(), eq(FeedSurface.FOR_YOU)))
-                .thenReturn(Set.of(suppressedOwner));
+        suppressedAuthors.add(suppressedOwner);
         // Four candidates were consumed, three past the primary one, so the topup chunk is spent.
         when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(6), eq(1), eq(10)))
                 .thenReturn(new SourceBatch('g', List.of(), 0, 0));
@@ -555,12 +556,9 @@ class RecommendationFeedServiceImplTest {
                                 publishedPost(notInterestedPost, notInterestedOwner),
                                 publishedPost(suppressedPost, suppressedOwner),
                                 publishedPost(keptPost, keptOwner)));
-        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
-                .thenReturn(Set.of(keptOwner, notInterestedOwner, suppressedOwner));
         when(postFeedbackService.findNotInterested(eq(viewerId), any()))
                 .thenReturn(Set.of(notInterestedPost));
-        when(socialService.findFeedSuppressedAuthors(eq(viewerId), any(), eq(FeedSurface.FOR_YOU)))
-                .thenReturn(Set.of(suppressedOwner));
+        suppressedAuthors.add(suppressedOwner);
         // The page of 3 is not full after the round, so a second one runs and finds nothing.
         when(recommendationSource.fetch(eq(viewerId), eq('p'), eq(6), eq(3), eq(0)))
                 .thenReturn(new SourceBatch('p', List.of(), 0, 0));
@@ -591,10 +589,7 @@ class RecommendationFeedServiceImplTest {
                         List.of(
                                 publishedPost(suppressedPost, suppressedOwner),
                                 publishedPost(keptPost, keptOwner)));
-        when(postVisibilityService.filterVisibleOwnerIds(any(), any()))
-                .thenReturn(Set.of(keptOwner, suppressedOwner));
-        when(socialService.findFeedSuppressedAuthors(eq(viewerId), any(), eq(FeedSurface.FOR_YOU)))
-                .thenReturn(Set.of(suppressedOwner));
+        suppressedAuthors.add(suppressedOwner);
         when(recommendationSource.fetch(eq(viewerId), eq('g'), eq(4), eq(2), eq(0)))
                 .thenReturn(new SourceBatch('g', List.of(), 0, 0));
 

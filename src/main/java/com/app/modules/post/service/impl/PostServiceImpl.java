@@ -2,17 +2,14 @@ package com.app.modules.post.service.impl;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -28,10 +25,6 @@ import com.app.common.pagination.TimeCursors;
 import com.app.common.response.CursorPageResponse;
 import com.app.common.response.UserSummaryResponse;
 import com.app.common.security.util.SecurityUtils;
-import com.app.common.settings.service.SystemSettingService;
-import com.app.modules.hashtag.service.HashtagService;
-import com.app.modules.media.entity.MediaAsset;
-import com.app.modules.media.enums.MediaType;
 import com.app.modules.post.dto.request.CreatePostRequest;
 import com.app.modules.post.dto.request.PostStatusTransitionRequest;
 import com.app.modules.post.dto.request.UpdatePostCaptionRequest;
@@ -40,18 +33,22 @@ import com.app.modules.post.dto.response.PostEditHistoryResponse;
 import com.app.modules.post.dto.response.PostResponse;
 import com.app.modules.post.entity.Post;
 import com.app.modules.post.entity.PostEditHistory;
-import com.app.modules.post.entity.PostMedia;
 import com.app.modules.post.enums.FeedSurface;
 import com.app.modules.post.enums.PostStatus;
-import com.app.modules.post.enums.PostType;
 import com.app.modules.post.mapper.PostMapper;
 import com.app.modules.post.messaging.PostEventTypes;
+import com.app.modules.post.place.entity.Place;
+import com.app.modules.post.place.enums.PlaceStatus;
+import com.app.modules.post.place.repository.PlaceRepository;
 import com.app.modules.post.repository.PostEditHistoryRepository;
-import com.app.modules.post.repository.PostMediaAssetRepository;
 import com.app.modules.post.repository.PostModerationProjection;
 import com.app.modules.post.repository.PostRepository;
 import com.app.modules.post.repository.PostUserRepository;
+import com.app.modules.post.service.PostMentionService;
+import com.app.modules.post.service.PostMentionService.MentionChange;
 import com.app.modules.post.service.PostModerationResult;
+import com.app.modules.post.service.PostPublicationService;
+import com.app.modules.post.service.PostPublicationService.Source;
 import com.app.modules.post.service.PostService;
 import com.app.modules.post.service.PostVisibilityService;
 import com.app.modules.post.validation.PostTypeFilter;
@@ -65,140 +62,99 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public class PostServiceImpl implements PostService {
 
-    private static final Pattern HASHTAG_PATTERN = Pattern.compile("#([\\p{L}\\p{N}_]+)");
-    private static final String MAX_POST_MEDIA_ITEMS = "max_post_media_items";
-    private static final String MAX_HASHTAGS_PER_POST = "max_hashtags_per_post";
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
+    private static final UUID NO_AUTHOR = new UUID(0L, 0L);
 
     private final PostRepository postRepository;
     private final PostEditHistoryRepository postEditHistoryRepository;
     private final PostUserRepository postUserRepository;
-    private final PostMediaAssetRepository postMediaAssetRepository;
-    private final HashtagService hashtagService;
-    private final SystemSettingService systemSettingService;
+    private final PostCaptionHashtags captionHashtags;
     private final PostVisibilityService postVisibilityService;
     private final PostResponseAssembler postResponseAssembler;
     private final PostMapper postMapper;
     private final SocialService socialService;
     private final OutboxService outboxService;
     private final UserSummaryService userSummaryService;
+    private final PostContentWriter postContentWriter;
+    private final PostPublicationService postPublicationService;
+    private final PostSchedulePolicy postSchedulePolicy;
+    private final PostMentionService postMentionService;
+    private final PostIndexEventPublisher postIndexEventPublisher;
+    private final PlaceRepository placeRepository;
 
     public PostServiceImpl(
             PostRepository postRepository,
             PostEditHistoryRepository postEditHistoryRepository,
             PostUserRepository postUserRepository,
-            PostMediaAssetRepository postMediaAssetRepository,
-            HashtagService hashtagService,
-            SystemSettingService systemSettingService,
+            PostCaptionHashtags captionHashtags,
             PostVisibilityService postVisibilityService,
             PostResponseAssembler postResponseAssembler,
             PostMapper postMapper,
             SocialService socialService,
             OutboxService outboxService,
-            UserSummaryService userSummaryService) {
+            UserSummaryService userSummaryService,
+            PostContentWriter postContentWriter,
+            PostPublicationService postPublicationService,
+            PostSchedulePolicy postSchedulePolicy,
+            PostMentionService postMentionService,
+            PostIndexEventPublisher postIndexEventPublisher,
+            PlaceRepository placeRepository) {
         this.postRepository = postRepository;
         this.postEditHistoryRepository = postEditHistoryRepository;
         this.postUserRepository = postUserRepository;
-        this.postMediaAssetRepository = postMediaAssetRepository;
-        this.hashtagService = hashtagService;
-        this.systemSettingService = systemSettingService;
+        this.captionHashtags = captionHashtags;
         this.postVisibilityService = postVisibilityService;
         this.postResponseAssembler = postResponseAssembler;
         this.postMapper = postMapper;
         this.socialService = socialService;
         this.outboxService = outboxService;
         this.userSummaryService = userSummaryService;
+        this.postContentWriter = postContentWriter;
+        this.postPublicationService = postPublicationService;
+        this.postSchedulePolicy = postSchedulePolicy;
+        this.postMentionService = postMentionService;
+        this.postIndexEventPublisher = postIndexEventPublisher;
+        this.placeRepository = placeRepository;
     }
 
     @Override
     @Transactional
     public PostResponse createPost(UUID authorId, CreatePostRequest request) {
-        PostStatus initialStatus =
-                request.status() == null ? PostStatus.PUBLISHED : request.status();
-        if (initialStatus != PostStatus.DRAFT && initialStatus != PostStatus.PUBLISHED) {
+        PostStatus target = request.status() == null ? PostStatus.PUBLISHED : request.status();
+        if (target != PostStatus.DRAFT
+                && target != PostStatus.SCHEDULED
+                && target != PostStatus.PUBLISHED) {
             throw new AppException(ApiErrorCode.BAD_REQUEST, "Invalid initial post status");
         }
-        if (request.postType() == PostType.TEXT) {
-            if (request.caption() == null || request.caption().isBlank()) {
-                throw new AppException(
-                        ApiErrorCode.BAD_REQUEST, "Text posts require a non-blank caption");
-            }
-            if (request.mediaIds() != null && !request.mediaIds().isEmpty()) {
-                throw new AppException(
-                        ApiErrorCode.BAD_REQUEST, "Text posts must not include media");
-            }
-            rejectBannedHashtags(request.caption());
-            Post post =
-                    Post.builder()
-                            .userId(authorId)
-                            .caption(request.caption())
-                            .postType(PostType.TEXT)
-                            .status(initialStatus)
-                            .locationName(request.locationName())
-                            .latitude(request.latitude())
-                            .longitude(request.longitude())
-                            .build();
-            // Flush so the DB-assigned id and the database-generated createdAt are populated
-            // before the index-upsert event payload reads them.
-            postRepository.saveAndFlush(post);
-            if (initialStatus == PostStatus.PUBLISHED) {
-                upsertCaptionHashtags(post.getId(), post.getCaption());
-                enqueuePostIndexUpsert(post);
-            }
-            log.info("Post created: postId={}, type={}", post.getId(), post.getPostType());
-            return postResponseAssembler.assemble(authorId, post);
-        }
-        rejectBannedHashtags(request.caption());
-        List<UUID> mediaIds = request.mediaIds();
-        if (mediaIds == null || mediaIds.isEmpty()) {
+        OffsetDateTime scheduledAt = null;
+        if (target == PostStatus.SCHEDULED) {
+            scheduledAt = postSchedulePolicy.validate(request.scheduledAt());
+        } else if (request.scheduledAt() != null) {
             throw new AppException(
-                    ApiErrorCode.BAD_REQUEST, "Media posts require at least one media item");
+                    ApiErrorCode.BAD_REQUEST, "scheduledAt is only valid for a scheduled post");
         }
-        if (new HashSet<>(mediaIds).size() != mediaIds.size()) {
-            throw new AppException(ApiErrorCode.BAD_REQUEST, "Duplicate media ids");
+        if (target != PostStatus.PUBLISHED) {
+            postSchedulePolicy.requireRoomForUnpublished(authorId);
         }
-        Map<UUID, MediaAsset> assets =
-                postMediaAssetRepository.findAllById(mediaIds).stream()
-                        .collect(Collectors.toMap(MediaAsset::getId, a -> a));
-        if (assets.size() != mediaIds.size()) {
-            throw new AppException(ApiErrorCode.NOT_FOUND, "Media asset not found");
-        }
-        for (MediaAsset asset : assets.values()) {
-            if (!asset.getUserId().equals(authorId)) {
-                throw new AppException(
-                        ApiErrorCode.POST_FORBIDDEN, "Media asset not owned by author");
-            }
-        }
-        validateMediaCardinality(request.postType(), mediaIds, assets);
-
+        // A post to be published is stored as a draft first and handed to the publication routine,
+        // so create-as-published and publish-a-draft cannot drift apart.
         Post post =
-                Post.builder()
-                        .userId(authorId)
-                        .caption(request.caption())
-                        .postType(request.postType())
-                        .status(initialStatus)
-                        .locationName(request.locationName())
-                        .latitude(request.latitude())
-                        .longitude(request.longitude())
-                        .build();
-        for (int i = 0; i < mediaIds.size(); i++) {
-            post.getMedia()
-                    .add(
-                            PostMedia.builder()
-                                    .post(post)
-                                    .mediaAssetId(mediaIds.get(i))
-                                    .position((short) i)
-                                    .build());
+                postContentWriter.create(
+                        authorId,
+                        PostContentWriter.Content.from(request),
+                        target == PostStatus.SCHEDULED ? PostStatus.SCHEDULED : PostStatus.DRAFT,
+                        scheduledAt);
+        switch (target) {
+            case PUBLISHED -> postPublicationService.publish(post, Source.OWNER);
+            case SCHEDULED -> enqueueScheduled(post);
+            default -> enqueueLifecycle(PostEventTypes.POST_DRAFT_SAVED_V1, post);
         }
-        // Flush so the DB-assigned id and @CreationTimestamp createdAt are populated before the
-        // index-upsert event payload reads them.
-        postRepository.saveAndFlush(post);
-        if (initialStatus == PostStatus.PUBLISHED) {
-            upsertCaptionHashtags(post.getId(), post.getCaption());
-            enqueuePostIndexUpsert(post);
-        }
-        log.info("Post created: postId={}, type={}", post.getId(), post.getPostType());
+        log.info(
+                "Post created: postId={}, type={}, status={}",
+                post.getId(),
+                post.getPostType(),
+                post.getStatus());
         return postResponseAssembler.assemble(authorId, post);
     }
 
@@ -224,14 +180,8 @@ public class PostServiceImpl implements PostService {
     @Transactional
     public PostResponse updateCaption(
             UUID requesterId, UUID postId, UpdatePostCaptionRequest request) {
-        Post post =
-                postRepository
-                        .findByIdAndDeletedAtIsNull(postId)
-                        .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
-        if (!requesterId.equals(post.getUserId())) {
-            throw new AppException(ApiErrorCode.POST_FORBIDDEN);
-        }
-        rejectBannedHashtags(request.caption());
+        Post post = requireOwnedForUpdate(requesterId, postId);
+        captionHashtags.rejectBanned(request.caption());
         // The audit row records the pre-edit caption before any mutation.
         postEditHistoryRepository.save(
                 PostEditHistory.builder()
@@ -240,11 +190,14 @@ public class PostServiceImpl implements PostService {
                         .previousCaption(post.getCaption())
                         .build());
         post.setCaption(request.caption());
+        MentionChange mentions = postMentionService.replaceCaptionMentions(post);
         if (post.getStatus() == PostStatus.PUBLISHED) {
             // Keep post_hashtags consistent with the published caption.
-            hashtagService.removeHashtagsForPost(post.getId());
-            upsertCaptionHashtags(post.getId(), post.getCaption());
-            enqueuePostIndexUpsert(post);
+            captionHashtags.refresh(post.getId(), post.getCaption());
+            postIndexEventPublisher.enqueueUpsert(post);
+            // Recorded for the behavioural signals, never notified: the people were told, or
+            // deliberately not told, when the post was published.
+            postMentionService.announce(post, mentions.added(), List.of());
         }
         return postResponseAssembler.assemble(requesterId, post);
     }
@@ -255,7 +208,7 @@ public class PostServiceImpl implements PostService {
             UUID requesterId, UUID postId, PostStatusTransitionRequest request) {
         Post post =
                 postRepository
-                        .findByIdAndDeletedAtIsNull(postId)
+                        .findByIdForUpdate(postId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
         PostStatus target = request.targetStatus();
         boolean isOwner = requesterId.equals(post.getUserId());
@@ -263,34 +216,52 @@ public class PostServiceImpl implements PostService {
             if (!isOwner && !isCurrentUserAdmin()) {
                 throw new AppException(ApiErrorCode.POST_FORBIDDEN);
             }
+            requireScheduledAtAbsent(request);
             softDelete(post);
             return postResponseAssembler.assemble(requesterId, post);
         }
         if (!isOwner) {
-            throw new AppException(ApiErrorCode.POST_FORBIDDEN);
+            // A non-owner must not learn that an unpublished post exists.
+            throw new AppException(
+                    post.getStatus() == PostStatus.PUBLISHED
+                            ? ApiErrorCode.POST_FORBIDDEN
+                            : ApiErrorCode.POST_NOT_FOUND);
         }
         PostStatus current = post.getStatus();
-        boolean allowed =
-                (current == PostStatus.DRAFT && target == PostStatus.PUBLISHED)
-                        || (current == PostStatus.PUBLISHED && target == PostStatus.ARCHIVED)
-                        || (current == PostStatus.ARCHIVED && target == PostStatus.PUBLISHED);
-        if (!allowed) {
+        if (!isAllowedTransition(current, target)) {
             throw new AppException(ApiErrorCode.BAD_REQUEST, "Invalid status transition");
         }
-        if (target == PostStatus.PUBLISHED) {
-            // The path a check on the create routes alone would miss: a post drafted or archived
-            // before the ban carries the tag, and publishing is when that tag would reach
-            // post_hashtags and the search index for the first time since.
-            rejectBannedHashtags(post.getCaption());
-        }
-        post.setStatus(target);
-        if (target == PostStatus.PUBLISHED) {
-            upsertCaptionHashtags(post.getId(), post.getCaption());
-            enqueuePostIndexUpsert(post);
-        } else if (target == PostStatus.ARCHIVED) {
-            // Unpublishing removes hashtag associations (hashtag module data rules).
-            hashtagService.removeHashtagsForPost(post.getId());
-            enqueuePostIndexDelete(post);
+        if (target == PostStatus.SCHEDULED) {
+            post.setScheduledAt(postSchedulePolicy.validate(request.scheduledAt()));
+            post.setStatus(PostStatus.SCHEDULED);
+            postRepository.saveAndFlush(post);
+            enqueueScheduled(post);
+        } else {
+            requireScheduledAtAbsent(request);
+            switch (target) {
+                case PUBLISHED -> {
+                    boolean unarchive = current == PostStatus.ARCHIVED;
+                    postPublicationService.publish(post, Source.OWNER);
+                    if (unarchive) {
+                        enqueueLifecycle(PostEventTypes.POST_UNARCHIVED_V1, post);
+                    }
+                }
+                case ARCHIVED -> {
+                    post.setStatus(PostStatus.ARCHIVED);
+                    postRepository.saveAndFlush(post);
+                    // Unpublishing removes hashtag associations (hashtag module data rules).
+                    captionHashtags.detach(post.getId());
+                    postIndexEventPublisher.enqueueDelete(post.getId(), post.getUserId());
+                    enqueueLifecycle(PostEventTypes.POST_ARCHIVED_V1, post);
+                }
+                default -> {
+                    // SCHEDULED to DRAFT: the owner took the post off the schedule.
+                    post.setStatus(PostStatus.DRAFT);
+                    post.setScheduledAt(null);
+                    postRepository.saveAndFlush(post);
+                    enqueueLifecycle(PostEventTypes.POST_DRAFT_SAVED_V1, post);
+                }
+            }
         }
         log.info(
                 "Post status transitioned: postId={}, from={}, to={}",
@@ -305,10 +276,13 @@ public class PostServiceImpl implements PostService {
     public void deletePost(UUID requesterId, UUID postId) {
         Post post =
                 postRepository
-                        .findByIdAndDeletedAtIsNull(postId)
+                        .findByIdForUpdate(postId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
         if (!requesterId.equals(post.getUserId()) && !isCurrentUserAdmin()) {
-            throw new AppException(ApiErrorCode.POST_FORBIDDEN);
+            throw new AppException(
+                    post.getStatus() == PostStatus.PUBLISHED
+                            ? ApiErrorCode.POST_FORBIDDEN
+                            : ApiErrorCode.POST_NOT_FOUND);
         }
         softDelete(post);
     }
@@ -317,9 +291,9 @@ public class PostServiceImpl implements PostService {
     @Transactional
     public PostModerationResult applyModerationRemoval(UUID postId) {
         PostModerationProjection post = requireModerationView(postId);
-        hashtagService.removeHashtagsForPost(postId);
+        captionHashtags.detach(postId);
         postRepository.applyModerationRemoval(postId, OffsetDateTime.now());
-        enqueuePostIndexDelete(postId, post.getUserId());
+        postIndexEventPublisher.enqueueDelete(postId, post.getUserId());
         log.info("Post removed by moderation: postId={}, from={}", postId, post.getStatus());
         return new PostModerationResult(post.getUserId(), PostStatus.REMOVED, List.of());
     }
@@ -332,89 +306,94 @@ public class PostServiceImpl implements PostService {
         // fallback rather than a guess: it is what restore did for every post back then, so a row
         // from that era lands exactly where it would have.
         PostStatus restored = restoredStatusOrPublished(post.getStatusBeforeModeration());
-        postRepository.applyModerationRestore(postId, restored.toJson());
+        // A scheduled post whose time passed while it was removed must not publish the instant it
+        // is restored, with no one having chosen that moment; it returns as a draft.
+        if (restored == PostStatus.SCHEDULED
+                && (post.getScheduledAt() == null
+                        || !post.getScheduledAt().isAfter(java.time.Instant.now()))) {
+            restored = PostStatus.DRAFT;
+        }
+        // The place may have been banned or deleted while the post was removed. The restore drops
+        // it, like it drops a banned hashtag, rather than refusing: a moderator correcting its own
+        // removal must not be blocked by an administrator decision it cannot reverse.
+        UUID keptPlaceId = post.getPlaceId();
+        String strippedPlaceName = null;
+        if (keptPlaceId != null) {
+            Place place = placeRepository.findById(keptPlaceId).orElse(null);
+            if (place == null || place.getStatus() != PlaceStatus.ACTIVE) {
+                strippedPlaceName = place == null ? null : place.getName();
+                keptPlaceId = null;
+            }
+        }
+        postRepository.applyModerationRestore(postId, restored.toJson(), keptPlaceId);
         // Only a published post belongs in post_hashtags and in the search index; the owner path
         // keeps a draft and an archived post out of both. The hashtag-eligibility check belongs on
         // this re-derivation rather than on the removal arm, because removal detaches every
         // association regardless of which tag it is.
         //
-        // This is the one write path that strips a banned tag instead of refusing. A moderator
-        // restoring a post it removed by mistake is correcting its own error and must not be
-        // blocked by an unrelated administrator decision it has no power to reverse; refusing here
-        // would leave the post removed with no in-role way to bring it back. The stripped names
-        // travel back to the caller so the audit row records exactly what was dropped and the
+        // This is the one write path that strips a banned tag instead of refusing. The stripped
+        // names travel back to the caller so the audit row records exactly what was dropped and the
         // moderator is told rather than finding out later.
         List<String> remainingBannedHashtags = List.of();
         if (restored == PostStatus.PUBLISHED) {
-            List<String> tags = extractHashtags(post.getCaption());
+            List<String> tags = captionHashtags.extract(post.getCaption());
             if (!tags.isEmpty()) {
-                remainingBannedHashtags =
-                        hashtagService.upsertHashtagsForPostSkippingBanned(postId, tags);
+                remainingBannedHashtags = captionHashtags.upsertSkippingBanned(postId, tags);
             }
-            enqueuePostIndexUpsert(
-                    postId, post.getUserId(), post.getCreatedAt().atOffset(ZoneOffset.UTC));
+            postIndexEventPublisher.enqueueUpsert(
+                    postId,
+                    post.getUserId(),
+                    post.getCreatedAt().atOffset(ZoneOffset.UTC),
+                    post.getPublishedAt() == null
+                            ? null
+                            : post.getPublishedAt().atOffset(ZoneOffset.UTC));
         }
         log.info(
-                "Post restored by moderation: postId={}, to={}, remainingBannedHashtags={}",
+                "Post restored by moderation: postId={}, to={}, remainingBannedHashtags={},"
+                        + " strippedPlace={}",
                 postId,
                 restored,
-                remainingBannedHashtags);
-        return new PostModerationResult(post.getUserId(), restored, remainingBannedHashtags);
-    }
-
-    private static PostStatus restoredStatusOrPublished(String statusBeforeModeration) {
-        PostStatus restored = PostStatus.fromJson(statusBeforeModeration);
-        return restored == null ? PostStatus.PUBLISHED : restored;
+                remainingBannedHashtags,
+                strippedPlaceName != null);
+        return new PostModerationResult(
+                post.getUserId(), restored, remainingBannedHashtags, strippedPlaceName);
     }
 
     @Override
     @Transactional(readOnly = true)
     public CursorPageResponse<PostResponse> listUserPosts(
             UUID viewerId, UUID targetUserId, PostTypeFilter typeFilter, String cursor, int size) {
-        User target =
-                postUserRepository
-                        .findByIdAndDeletedAtIsNull(targetUserId)
-                        .orElseThrow(
-                                () -> new AppException(ApiErrorCode.NOT_FOUND, "User not found"));
-        // Stealth block model: matches assemblePublicProfile's reference behaviour - a block in
-        // either direction must be indistinguishable from targetUserId not existing.
-        if (socialService.isBlockedBetween(viewerId, targetUserId)) {
-            throw new AppException(ApiErrorCode.NOT_FOUND, "User not found");
-        }
-        boolean isOwner = viewerId.equals(targetUserId);
-        if (target.isPrivate()
-                && !isOwner
-                && !socialService.hasAcceptedFollow(viewerId, targetUserId)) {
-            throw new AppException(ApiErrorCode.POST_FORBIDDEN);
-        }
+        requireProfileReadable(viewerId, targetUserId);
         int pageSize = normalizeLimit(size);
         // The filter is bound into the cursor scope, so a cursor cannot be carried across filters.
         // The ordering is identical either way, which is exactly why a replay would otherwise
         // succeed while silently omitting the rows the other filter excludes before this position.
         String scope = typeFilter.cursorScope();
         Cursor decoded = decodeCursor(cursor, scope);
-        PageRequest page = PageRequest.of(0, pageSize + 1);
+        // One row more than the page, to learn whether another page exists.
+        int fetchSize = pageSize + 1;
         List<Post> posts;
         if (typeFilter.isEmpty()) {
             posts =
                     decoded == null
-                            ? postRepository.findFirstUserPosts(targetUserId, page)
+                            ? postRepository.findFirstUserPosts(targetUserId, fetchSize)
                             : postRepository.findUserPostsBefore(
                                     targetUserId,
                                     TimeCursors.fromMicros(decoded.sortValueMicros()),
                                     decoded.id(),
-                                    page);
+                                    fetchSize);
         } else {
             String types = typeFilter.asDelimitedTypes();
             posts =
                     decoded == null
-                            ? postRepository.findFirstUserPostsByType(targetUserId, types, page)
+                            ? postRepository.findFirstUserPostsByType(
+                                    targetUserId, types, fetchSize)
                             : postRepository.findUserPostsByTypeBefore(
                                     targetUserId,
                                     types,
                                     TimeCursors.fromMicros(decoded.sortValueMicros()),
                                     decoded.id(),
-                                    page);
+                                    fetchSize);
         }
         boolean hasNextPage = posts.size() > pageSize;
         if (hasNextPage) {
@@ -424,11 +403,52 @@ public class PostServiceImpl implements PostService {
             return CursorPageResponse.of(
                     Collections.emptyList(), false, null, null, cursor != null);
         }
-        List<PostResponse> content = postResponseAssembler.assemble(viewerId, posts);
         Post first = posts.get(0);
         Post last = posts.get(posts.size() - 1);
-        String startCursor = encodeCursor(first.getCreatedAt(), first.getId(), scope);
-        String endCursor = encodeCursor(last.getCreatedAt(), last.getId(), scope);
+        String startCursor = encodeCursor(first.getPublishedAt(), first.getId(), scope);
+        String endCursor = encodeCursor(last.getPublishedAt(), last.getId(), scope);
+        // A co-authored post on someone else's profile is governed by its owner's privacy and by
+        // blocks with every author, which the profile gate above did not look at. The cursors come
+        // from the unfiltered page, so a page the filter shortens still walks forward correctly.
+        List<Post> visible = keepVisible(viewerId, targetUserId, posts);
+        List<PostResponse> content =
+                visible.isEmpty() ? List.of() : postResponseAssembler.assemble(viewerId, visible);
+        return CursorPageResponse.of(content, hasNextPage, startCursor, endCursor, cursor != null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CursorPageResponse<PostResponse> listTaggedPosts(
+            UUID viewerId, UUID targetUserId, String cursor, int size) {
+        requireProfileReadable(viewerId, targetUserId);
+        int pageSize = normalizeLimit(size);
+        Cursor decoded = decodeCursor(cursor, CursorScope.TAGGED_POSTS);
+        PageRequest page = PageRequest.of(0, pageSize + 1);
+        List<Post> posts =
+                decoded == null
+                        ? postRepository.findFirstTaggedPosts(targetUserId, page)
+                        : postRepository.findTaggedPostsBefore(
+                                targetUserId,
+                                TimeCursors.fromMicros(decoded.sortValueMicros()),
+                                decoded.id(),
+                                page);
+        boolean hasNextPage = posts.size() > pageSize;
+        if (hasNextPage) {
+            posts = posts.subList(0, pageSize);
+        }
+        if (posts.isEmpty()) {
+            return CursorPageResponse.of(
+                    Collections.emptyList(), false, null, null, cursor != null);
+        }
+        Post first = posts.get(0);
+        Post last = posts.get(posts.size() - 1);
+        String startCursor =
+                encodeCursor(first.getPublishedAt(), first.getId(), CursorScope.TAGGED_POSTS);
+        String endCursor =
+                encodeCursor(last.getPublishedAt(), last.getId(), CursorScope.TAGGED_POSTS);
+        List<Post> visible = keepVisible(viewerId, targetUserId, posts);
+        List<PostResponse> content =
+                visible.isEmpty() ? List.of() : postResponseAssembler.assemble(viewerId, visible);
         return CursorPageResponse.of(content, hasNextPage, startCursor, endCursor, cursor != null);
     }
 
@@ -447,28 +467,34 @@ public class PostServiceImpl implements PostService {
                     Collections.emptyList(), false, null, null, cursor != null);
         }
         // Authors are removed before the query rather than rows afterwards, so a page is never
-        // served short and the keyset cursor never sees a row the viewer will not. The block
-        // exclusion above is untouched: this only subtracts the viewer's own preferences.
-        Set<UUID> suppressedIds =
-                socialService.findFeedSuppressedAuthors(viewerId, followedIds, surface);
+        // served short and the keyset cursor never sees a row the viewer will not. A post is
+        // hidden when any of its authors is excluded, so the exclusion list also carries the
+        // viewer's blocks and every author the viewer muted, not only the followed ones.
+        Set<UUID> suppressed = socialService.findAllFeedSuppressedAuthors(viewerId, surface);
         List<UUID> authorIds =
-                suppressedIds.isEmpty()
+                suppressed.isEmpty()
                         ? followedIds
-                        : followedIds.stream().filter(id -> !suppressedIds.contains(id)).toList();
+                        : followedIds.stream().filter(id -> !suppressed.contains(id)).toList();
         if (authorIds.isEmpty()) {
             return CursorPageResponse.of(
                     Collections.emptyList(), false, null, null, cursor != null);
         }
-        PageRequest page = PageRequest.of(0, pageSize + 1);
+        Set<UUID> excluded = new HashSet<>(suppressed);
+        excluded.addAll(socialService.findBlockedEitherDirection(viewerId));
+        List<UUID> excludedAuthorIds =
+                excluded.isEmpty() ? List.of(NO_AUTHOR) : List.copyOf(excluded);
+        int fetchSize = pageSize + 1;
         List<Post> posts =
                 decoded == null
-                        ? postRepository.findFirstFeedPosts(authorIds, viewerId, page)
+                        ? postRepository.findFirstFeedPosts(
+                                authorIds, excludedAuthorIds, viewerId, fetchSize)
                         : postRepository.findFeedPostsBefore(
                                 authorIds,
+                                excludedAuthorIds,
                                 viewerId,
                                 TimeCursors.fromMicros(decoded.sortValueMicros()),
                                 decoded.id(),
-                                page);
+                                fetchSize);
         boolean hasNextPage = posts.size() > pageSize;
         if (hasNextPage) {
             posts = posts.subList(0, pageSize);
@@ -481,8 +507,8 @@ public class PostServiceImpl implements PostService {
         Post first = posts.get(0);
         Post last = posts.get(posts.size() - 1);
         String startCursor =
-                encodeCursor(first.getCreatedAt(), first.getId(), CursorScope.POST_FEED);
-        String endCursor = encodeCursor(last.getCreatedAt(), last.getId(), CursorScope.POST_FEED);
+                encodeCursor(first.getPublishedAt(), first.getId(), CursorScope.POST_FEED);
+        String endCursor = encodeCursor(last.getPublishedAt(), last.getId(), CursorScope.POST_FEED);
         return CursorPageResponse.of(content, hasNextPage, startCursor, endCursor, cursor != null);
     }
 
@@ -495,7 +521,10 @@ public class PostServiceImpl implements PostService {
                         .findByIdAndDeletedAtIsNull(postId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
         if (!requesterId.equals(post.getUserId())) {
-            throw new AppException(ApiErrorCode.POST_FORBIDDEN);
+            throw new AppException(
+                    post.getStatus() == PostStatus.PUBLISHED
+                            ? ApiErrorCode.POST_FORBIDDEN
+                            : ApiErrorCode.POST_NOT_FOUND);
         }
         int pageSize = normalizeLimit(size);
         Cursor decoded = decodeCursor(cursor, CursorScope.POST_EDIT_HISTORY);
@@ -532,67 +561,101 @@ public class PostServiceImpl implements PostService {
         return CursorPageResponse.of(content, hasNextPage, startCursor, endCursor, cursor != null);
     }
 
+    // The valid owner transitions. A post that was ever published never goes back to draft: the
+    // only way to a draft from a scheduled post is the schedule coming off, and a scheduled post
+    // cannot have been published.
+    private static boolean isAllowedTransition(PostStatus current, PostStatus target) {
+        return switch (current) {
+            case DRAFT -> target == PostStatus.PUBLISHED || target == PostStatus.SCHEDULED;
+            case SCHEDULED ->
+                    target == PostStatus.DRAFT
+                            || target == PostStatus.SCHEDULED
+                            || target == PostStatus.PUBLISHED;
+            case PUBLISHED -> target == PostStatus.ARCHIVED;
+            case ARCHIVED -> target == PostStatus.PUBLISHED;
+            case REMOVED -> false;
+        };
+    }
+
+    private static void requireScheduledAtAbsent(PostStatusTransitionRequest request) {
+        if (request.scheduledAt() != null) {
+            throw new AppException(
+                    ApiErrorCode.BAD_REQUEST, "scheduledAt is only valid when scheduling a post");
+        }
+    }
+
+    private static PostStatus restoredStatusOrPublished(String statusBeforeModeration) {
+        PostStatus restored = PostStatus.fromJson(statusBeforeModeration);
+        return restored == null ? PostStatus.PUBLISHED : restored;
+    }
+
     // Soft delete keeps the row (GLOBAL_RULES soft delete policy): status flip + deleted_at; the
     // trg_post_count trigger adjusts users.post_count on the same UPDATE statement.
     private void softDelete(Post post) {
+        boolean wasPublished = post.getStatus() == PostStatus.PUBLISHED;
         post.setStatus(PostStatus.REMOVED);
         post.setDeletedAt(OffsetDateTime.now());
-        hashtagService.removeHashtagsForPost(post.getId());
-        enqueuePostIndexDelete(post);
+        captionHashtags.detach(post.getId());
+        if (wasPublished) {
+            postIndexEventPublisher.enqueueDelete(post.getId(), post.getUserId());
+        }
     }
 
-    private void validateMediaCardinality(
-            PostType postType, List<UUID> mediaIds, Map<UUID, MediaAsset> assets) {
-        if (postType == PostType.CAROUSEL) {
-            if (mediaIds.size() < 2) {
-                throw new AppException(
-                        ApiErrorCode.BAD_REQUEST, "Carousel posts require at least 2 media items");
-            }
-            long maxItems = systemSettingService.getRequiredLong(MAX_POST_MEDIA_ITEMS);
-            if (mediaIds.size() > maxItems) {
-                throw new AppException(
-                        ApiErrorCode.BAD_REQUEST,
-                        "Carousel exceeds the maximum of " + maxItems + " media items");
-            }
-            return;
-        }
-        if (mediaIds.size() != 1) {
+    private Post requireOwnedForUpdate(UUID requesterId, UUID postId) {
+        Post post =
+                postRepository
+                        .findByIdForUpdate(postId)
+                        .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
+        if (!requesterId.equals(post.getUserId())) {
             throw new AppException(
-                    ApiErrorCode.BAD_REQUEST, "Image and video posts require exactly 1 media item");
+                    post.getStatus() == PostStatus.PUBLISHED
+                            ? ApiErrorCode.POST_FORBIDDEN
+                            : ApiErrorCode.POST_NOT_FOUND);
         }
-        MediaAsset asset = assets.get(mediaIds.get(0));
-        MediaType expected = postType == PostType.IMAGE ? MediaType.IMAGE : MediaType.VIDEO;
-        if (asset.getMediaType() != expected) {
-            throw new AppException(
-                    ApiErrorCode.BAD_REQUEST, "Media asset type does not match the post type");
-        }
+        return post;
     }
 
-    private void upsertCaptionHashtags(UUID postId, String caption) {
-        List<String> tags = extractHashtags(caption);
-        if (!tags.isEmpty()) {
-            hashtagService.upsertHashtagsForPost(postId, tags);
+    private User requireProfileReadable(UUID viewerId, UUID targetUserId) {
+        User target =
+                postUserRepository
+                        .findByIdAndDeletedAtIsNull(targetUserId)
+                        .orElseThrow(
+                                () -> new AppException(ApiErrorCode.NOT_FOUND, "User not found"));
+        // Stealth block model: matches assemblePublicProfile's reference behaviour - a block in
+        // either direction must be indistinguishable from targetUserId not existing.
+        if (socialService.findBlockedEitherDirection(viewerId).contains(targetUserId)) {
+            throw new AppException(ApiErrorCode.NOT_FOUND, "User not found");
         }
+        boolean isOwner = viewerId.equals(targetUserId);
+        if (target.isPrivate()
+                && !isOwner
+                && !socialService.hasAcceptedFollow(viewerId, targetUserId)) {
+            throw new AppException(ApiErrorCode.POST_FORBIDDEN);
+        }
+        return target;
     }
 
-    /**
-     * Refuses a caption naming a banned hashtag, before the caller mutates anything.
-     *
-     * <p>Called on every write path that could put a tag into {@code post_hashtags}, including the
-     * draft ones. A draft carrying a banned tag could never be published, so refusing it at the
-     * point it is written tells the author while the caption is still in front of them rather than
-     * at publish time. The check reads the caption being submitted, so removing the offending tag
-     * and retrying always succeeds; it never traps an author in a post it cannot edit.
-     */
-    private void rejectBannedHashtags(String caption) {
-        List<String> tags = extractHashtags(caption);
-        if (tags.isEmpty()) {
-            return;
+    // Posts the viewer may not see by their own visibility: the owner's privacy and blocks with
+    // any author. Only evaluated for posts the profile owner does not own, since the profile gate
+    // already covered the rest.
+    private List<Post> keepVisible(UUID viewerId, UUID profileUserId, List<Post> posts) {
+        Map<UUID, UUID> ownerByPostId = new HashMap<>();
+        for (Post post : posts) {
+            if (!post.getUserId().equals(profileUserId)) {
+                ownerByPostId.put(post.getId(), post.getUserId());
+            }
         }
-        List<String> banned = hashtagService.findBannedNames(tags);
-        if (!banned.isEmpty()) {
-            throw new AppException(ApiErrorCode.POST_BANNED_HASHTAG, Map.of("bannedTags", banned));
+        if (ownerByPostId.isEmpty()) {
+            return posts;
         }
+        Set<UUID> visible = postVisibilityService.filterVisiblePostIds(viewerId, ownerByPostId);
+        List<Post> kept = new ArrayList<>(posts.size());
+        for (Post post : posts) {
+            if (!ownerByPostId.containsKey(post.getId()) || visible.contains(post.getId())) {
+                kept.add(post);
+            }
+        }
+        return kept;
     }
 
     private PostModerationProjection requireModerationView(UUID postId) {
@@ -601,63 +664,33 @@ public class PostServiceImpl implements PostService {
                 .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
     }
 
-    private void enqueuePostIndexUpsert(Post post) {
-        enqueuePostIndexUpsert(post.getId(), post.getUserId(), post.getCreatedAt());
-    }
-
-    private void enqueuePostIndexDelete(Post post) {
-        enqueuePostIndexDelete(post.getId(), post.getUserId());
-    }
-
-    // Must run after upsertCaptionHashtags so the post_hashtags associations are queryable here.
-    private void enqueuePostIndexUpsert(UUID postId, UUID userId, OffsetDateTime createdAt) {
-        List<String> hashtagIds =
-                hashtagService
-                        .getHashtagIdsForPosts(List.of(postId))
-                        .getOrDefault(postId, List.of())
-                        .stream()
-                        .map(UUID::toString)
-                        .toList();
-        // User free-text (caption) is excluded from the payload; the consumer reads it from the
-        // source-of-truth post row it already loads for the Q4 gate.
+    private void enqueueScheduled(Post post) {
         Map<String, Object> data = new HashMap<>();
-        data.put("postId", postId.toString());
-        data.put("userId", userId.toString());
-        data.put("status", "published");
-        data.put("hashtagIds", hashtagIds);
-        data.put("createdAt", createdAt.toString());
+        data.put("postId", post.getId().toString());
+        data.put("scheduledAt", post.getScheduledAt().toString());
+        data.put(
+                "leadMinutes",
+                Math.max(
+                        0,
+                        java.time.Duration.between(OffsetDateTime.now(), post.getScheduledAt())
+                                .toMinutes()));
         outboxService.enqueue(
-                PostEventTypes.POST_INDEX_UPSERT_V1,
-                PostEventTypes.POST_INDEX_UPSERT_V1,
+                PostEventTypes.POST_SCHEDULED_V1,
+                PostEventTypes.POST_SCHEDULED_V1,
                 "post",
-                postId,
-                userId,
+                post.getId(),
+                post.getUserId(),
                 data);
     }
 
-    private void enqueuePostIndexDelete(UUID postId, UUID userId) {
+    private void enqueueLifecycle(String eventType, Post post) {
         outboxService.enqueue(
-                PostEventTypes.POST_INDEX_DELETE_V1,
-                PostEventTypes.POST_INDEX_DELETE_V1,
+                eventType,
+                eventType,
                 "post",
-                postId,
-                userId,
-                Map.of("postId", postId.toString()));
-    }
-
-    // Tokens are #-prefixed runs of Unicode letters, digits, and underscores; normalization and
-    // case-insensitive de-duplication are HashtagService's responsibility.
-    private List<String> extractHashtags(String caption) {
-        if (caption == null || caption.isBlank()) {
-            return List.of();
-        }
-        long maxTags = systemSettingService.getRequiredLong(MAX_HASHTAGS_PER_POST);
-        LinkedHashSet<String> tags = new LinkedHashSet<>();
-        Matcher matcher = HASHTAG_PATTERN.matcher(caption);
-        while (matcher.find() && tags.size() < maxTags) {
-            tags.add(matcher.group(1));
-        }
-        return List.copyOf(tags);
+                post.getId(),
+                post.getUserId(),
+                Map.of("postId", post.getId().toString()));
     }
 
     // SecurityUtils.getCurrentUser throws when no principal is bound (system/test contexts);

@@ -114,6 +114,27 @@ public enum ApiErrorCode {
     // the offending names under data.bannedTags, in normalized form, so a client can highlight them
     // in the caption instead of making the author guess which tag was refused.
     POST_BANNED_HASHTAG("POST_BANNED_HASHTAG", "Caption contains banned hashtags", HttpStatus.UNPROCESSABLE_ENTITY),
+    // The place is named in the request but an administrator removed it, so the post cannot carry it.
+    POST_PLACE_UNAVAILABLE("POST_PLACE_UNAVAILABLE", "This place is not available", HttpStatus.UNPROCESSABLE_ENTITY),
+    // 409: the request is well formed but the post is in a state that does not allow it, such as
+    // replacing the content of a post that is already published.
+    POST_STATE_CONFLICT("POST_STATE_CONFLICT", "This post cannot be changed in its current state", HttpStatus.CONFLICT),
+    POST_SCHEDULE_INVALID("POST_SCHEDULE_INVALID", "The publication time must be between one minute and thirty days from now", HttpStatus.BAD_REQUEST),
+    POST_DRAFT_LIMIT_REACHED("POST_DRAFT_LIMIT_REACHED", "You have reached the limit of drafts and scheduled posts", HttpStatus.UNPROCESSABLE_ENTITY),
+    // The tagged account's own setting refuses the tag. A block never reaches this code: it answers
+    // as a missing user so the tagger cannot tell it from a username that does not exist.
+    POST_TAG_NOT_ALLOWED("POST_TAG_NOT_ALLOWED", "This account does not allow tags", HttpStatus.UNPROCESSABLE_ENTITY),
+    POST_TAG_LIMIT_REACHED("POST_TAG_LIMIT_REACHED", "This image already has the maximum number of tags", HttpStatus.UNPROCESSABLE_ENTITY),
+    POST_TAG_NOT_FOUND("POST_TAG_NOT_FOUND", "Tag not found", HttpStatus.NOT_FOUND),
+    POST_COLLABORATOR_LIMIT_REACHED("POST_COLLABORATOR_LIMIT_REACHED", "A post can have at most three co-authors", HttpStatus.UNPROCESSABLE_ENTITY),
+    POST_COLLABORATION_NOT_FOUND("POST_COLLABORATION_NOT_FOUND", "Collaboration not found", HttpStatus.NOT_FOUND),
+
+    // Place
+    PLACE_NOT_FOUND("PLACE_NOT_FOUND", "Place not found", HttpStatus.NOT_FOUND),
+    // Distinct from PLACE_NOT_FOUND for the same reason as HASHTAG_UNAVAILABLE: the row exists but
+    // an administrator removed the name, and a client words that differently from "no such place".
+    PLACE_UNAVAILABLE("PLACE_UNAVAILABLE", "Place is no longer available", HttpStatus.NOT_FOUND),
+    PLACE_NAME_INVALID("PLACE_NAME_INVALID", "A place name must be 2 to 100 characters and contain a letter or a digit", HttpStatus.BAD_REQUEST),
 
     // Comment
     COMMENT_NOT_FOUND("COMMENT_NOT_FOUND", "Comment not found", HttpStatus.NOT_FOUND),

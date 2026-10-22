@@ -17,7 +17,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.core.simple.JdbcClient.StatementSpec;
@@ -57,6 +56,7 @@ class PostKeysetRowLossIT {
     private static final OffsetDateTime SHARED_INSTANT =
             OffsetDateTime.of(2026, 1, 1, 12, 0, 0, 0, ZoneOffset.UTC);
     private static final int PAGE_SIZE = 2;
+    private static final List<UUID> NO_EXCLUDED_AUTHORS = List.of(new UUID(0L, 0L));
 
     private final PostRepository postRepository;
     private final PostLikeRepository postLikeRepository;
@@ -83,7 +83,7 @@ class PostKeysetRowLossIT {
     }
 
     @Test
-    void userPosts_tieGroupOnCreatedAt_pagesEveryRowExactlyOnce() {
+    void userPosts_tieGroupOnPublishedAt_pagesEveryRowExactlyOnce() {
         UUID author = insertUser("tie_author");
         List<UUID> expected = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
@@ -91,21 +91,21 @@ class PostKeysetRowLossIT {
         }
 
         List<UUID> seen = new ArrayList<>();
-        List<Post> page = postRepository.findFirstUserPosts(author, page());
+        List<Post> page = postRepository.findFirstUserPosts(author, PAGE_SIZE);
         int guard = 0;
         while (!page.isEmpty() && guard++ < 100) {
             page.forEach(p -> seen.add(p.getId()));
             Post last = page.get(page.size() - 1);
             page =
                     postRepository.findUserPostsBefore(
-                            author, last.getCreatedAt(), last.getId(), page());
+                            author, last.getPublishedAt(), last.getId(), PAGE_SIZE);
         }
 
         assertThat(seen).containsExactlyInAnyOrderElementsOf(expected);
     }
 
     @Test
-    void feed_tieGroupOnCreatedAt_pagesEveryRowExactlyOnce() {
+    void feed_tieGroupOnPublishedAt_pagesEveryRowExactlyOnce() {
         UUID viewer = insertUser("feed_viewer");
         UUID author = insertUser("feed_author");
         List<UUID> authorIds = List.of(author);
@@ -169,8 +169,10 @@ class PostKeysetRowLossIT {
 
         StatementSpec spec =
                 jdbcClient
-                        .sql("EXPLAIN " + feedQuery(method, withCursor) + " LIMIT 21")
+                        .sql("EXPLAIN " + feedQuery(method, withCursor))
+                        .param("limit", 21)
                         .param("authorIds", authors)
+                        .param("excludedAuthorIds", NO_EXCLUDED_AUTHORS)
                         .param("viewerId", viewer);
         if (withCursor) {
             spec = spec.param("cursorTime", SHARED_INSTANT).param("cursorId", UUID.randomUUID());
@@ -180,7 +182,7 @@ class PostKeysetRowLossIT {
         if (authorCount == 1) {
             assertThat(plan)
                     .as("the keyset index must drive the scan")
-                    .contains("idx_posts_user_created_id");
+                    .contains("idx_posts_user_published_id");
         } else {
             // With several authors the planner may order by another posts index and filter the
             // authors; what matters is that the table is never read sequentially.
@@ -207,25 +209,33 @@ class PostKeysetRowLossIT {
                         ? PostRepository.class.getMethod(
                                 method,
                                 List.class,
+                                List.class,
                                 UUID.class,
                                 OffsetDateTime.class,
                                 UUID.class,
-                                Pageable.class)
+                                int.class)
                         : PostRepository.class.getMethod(
-                                method, List.class, UUID.class, Pageable.class);
+                                method, List.class, List.class, UUID.class, int.class);
         return repositoryMethod.getAnnotation(Query.class).value();
     }
 
     private List<UUID> pageFeed(List<UUID> authorIds, UUID viewer) {
         List<UUID> seen = new ArrayList<>();
-        List<Post> page = postRepository.findFirstFeedPosts(authorIds, viewer, page());
+        List<Post> page =
+                postRepository.findFirstFeedPosts(
+                        authorIds, NO_EXCLUDED_AUTHORS, viewer, PAGE_SIZE);
         int guard = 0;
         while (!page.isEmpty() && guard++ < 100) {
             page.forEach(p -> seen.add(p.getId()));
             Post last = page.get(page.size() - 1);
             page =
                     postRepository.findFeedPostsBefore(
-                            authorIds, viewer, last.getCreatedAt(), last.getId(), page());
+                            authorIds,
+                            NO_EXCLUDED_AUTHORS,
+                            viewer,
+                            last.getPublishedAt(),
+                            last.getId(),
+                            PAGE_SIZE);
         }
         return seen;
     }
@@ -353,8 +363,9 @@ class PostKeysetRowLossIT {
     private UUID insertPost(UUID userId, OffsetDateTime createdAt) {
         return jdbcClient
                 .sql(
-                        "INSERT INTO posts(user_id, post_type, status, created_at)"
-                                + " VALUES (:userId, 'image', 'published', :createdAt) RETURNING id")
+                        "INSERT INTO posts(user_id, post_type, status, created_at, published_at)"
+                                + " VALUES (:userId, 'image', 'published', :createdAt, :createdAt)"
+                                + " RETURNING id")
                 .param("userId", userId)
                 .param("createdAt", createdAt)
                 .query(UUID.class)

@@ -33,6 +33,7 @@ import com.app.modules.post.event.PostIndexUpsertEvent;
 import com.app.modules.post.messaging.PostEventTypes;
 import com.app.modules.post.repository.PostRepository;
 import com.app.modules.post.search.PostDocument;
+import com.app.modules.post.search.PostDocumentFactory;
 import com.app.modules.post.search.PostSearchRepository;
 import com.app.modules.recommendation.client.GorseClient;
 import com.app.modules.recommendation.client.dto.GorseItem;
@@ -65,6 +66,7 @@ public class PostIndexSyncConsumer {
     private final PostSearchRepository postSearchRepository;
     private final PostRepository postRepository;
     private final HashtagService hashtagService;
+    private final PostDocumentFactory postDocumentFactory;
     private final GorseClient gorseClient;
     private final ObjectMapper objectMapper;
     private final Sleeper sleeper;
@@ -78,6 +80,7 @@ public class PostIndexSyncConsumer {
             PostSearchRepository postSearchRepository,
             PostRepository postRepository,
             HashtagService hashtagService,
+            PostDocumentFactory postDocumentFactory,
             GorseClient gorseClient,
             ObjectMapper objectMapper) {
         this(
@@ -88,6 +91,7 @@ public class PostIndexSyncConsumer {
                 postSearchRepository,
                 postRepository,
                 hashtagService,
+                postDocumentFactory,
                 gorseClient,
                 objectMapper,
                 Thread::sleep);
@@ -101,6 +105,7 @@ public class PostIndexSyncConsumer {
             PostSearchRepository postSearchRepository,
             PostRepository postRepository,
             HashtagService hashtagService,
+            PostDocumentFactory postDocumentFactory,
             GorseClient gorseClient,
             ObjectMapper objectMapper,
             Sleeper sleeper) {
@@ -111,6 +116,7 @@ public class PostIndexSyncConsumer {
         this.postSearchRepository = postSearchRepository;
         this.postRepository = postRepository;
         this.hashtagService = hashtagService;
+        this.postDocumentFactory = postDocumentFactory;
         this.gorseClient = gorseClient;
         this.objectMapper = objectMapper;
         this.sleeper = sleeper;
@@ -198,15 +204,9 @@ public class PostIndexSyncConsumer {
                 }
                 // Caption is read from the source-of-truth row, not the event payload, so user
                 // free-text never travels through the outbox.
-                PostDocument document =
-                        PostDocument.builder()
-                                .id(payload.postId().toString())
-                                .userId(payload.userId().toString())
-                                .caption(post.get().getCaption())
-                                .status("published")
-                                .hashtagIds(payload.hashtagIds())
-                                .createdAt(payload.createdAt())
-                                .build();
+                // The place and the author list are read from the rows too, so an event that
+                // arrives late cannot restore an author who has since left.
+                PostDocument document = postDocumentFactory.build(post.get(), payload.hashtagIds());
                 postSearchRepository.save(document);
             }
             case PostEventTypes.POST_INDEX_DELETE_V1 -> {
@@ -227,7 +227,8 @@ public class PostIndexSyncConsumer {
     // item.Labels, and the recommender computes tag similarity on the label strings themselves.
     // Names are read from the source-of-truth rows for the same reason the caption is, rather than
     // being carried in the event payload where a later rename would leave them stale.
-    // Timestamp is the post's creation time so the trending recommender's age term is meaningful.
+    // Timestamp is the post's publication time so the trending recommender's age term is
+    // meaningful.
     private void upsertRecommenderItem(PostIndexUpsertEvent payload, Post post, boolean published) {
         List<String> labels = hashtagService.getHashtagNamesForPost(payload.postId());
         gorseClient.upsertItems(
@@ -237,7 +238,9 @@ public class PostIndexSyncConsumer {
                                 !published,
                                 List.of(),
                                 labels,
-                                post.getCreatedAt(),
+                                post.getPublishedAt() == null
+                                        ? post.getCreatedAt()
+                                        : post.getPublishedAt(),
                                 null)));
     }
 

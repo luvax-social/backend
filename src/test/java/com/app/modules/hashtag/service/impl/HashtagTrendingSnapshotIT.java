@@ -266,8 +266,8 @@ class HashtagTrendingSnapshotIT {
         return jdbcClient
                 .sql(
                         """
-						INSERT INTO posts(user_id, post_type, status, created_at)
-						VALUES (:userId, 'image', 'published', :createdAt) RETURNING id
+						INSERT INTO posts(user_id, post_type, status, created_at, published_at)
+						VALUES (:userId, 'image', 'published', :createdAt, :createdAt) RETURNING id
 						""")
                 .param("userId", userId)
                 .param("createdAt", createdAt)

@@ -3,12 +3,14 @@ package com.app.modules.post.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,6 +48,7 @@ class PostPreviewServiceImplTest {
         assertThat(preview.available()).isTrue();
         assertThat(preview.media().url()).isEqualTo("https://cdn/p.jpg");
         assertThat(preview.media().mediaType()).isEqualTo("image");
+        assertThat(preview.media().altText()).isEqualTo("A cat on a sofa");
     }
 
     @Test
@@ -56,7 +59,7 @@ class PostPreviewServiceImplTest {
         PostPreviewRow hidden = row("published", false, false, UUID.randomUUID());
         when(postPreviewRepository.findPreviewRows(anyCollection()))
                 .thenReturn(List.of(deleted, moderated, draft, hidden));
-        when(postVisibilityService.filterVisibleOwnerIds(any(), any())).thenReturn(Set.of(owner));
+        stubVisibleOwners(Set.of(owner));
 
         Map<UUID, PostPreviewResponse> previews =
                 service.loadPreviews(
@@ -82,7 +85,7 @@ class PostPreviewServiceImplTest {
     void loadPreviews_unknownPost_isUnavailable() {
         UUID missing = UUID.randomUUID();
         when(postPreviewRepository.findPreviewRows(anyCollection())).thenReturn(List.of());
-        when(postVisibilityService.filterVisibleOwnerIds(any(), any())).thenReturn(Set.of());
+        stubVisibleOwners(Set.of());
 
         assertThat(service.loadPreviews(viewer, List.of(missing)).get(missing).available())
                 .isFalse();
@@ -90,7 +93,20 @@ class PostPreviewServiceImplTest {
 
     private void stub(PostPreviewRow row, Set<UUID> visibleOwners) {
         when(postPreviewRepository.findPreviewRows(anyCollection())).thenReturn(List.of(row));
-        when(postVisibilityService.filterVisibleOwnerIds(any(), any())).thenReturn(visibleOwners);
+        stubVisibleOwners(visibleOwners);
+    }
+
+    // The chain is evaluated per post, so the stub answers with the posts whose owner is visible.
+    private void stubVisibleOwners(Set<UUID> visibleOwners) {
+        when(postVisibilityService.filterVisiblePostIds(any(), anyMap()))
+                .thenAnswer(
+                        invocation -> {
+                            Map<UUID, UUID> ownerByPostId = invocation.getArgument(1);
+                            return ownerByPostId.entrySet().stream()
+                                    .filter(entry -> visibleOwners.contains(entry.getValue()))
+                                    .map(Map.Entry::getKey)
+                                    .collect(Collectors.toSet());
+                        });
     }
 
     private static PostPreviewRow row(
@@ -105,6 +121,7 @@ class PostPreviewServiceImplTest {
                 "LKO2",
                 "image",
                 1080,
-                1350);
+                1350,
+                "A cat on a sofa");
     }
 }

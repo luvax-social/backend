@@ -48,6 +48,7 @@ class PostNotificationConsumerTest {
     @Mock private ProcessedMessageService processedMessageService;
     @Mock private NotificationService notificationService;
     @Mock private PostLikeRepository postLikeRepository;
+    @Mock private PostInvolvementNotifier involvementNotifier;
     @Mock private Channel channel;
 
     private PostNotificationConsumer consumer;
@@ -64,6 +65,7 @@ class PostNotificationConsumerTest {
                         notificationService,
                         retryProperties,
                         postLikeRepository,
+                        involvementNotifier,
                         millis -> {});
     }
 

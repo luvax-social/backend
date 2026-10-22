@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -42,6 +43,7 @@ import com.app.modules.social.entity.BlockId;
 import com.app.modules.social.entity.Follow;
 import com.app.modules.social.entity.FollowId;
 import com.app.modules.social.enums.FollowStatus;
+import com.app.modules.social.event.UserBlockedEvent;
 import com.app.modules.social.repository.AccountShowFewerRepository;
 import com.app.modules.social.repository.BlockRepository;
 import com.app.modules.social.repository.FollowEdgeProjection;
@@ -68,6 +70,7 @@ public class SocialServiceImpl implements SocialService {
     private final DirectConversationProvisioner directConversationProvisioner;
     private final UserMuteRepository userMuteRepository;
     private final AccountShowFewerRepository accountShowFewerRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public SocialServiceImpl(
             FollowRepository followRepository,
@@ -78,7 +81,9 @@ public class SocialServiceImpl implements SocialService {
             ReportedTargetService reportedTargetService,
             DirectConversationProvisioner directConversationProvisioner,
             UserMuteRepository userMuteRepository,
-            AccountShowFewerRepository accountShowFewerRepository) {
+            AccountShowFewerRepository accountShowFewerRepository,
+            ApplicationEventPublisher eventPublisher) {
+        this.eventPublisher = eventPublisher;
         this.directConversationProvisioner = directConversationProvisioner;
         this.userMuteRepository = userMuteRepository;
         this.accountShowFewerRepository = accountShowFewerRepository;
@@ -286,6 +291,10 @@ public class SocialServiceImpl implements SocialService {
         // request left behind would resurface as stale state the moment the block is lifted.
         userMuteRepository.deleteBetween(currentUserId, targetUserId);
         accountShowFewerRepository.deleteBetween(currentUserId, targetUserId);
+
+        // Tags and co-authorships between the pair belong to other modules; they end in this same
+        // transaction through the event, so no tag between a blocked pair outlives the block.
+        eventPublisher.publishEvent(new UserBlockedEvent(currentUserId, targetUserId));
 
         // Blocking destroys both follow edges above, so the pair is no longer mutual. An empty
         // conversation provisioned by that relationship goes with it; one with messages stays and
@@ -726,6 +735,14 @@ public class SocialServiceImpl implements SocialService {
                                 viewerId, surface.appliesShowFewer()));
         suppressed.retainAll(new HashSet<>(candidateAuthorIds));
         return suppressed;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<UUID> findAllFeedSuppressedAuthors(UUID viewerId, FeedSurface surface) {
+        return new HashSet<>(
+                userMuteRepository.findFeedSuppressedAuthorIds(
+                        viewerId, surface.appliesShowFewer()));
     }
 
     @Override

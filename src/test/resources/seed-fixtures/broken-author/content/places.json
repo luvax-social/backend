@@ -1,0 +1,5 @@
+{
+  "places": [
+    { "name": "Test Place One", "status": "active", "history": "none", "status_note": null }
+  ]
+}

@@ -39,6 +39,10 @@ public class RabbitMqTopologyConfig {
     public static final String HASHTAG_INDEX_SYNC_DEAD_LETTER_QUEUE = "hashtag.index.sync.dlq";
     public static final String HASHTAG_INDEX_DEAD_LETTER_ROUTING_KEY = "hashtag.index.dead-letter";
 
+    public static final String PLACE_INDEX_SYNC_QUEUE = "place.index.sync";
+    public static final String PLACE_INDEX_SYNC_DEAD_LETTER_QUEUE = "place.index.sync.dlq";
+    public static final String PLACE_INDEX_DEAD_LETTER_ROUTING_KEY = "place.index.dead-letter";
+
     public static final String POST_INDEX_SYNC_QUEUE = "post.index.sync";
     public static final String POST_INDEX_SYNC_DEAD_LETTER_QUEUE = "post.index.sync.dlq";
     public static final String POST_INDEX_DEAD_LETTER_ROUTING_KEY = "post.index.dead-letter";
@@ -199,6 +203,24 @@ public class RabbitMqTopologyConfig {
     @Bean
     Queue hashtagIndexSyncDeadLetterQueue() {
         return QueueBuilder.durable(HASHTAG_INDEX_SYNC_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    Queue placeIndexSyncQueue() {
+        return QueueBuilder.durable(PLACE_INDEX_SYNC_QUEUE).build();
+    }
+
+    @Bean
+    Queue placeIndexSyncDeadLetterQueue() {
+        return QueueBuilder.durable(PLACE_INDEX_SYNC_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    Binding placeIndexSyncDeadLetterBinding(
+            Queue placeIndexSyncDeadLetterQueue, TopicExchange socialEventsDeadLetterExchange) {
+        return BindingBuilder.bind(placeIndexSyncDeadLetterQueue)
+                .to(socialEventsDeadLetterExchange)
+                .with(PLACE_INDEX_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean

@@ -22,6 +22,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.app.common.response.ViewerRelationshipResponse;
 import com.app.modules.post.entity.Post;
+import com.app.modules.post.entity.PostCollaborator;
+import com.app.modules.post.entity.PostCollaboratorId;
+import com.app.modules.post.enums.CollaborationStatus;
+import com.app.modules.post.repository.PostCollaboratorRepository;
 import com.app.modules.post.repository.PostUserRepository;
 import com.app.modules.social.service.SocialService;
 import com.app.modules.users.entity.User;
@@ -31,6 +35,7 @@ class PostVisibilityServiceImplTest {
 
     @Mock private PostUserRepository postUserRepository;
     @Mock private SocialService socialService;
+    @Mock private PostCollaboratorRepository postCollaboratorRepository;
 
     private PostVisibilityServiceImpl service;
 
@@ -39,7 +44,9 @@ class PostVisibilityServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new PostVisibilityServiceImpl(postUserRepository, socialService);
+        service =
+                new PostVisibilityServiceImpl(
+                        postUserRepository, socialService, postCollaboratorRepository);
     }
 
     private Post post() {
@@ -99,6 +106,104 @@ class PostVisibilityServiceImplTest {
         when(postUserRepository.findByIdAndDeletedAtIsNull(ownerId)).thenReturn(Optional.empty());
 
         assertThat(service.isVisibleTo(viewerId, post())).isFalse();
+    }
+
+    @Test
+    void isVisibleTo_viewerIsAcceptedCoAuthor_returnsTrueWithoutBlockChecks() {
+        Post post = post();
+        when(postCollaboratorRepository.findAcceptedUserIds(post.getId()))
+                .thenReturn(List.of(viewerId));
+
+        assertThat(service.isVisibleTo(viewerId, post)).isTrue();
+        verifyNoInteractions(socialService, postUserRepository);
+    }
+
+    @Test
+    void isVisibleTo_viewerBlockedWithAnAcceptedCoAuthor_returnsFalse() {
+        Post post = post();
+        UUID coAuthor = UUID.randomUUID();
+        when(postCollaboratorRepository.findAcceptedUserIds(post.getId()))
+                .thenReturn(List.of(coAuthor));
+        when(socialService.isBlockedBetween(viewerId, ownerId)).thenReturn(false);
+        when(socialService.isBlockedBetween(viewerId, coAuthor)).thenReturn(true);
+
+        assertThat(service.isVisibleTo(viewerId, post)).isFalse();
+    }
+
+    @Test
+    void isVisibleTo_privateOwnerDecidesTheAudienceOfACoAuthoredPost() {
+        Post post = post();
+        UUID coAuthor = UUID.randomUUID();
+        when(postCollaboratorRepository.findAcceptedUserIds(post.getId()))
+                .thenReturn(List.of(coAuthor));
+        when(postUserRepository.findByIdAndDeletedAtIsNull(ownerId))
+                .thenReturn(Optional.of(owner(true)));
+        when(socialService.hasAcceptedFollow(viewerId, ownerId)).thenReturn(false);
+
+        assertThat(service.isVisibleTo(viewerId, post)).isFalse();
+    }
+
+    @Test
+    void filterVisiblePostIds_viewerBlockedWithACoAuthor_excludesOnlyThatPost() {
+        UUID plainPost = UUID.randomUUID();
+        UUID sharedPost = UUID.randomUUID();
+        UUID coAuthor = UUID.randomUUID();
+        when(socialService.findBlockedEitherDirection(viewerId)).thenReturn(Set.of(coAuthor));
+        when(socialService.loadRelationships(any(), anyCollection())).thenReturn(Map.of());
+        when(postUserRepository.findAllByIdInAndDeletedAtIsNull(anyCollection()))
+                .thenReturn(List.of(owner(false)));
+        when(postCollaboratorRepository.findByPostIdIn(anyCollection()))
+                .thenReturn(
+                        List.of(
+                                PostCollaborator.builder()
+                                        .id(new PostCollaboratorId(sharedPost, coAuthor))
+                                        .status(CollaborationStatus.ACCEPTED)
+                                        .build()));
+
+        Set<UUID> visible =
+                service.filterVisiblePostIds(
+                        viewerId, Map.of(plainPost, ownerId, sharedPost, ownerId));
+
+        assertThat(visible).containsExactly(plainPost);
+    }
+
+    @Test
+    void filterVisiblePostIds_pendingInvitationDoesNotHideAPost() {
+        UUID sharedPost = UUID.randomUUID();
+        UUID invitee = UUID.randomUUID();
+        when(socialService.findBlockedEitherDirection(viewerId)).thenReturn(Set.of(invitee));
+        when(socialService.loadRelationships(any(), anyCollection())).thenReturn(Map.of());
+        when(postUserRepository.findAllByIdInAndDeletedAtIsNull(anyCollection()))
+                .thenReturn(List.of(owner(false)));
+        when(postCollaboratorRepository.findByPostIdIn(anyCollection()))
+                .thenReturn(
+                        List.of(
+                                PostCollaborator.builder()
+                                        .id(new PostCollaboratorId(sharedPost, invitee))
+                                        .status(CollaborationStatus.INVITED)
+                                        .build()));
+
+        assertThat(service.filterVisiblePostIds(viewerId, Map.of(sharedPost, ownerId)))
+                .containsExactly(sharedPost);
+    }
+
+    @Test
+    void filterVisiblePostIds_viewerIsACoAuthor_alwaysSeesThePost() {
+        UUID sharedPost = UUID.randomUUID();
+        when(socialService.findBlockedEitherDirection(viewerId)).thenReturn(Set.of(ownerId));
+        when(socialService.loadRelationships(any(), anyCollection())).thenReturn(Map.of());
+        when(postUserRepository.findAllByIdInAndDeletedAtIsNull(anyCollection()))
+                .thenReturn(List.of(owner(false)));
+        when(postCollaboratorRepository.findByPostIdIn(anyCollection()))
+                .thenReturn(
+                        List.of(
+                                PostCollaborator.builder()
+                                        .id(new PostCollaboratorId(sharedPost, viewerId))
+                                        .status(CollaborationStatus.ACCEPTED)
+                                        .build()));
+
+        assertThat(service.filterVisiblePostIds(viewerId, Map.of(sharedPost, ownerId)))
+                .containsExactly(sharedPost);
     }
 
     @Test

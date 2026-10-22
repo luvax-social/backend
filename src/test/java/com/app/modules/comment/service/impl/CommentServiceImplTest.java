@@ -56,8 +56,8 @@ import com.app.modules.comment.observability.CommentMetrics;
 import com.app.modules.comment.repository.CommentIdempotencyRepository;
 import com.app.modules.comment.repository.CommentLikeRepository;
 import com.app.modules.comment.repository.CommentRepository;
-import com.app.modules.comment.repository.CommentUserRepository;
 import com.app.modules.comment.service.CommentAccessPolicyService;
+import com.app.modules.comment.service.CommentMentionService;
 import com.app.modules.comment.service.CommentModerationService;
 import com.app.modules.comment.service.CommentModerationService.ModerationResult;
 import com.app.modules.comment.service.CommentViewerStateService;
@@ -92,7 +92,6 @@ class CommentServiceImplTest {
     @Mock private CommentLikeRepository commentLikeRepository;
     @Mock private CommentIdempotencyRepository idempotencyRepository;
     @Mock private PostRepository postRepository;
-    @Mock private CommentUserRepository commentUserRepository;
     @Mock private CommentModerationService moderationService;
     @Mock private CommentAccessPolicyService accessPolicy;
     @Mock private CommentMapper mapper;
@@ -105,6 +104,7 @@ class CommentServiceImplTest {
     @Mock private CommentViewerStateService commentViewerStateService;
     @Mock private BlockRepository blockRepository;
     @Mock private InteractionPolicyService interactionPolicy;
+    @Mock private CommentMentionService commentMentionService;
 
     private CommentServiceImpl service;
 
@@ -136,7 +136,6 @@ class CommentServiceImplTest {
                 commentLikeRepository,
                 idempotencyRepository,
                 postRepository,
-                commentUserRepository,
                 moderationService,
                 accessPolicy,
                 mapper,
@@ -149,7 +148,8 @@ class CommentServiceImplTest {
                 userSummaryService,
                 commentViewerStateService,
                 blockRepository,
-                interactionPolicy);
+                interactionPolicy,
+                commentMentionService);
     }
 
     @AfterEach
@@ -172,11 +172,6 @@ class CommentServiceImplTest {
     private InteractionRequest commentRequestTo(UUID postOwnerId) {
         return new InteractionRequest(
                 actorId, postOwnerId, InteractionType.COMMENT, "hello world", List.of(), null);
-    }
-
-    private InteractionRequest mentionRequestTo(UUID mentionedId) {
-        return new InteractionRequest(
-                actorId, mentionedId, InteractionType.MENTION, null, List.of(), null);
     }
 
     private Comment approvedComment(UUID authorId) {
@@ -222,16 +217,6 @@ class CommentServiceImplTest {
         when(commentRepository.saveAndFlush(any())).thenReturn(saved);
         when(mapper.toResponse(eq(saved), any(), anyBoolean(), anyBoolean())).thenReturn(mapped);
         return mapped;
-    }
-
-    private void stubUser(String username, UUID userId) {
-        when(commentUserRepository.findByUsernameAndDeletedAtIsNull(username))
-                .thenReturn(
-                        Optional.of(
-                                com.app.modules.users.entity.User.builder()
-                                        .id(userId)
-                                        .username(username)
-                                        .build()));
     }
 
     @SuppressWarnings("unchecked")
@@ -362,60 +347,6 @@ class CommentServiceImplTest {
                         eq(commentId),
                         eq(actorId),
                         anyMap());
-    }
-
-    @Test
-    void createComment_mentionsBlockedUser_silentlyExcludesFromMentionedUserIds() {
-        UUID unrelatedUserId = UUID.randomUUID();
-        UUID blockedUserId = UUID.randomUUID();
-        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
-        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
-        Comment saved =
-                Comment.builder()
-                        .id(commentId)
-                        .postId(postId)
-                        .userId(actorId)
-                        .depth((short) 0)
-                        .build();
-        when(commentRepository.saveAndFlush(any())).thenReturn(saved);
-        when(mapper.toResponse(eq(saved), any(), anyBoolean(), anyBoolean()))
-                .thenReturn(sampleResponse());
-        when(commentUserRepository.findByUsernameAndDeletedAtIsNull("unrelated"))
-                .thenReturn(
-                        Optional.of(
-                                com.app.modules.users.entity.User.builder()
-                                        .id(unrelatedUserId)
-                                        .username("unrelated")
-                                        .build()));
-        when(commentUserRepository.findByUsernameAndDeletedAtIsNull("blocked"))
-                .thenReturn(
-                        Optional.of(
-                                com.app.modules.users.entity.User.builder()
-                                        .id(blockedUserId)
-                                        .username("blocked")
-                                        .build()));
-        when(blockRepository.existsBetween(actorId, unrelatedUserId)).thenReturn(false);
-        when(blockRepository.existsBetween(actorId, blockedUserId)).thenReturn(true);
-        CreateCommentRequest request =
-                new CreateCommentRequest(postId, null, "hi @unrelated and @blocked");
-
-        service.createComment(actorId, request, null);
-
-        ArgumentCaptor<java.util.Map> dataCaptor = ArgumentCaptor.forClass(java.util.Map.class);
-        verify(outboxService)
-                .enqueue(
-                        eq(CommentEventTypes.COMMENT_CREATED_V1),
-                        eq(CommentEventTypes.COMMENT_CREATED_V1),
-                        eq("comment"),
-                        eq(commentId),
-                        eq(actorId),
-                        dataCaptor.capture());
-        @SuppressWarnings("unchecked")
-        List<String> mentionedUserIds =
-                (List<String>) dataCaptor.getValue().get("mentionedUserIds");
-        assertThat(mentionedUserIds)
-                .containsExactly(unrelatedUserId.toString())
-                .doesNotContain(blockedUserId.toString());
     }
 
     @Test
@@ -860,62 +791,12 @@ class CommentServiceImplTest {
 
         CommentResponse response = service.createComment(actorId, createRequest(null), null);
 
-        assertThat(response).isSameAs(mapped);
+        assertThat(response).isEqualTo(mapped);
         assertThat(
                         java.util.Arrays.stream(CommentResponse.class.getRecordComponents())
                                 .map(java.lang.reflect.RecordComponent::getName))
                 .noneMatch(
                         name -> name.toLowerCase().contains("hidden") || name.contains("status"));
-    }
-
-    @Test
-    void mentions_limitedTargetExcludedFromMentionedUserIds() {
-        UUID openId = UUID.randomUUID();
-        UUID limitedId = UUID.randomUUID();
-        UUID deniedId = UUID.randomUUID();
-        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
-        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
-        stubSave();
-        stubUser("open", openId);
-        stubUser("limited", limitedId);
-        stubUser("denied", deniedId);
-        when(interactionPolicy.evaluate(mentionRequestTo(limitedId)))
-                .thenReturn(
-                        new InteractionDecision(
-                                InteractionOutcome.ALLOW_HIDDEN,
-                                InteractionReason.LIMITED_NON_FOLLOWER));
-        when(interactionPolicy.evaluate(mentionRequestTo(deniedId)))
-                .thenReturn(
-                        new InteractionDecision(
-                                InteractionOutcome.DENY, InteractionReason.BLOCKED));
-
-        service.createComment(
-                actorId, new CreateCommentRequest(postId, null, "hi @open @limited @denied"), null);
-
-        @SuppressWarnings("unchecked")
-        List<String> mentioned = (List<String>) createdEventData().get("mentionedUserIds");
-        assertThat(mentioned).containsExactly(openId.toString());
-        verify(interactionPolicy, org.mockito.Mockito.times(1)).evaluate(mentionRequestTo(openId));
-        verify(interactionPolicy, org.mockito.Mockito.times(1))
-                .evaluate(mentionRequestTo(limitedId));
-    }
-
-    @Test
-    void mentions_sameAccountNamedTwice_isEvaluatedOnce() {
-        UUID openId = UUID.randomUUID();
-        when(postRepository.findById(postId)).thenReturn(Optional.of(publishedPost()));
-        when(moderationService.check(any())).thenReturn(ModerationResult.approved());
-        stubSave();
-        stubUser("open", openId);
-        stubUser("Open", openId);
-
-        service.createComment(
-                actorId, new CreateCommentRequest(postId, null, "hi @open and @Open"), null);
-
-        @SuppressWarnings("unchecked")
-        List<String> mentioned = (List<String>) createdEventData().get("mentionedUserIds");
-        assertThat(mentioned).containsExactly(openId.toString());
-        verify(interactionPolicy, org.mockito.Mockito.times(1)).evaluate(mentionRequestTo(openId));
     }
 
     @Test
@@ -2094,7 +1975,8 @@ class CommentServiceImplTest {
                 null,
                 null,
                 null,
-                false);
+                false,
+                null);
     }
 
     private CommentResponse sampleResponse() {
@@ -2115,7 +1997,8 @@ class CommentServiceImplTest {
                 null,
                 null,
                 null,
-                false);
+                false,
+                null);
     }
 
     // Mirrors CommentServiceImpl's request-hash formula so the replay test can match the stored

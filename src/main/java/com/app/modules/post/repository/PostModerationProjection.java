@@ -25,6 +25,15 @@ public interface PostModerationProjection {
      */
     Instant getCreatedAt();
 
+    /** First publication instant, or null for a post that was never published. */
+    Instant getPublishedAt();
+
+    /** The scheduled time a post removed while scheduled still carries, or null. */
+    Instant getScheduledAt();
+
+    /** The place the post carries, or null; it may since have been banned or deleted. */
+    UUID getPlaceId();
+
     String getStatus();
 
     /** Status held before the moderation removal, or null for a post removed before V59. */

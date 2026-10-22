@@ -20,9 +20,11 @@ public interface PostService {
      *
      * <p>Every media asset must exist and be owned by the author. Carousel posts require at least
      * two and at most {@code max_post_media_items} assets; image and video posts require exactly
-     * one asset of the matching media type. When the effective status is published, hashtags are
-     * extracted from the caption and associated synchronously. Counters are never written —
-     * triggers maintain them.
+     * one asset of the matching media type. The status may be draft, scheduled or published. A
+     * draft and a scheduled post count against the owner's cap on unpublished posts, and a
+     * scheduled post needs a due time between one minute and thirty days ahead. A post created as
+     * published goes through the publication routine, which associates the caption hashtags and
+     * tells the people the post involves. Counters are never written — triggers maintain them.
      *
      * @param authorId authenticated author
      * @param request post payload
@@ -60,9 +62,12 @@ public interface PostService {
     /**
      * Transitions the post lifecycle status.
      *
-     * <p>Valid transitions: draft to published, published to archived, archived to published (owner
-     * only), and any status to removed (owner or admin — equivalent to soft delete). Publishing
-     * extracts caption hashtags; archiving and removal delete the hashtag associations.
+     * <p>Valid transitions: draft to published, draft to scheduled, scheduled to draft, scheduled
+     * to scheduled (reschedule), scheduled to published (publish now), published to archived,
+     * archived to published (owner only), and any status to removed (owner or admin — equivalent to
+     * soft delete). Scheduling needs {@code scheduledAt}; no other target accepts it. Publishing
+     * runs the publication routine; archiving and removal delete the hashtag associations. A post
+     * that was ever published can never return to draft.
      *
      * @param requesterId authenticated requester
      * @param postId post identifier
@@ -133,8 +138,10 @@ public interface PostService {
      * Cursor-paginated published posts of a user, newest first.
      *
      * <p>Throws when a block exists between viewer and target, or when the target account is
-     * private and the viewer holds no accepted follow. Drafts and archived posts are never listed,
-     * including for the owner.
+     * private and the viewer holds no accepted follow. A user's posts are the ones they own and the
+     * ones they co-author after accepting, newest publication first. Drafts, scheduled and archived
+     * posts are never listed, including for the owner; the owner reads those through the owner
+     * listing.
      *
      * <p>The type filter is bound into the cursor scope, so a cursor issued under one filter is
      * rejected by another. Without that binding a replay would succeed and silently omit every row
@@ -158,8 +165,10 @@ public interface PostService {
      * <p>Only accepted follow relationships contribute to the feed; pending follow requests are
      * excluded. Posts from any account involved in a block relationship with the viewer, in either
      * direction, are excluded. Returns an empty page without querying posts when the viewer follows
-     * nobody or when all followed accounts are blocked. Posts are ordered by creation time, newest
-     * first.
+     * nobody or when all followed accounts are blocked. A post belongs to the feed when its owner
+     * or an accepted co-author is followed, appears once, and is hidden when any of its authors is
+     * one the viewer muted, asked for fewer posts from, or is blocked with. Posts are ordered by
+     * publication time, newest first.
      *
      * <p>Posts the viewer marked not interested are never returned, and neither are posts by
      * accounts whose posts the viewer muted. Accounts the viewer asked to see fewer posts from are
@@ -175,10 +184,27 @@ public interface PostService {
      * @param cursor opaque base64 cursor from the previous page; null or blank for the first page
      * @param size requested page size, normalized to 1–100 with a default of 20
      * @param surface the feed the page is served for
-     * @return cursor page of feed posts ordered by creation time, newest first
+     * @return cursor page of feed posts ordered by publication time, newest first
      */
     CursorPageResponse<FeedPostResponse> getFeed(
             UUID viewerId, String cursor, int size, FeedSurface surface);
+
+    /**
+     * Cursor-paginated published posts in which the target holds an approved tag, newest first.
+     *
+     * <p>Applies the profile gate of {@link #listUserPosts}: a block in either direction reads as
+     * an unknown user, and a private account needs an accepted follow unless the viewer is the
+     * account itself. Every post is also checked against the viewer's own visibility, so a post by
+     * an account the viewer is blocked with is left out. A pending tag lists nothing.
+     *
+     * @param viewerId authenticated viewer
+     * @param targetUserId the tagged person whose tab is read
+     * @param cursor opaque base64 cursor from the previous page; null or blank for the first page
+     * @param size requested page size, normalized to 1–100 with a default of 20
+     * @return cursor page of posts ordered by publication time, newest first
+     */
+    CursorPageResponse<PostResponse> listTaggedPosts(
+            UUID viewerId, UUID targetUserId, String cursor, int size);
 
     /**
      * Cursor-paginated caption edit history of an owned post, newest first.

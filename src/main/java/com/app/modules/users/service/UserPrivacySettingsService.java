@@ -3,6 +3,7 @@ package com.app.modules.users.service;
 import java.util.UUID;
 
 import com.app.modules.users.enums.MessagePermission;
+import com.app.modules.users.enums.TagPermission;
 
 /**
  * Read access to the privacy preferences other modules enforce against an account.
@@ -28,4 +29,20 @@ public interface UserPrivacySettingsService {
      * @return the stored permission, or {@code EVERYONE} when the account has no settings row
      */
     MessagePermission messagePermissionOf(UUID userId);
+
+    /**
+     * Returns who may tag the account and whether its tags wait for approval.
+     *
+     * @param userId the account whose preferences are read
+     * @return the stored preferences, or the column defaults when the account has no settings row
+     */
+    TagSettings tagSettingsOf(UUID userId);
+
+    /**
+     * The two tag preferences the interaction policy applies to a tag of an account.
+     *
+     * @param permission who may tag the account
+     * @param manualApproval whether a tag of the account must be approved before it is shown
+     */
+    record TagSettings(TagPermission permission, boolean manualApproval) {}
 }

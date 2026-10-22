@@ -46,7 +46,7 @@ class NotificationItemAssemblerTest {
     private static final OffsetDateTime NOW =
             OffsetDateTime.of(2026, 9, 1, 12, 0, 0, 0, ZoneOffset.UTC);
     private static final PreviewMediaResponse MEDIA =
-            new PreviewMediaResponse("https://cdn/p.jpg", "LKO2", "image", 1080, 1350);
+            new PreviewMediaResponse("https://cdn/p.jpg", "LKO2", "image", 1080, 1350, null);
 
     @Mock private NotificationFeedRepository feedRepository;
     @Mock private UserSummaryService userSummaryService;

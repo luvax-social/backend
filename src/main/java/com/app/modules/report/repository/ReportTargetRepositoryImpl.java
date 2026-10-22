@@ -21,8 +21,12 @@ public class ReportTargetRepositoryImpl implements ReportTargetRepository {
         // round trip without repository coupling, at the cost of compile-time column safety.
         String query =
                 switch (reportType) {
+                    // Only a published post can be reported: a draft, a scheduled or an archived
+                    // post is not visible to anyone but its owner, so for every other account it
+                    // answers as a post that does not exist.
                     case POST ->
-                            "SELECT user_id FROM posts WHERE id = :entityId AND deleted_at IS NULL";
+                            "SELECT user_id FROM posts WHERE id = :entityId AND deleted_at IS NULL"
+                                    + " AND status = 'published'";
                     case COMMENT ->
                             "SELECT user_id FROM comments WHERE id = :entityId "
                                     + "AND deleted_at IS NULL AND admin_removed_at IS NULL "
@@ -35,6 +39,14 @@ public class ReportTargetRepositoryImpl implements ReportTargetRepository {
                     case STORY ->
                             "SELECT user_id FROM stories WHERE id = :entityId "
                                     + "AND deleted_at IS NULL AND admin_removed_at IS NULL";
+                    // A place has no owner in the account sense: its creator may be gone, and the
+                    // report must still resolve. The nil UUID stands in for a missing creator and
+                    // equals no reporter, so only the person who created the name is barred from
+                    // reporting it. A banned or deleted place is not visible to be reported.
+                    case PLACE ->
+                            "SELECT COALESCE(created_by,"
+                                    + " '00000000-0000-0000-0000-000000000000'::uuid)"
+                                    + " FROM places WHERE id = :entityId AND status = 'active'";
                     case MESSAGE ->
                             "SELECT sender_id FROM messages WHERE id = :entityId "
                                     + "AND is_deleted = FALSE AND deleted_at IS NULL "

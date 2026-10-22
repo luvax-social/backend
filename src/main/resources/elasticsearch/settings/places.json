@@ -1,0 +1,22 @@
+{
+  "index": {
+    "max_ngram_diff": 8
+  },
+  "analysis": {
+    "tokenizer": {
+      "place_ngram_tokenizer": {
+        "type": "ngram",
+        "min_gram": 2,
+        "max_gram": 10,
+        "token_chars": ["letter", "digit"]
+      }
+    },
+    "analyzer": {
+      "ngram_analyzer": {
+        "type": "custom",
+        "tokenizer": "place_ngram_tokenizer",
+        "filter": ["lowercase"]
+      }
+    }
+  }
+}

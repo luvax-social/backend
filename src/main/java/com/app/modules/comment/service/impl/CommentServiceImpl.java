@@ -7,14 +7,11 @@ import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.slf4j.MDC;
@@ -53,11 +50,12 @@ import com.app.modules.comment.observability.CommentMetrics;
 import com.app.modules.comment.repository.CommentIdempotencyRepository;
 import com.app.modules.comment.repository.CommentLikeRepository;
 import com.app.modules.comment.repository.CommentRepository;
-import com.app.modules.comment.repository.CommentUserRepository;
 import com.app.modules.comment.service.CommentAccessPolicyService;
+import com.app.modules.comment.service.CommentMentionService;
 import com.app.modules.comment.service.CommentModerationService;
 import com.app.modules.comment.service.CommentService;
 import com.app.modules.comment.service.CommentViewerStateService;
+import com.app.modules.post.dto.response.PostMentionResponse;
 import com.app.modules.post.entity.Post;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.repository.PostRepository;
@@ -76,8 +74,6 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class CommentServiceImpl implements CommentService {
 
-    private static final Pattern MENTION = Pattern.compile("@([a-zA-Z0-9_]{1,30})");
-    private static final int MAX_MENTIONS = 10;
     private static final int MAX_DEPTH = 10;
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
@@ -90,7 +86,6 @@ public class CommentServiceImpl implements CommentService {
     private final CommentLikeRepository commentLikeRepository;
     private final CommentIdempotencyRepository idempotencyRepository;
     private final PostRepository postRepository;
-    private final CommentUserRepository commentUserRepository;
     private final CommentModerationService moderationService;
     private final CommentAccessPolicyService accessPolicy;
     private final CommentMapper mapper;
@@ -104,13 +99,13 @@ public class CommentServiceImpl implements CommentService {
     private final CommentViewerStateService commentViewerStateService;
     private final BlockRepository blockRepository;
     private final InteractionPolicyService interactionPolicy;
+    private final CommentMentionService commentMentionService;
 
     public CommentServiceImpl(
             CommentRepository commentRepository,
             CommentLikeRepository commentLikeRepository,
             CommentIdempotencyRepository idempotencyRepository,
             PostRepository postRepository,
-            CommentUserRepository commentUserRepository,
             CommentModerationService moderationService,
             CommentAccessPolicyService accessPolicy,
             CommentMapper mapper,
@@ -123,12 +118,12 @@ public class CommentServiceImpl implements CommentService {
             UserSummaryService userSummaryService,
             CommentViewerStateService commentViewerStateService,
             BlockRepository blockRepository,
-            InteractionPolicyService interactionPolicy) {
+            InteractionPolicyService interactionPolicy,
+            CommentMentionService commentMentionService) {
         this.commentRepository = commentRepository;
         this.commentLikeRepository = commentLikeRepository;
         this.idempotencyRepository = idempotencyRepository;
         this.postRepository = postRepository;
-        this.commentUserRepository = commentUserRepository;
         this.moderationService = moderationService;
         this.accessPolicy = accessPolicy;
         this.mapper = mapper;
@@ -142,6 +137,7 @@ public class CommentServiceImpl implements CommentService {
         this.commentViewerStateService = commentViewerStateService;
         this.blockRepository = blockRepository;
         this.interactionPolicy = interactionPolicy;
+        this.commentMentionService = commentMentionService;
     }
 
     @Override
@@ -258,6 +254,8 @@ public class CommentServiceImpl implements CommentService {
                                 .hiddenReason(hiddenReason)
                                 .build());
         MDC.put("commentId", saved.getId().toString());
+        List<String> mentionedUserIds =
+                commentMentionService.replaceMentions(saved.getId(), actorId, content);
 
         // The response is built from the same fields whether the comment is hidden or not: its
         // author is deliberately not told, so a hidden-words match or a limit stays invisible.
@@ -265,17 +263,17 @@ public class CommentServiceImpl implements CommentService {
         // created, and self-reporting is rejected, so no report by them against it can exist.
         CommentResponse response =
                 mapper.toResponse(
-                        saved,
-                        loadAuthor(saved.getUserId()),
-                        loadIsLiked(actorId, saved.getId()),
-                        false);
+                                saved,
+                                loadAuthor(saved.getUserId()),
+                                loadIsLiked(actorId, saved.getId()),
+                                false)
+                        .withMentions(loadMentions(actorId, saved.getId()));
 
         if (idempotencyKey != null) {
             idempotencyRepository.updateResponseBody(
                     actorId, idempotencyKey, objectMapper.writeValueAsString(response));
         }
 
-        List<String> mentionedUserIds = resolveMentions(content, actorId);
         enqueueCreated(post, saved, actorId, parentOwnerId, mentionedUserIds, response, hidden);
         if (hidden) {
             enqueueHidden(saved, actorId, hiddenReason);
@@ -316,14 +314,18 @@ public class CommentServiceImpl implements CommentService {
             // both carried the value the previous edit left behind, one edit behind the row and
             // behind the edited_at set just above it.
             Comment saved = commentRepository.saveAndFlush(comment);
+            // The mentions follow the new text. Nobody is notified by an edit: the people the
+            // comment named were told when it was written, or deliberately not told.
+            commentMentionService.replaceMentions(saved.getId(), actorId, content);
             // hasReported is false without a lookup: only the author may edit, and self-reporting
             // is rejected, so no report by them against this comment can exist.
             CommentResponse response =
                     mapper.toResponse(
-                            saved,
-                            loadAuthor(saved.getUserId()),
-                            loadIsLiked(actorId, saved.getId()),
-                            false);
+                                    saved,
+                                    loadAuthor(saved.getUserId()),
+                                    loadIsLiked(actorId, saved.getId()),
+                                    false)
+                            .withMentions(loadMentions(actorId, saved.getId()));
 
             Map<String, Object> data = new HashMap<>();
             data.put("postId", saved.getPostId().toString());
@@ -626,8 +628,13 @@ public class CommentServiceImpl implements CommentService {
         List<UUID> ids = chain.stream().map(Comment::getId).toList();
         Set<UUID> liked = commentViewerStateService.loadLikedCommentIds(viewerId, ids);
         Set<UUID> reported = commentViewerStateService.loadReportedCommentIds(viewerId, ids);
+        Map<UUID, List<PostMentionResponse>> mentions =
+                commentMentionService.loadForComments(viewerId, ids);
         return new CommentContextResponse(
-                postId, chain.stream().map(c -> toResponse(c, authors, liked, reported)).toList());
+                postId,
+                chain.stream()
+                        .map(c -> toResponse(c, authors, liked, reported, mentions))
+                        .toList());
     }
 
     @Override
@@ -713,21 +720,24 @@ public class CommentServiceImpl implements CommentService {
             // The target goes first and its replies follow in thread order, so a client that
             // renders each frame as it arrives never shows a reply before the comment it answers.
             Comment target = released.get(commentId);
-            enqueueUnhidden(target, ownerId, authors);
+            Map<UUID, List<PostMentionResponse>> releasedMentions =
+                    commentMentionService.loadForComments(null, releasedIds);
+            enqueueUnhidden(target, ownerId, authors, releasedMentions);
             releasedIds.stream()
                     .skip(1)
                     .map(released::get)
                     .sorted(
                             java.util.Comparator.comparing(Comment::getDepth)
                                     .thenComparing(Comment::getCreatedAt))
-                    .forEach(reply -> enqueueUnhidden(reply, ownerId, authors));
+                    .forEach(reply -> enqueueUnhidden(reply, ownerId, authors, releasedMentions));
             return mapper.toResponse(
-                    target,
-                    authors.get(target.getUserId()),
-                    loadIsLiked(ownerId, commentId),
-                    commentViewerStateService
-                            .loadReportedCommentIds(ownerId, List.of(commentId))
-                            .contains(commentId));
+                            target,
+                            authors.get(target.getUserId()),
+                            loadIsLiked(ownerId, commentId),
+                            commentViewerStateService
+                                    .loadReportedCommentIds(ownerId, List.of(commentId))
+                                    .contains(commentId))
+                    .withMentions(loadMentions(ownerId, commentId));
         } finally {
             clearWriteMdc();
         }
@@ -754,7 +764,10 @@ public class CommentServiceImpl implements CommentService {
     // hidden and is not told it was released, and the people it mentions or answers were never
     // told of it. Only the live tier renders it, as it would a created comment.
     private void enqueueUnhidden(
-            Comment comment, UUID actorId, Map<UUID, UserSummaryResponse> authors) {
+            Comment comment,
+            UUID actorId,
+            Map<UUID, UserSummaryResponse> authors,
+            Map<UUID, List<PostMentionResponse>> mentions) {
         Map<String, Object> data = new HashMap<>();
         data.put("postId", comment.getPostId().toString());
         data.put("commentId", comment.getId().toString());
@@ -771,8 +784,8 @@ public class CommentServiceImpl implements CommentService {
         data.put(
                 "comment",
                 mapper.toBroadcastResponse(
-                        mapper.toResponse(
-                                comment, authors.get(comment.getUserId()), false, false)));
+                        mapper.toResponse(comment, authors.get(comment.getUserId()), false, false)
+                                .withMentions(mentions.getOrDefault(comment.getId(), List.of()))));
         outboxService.enqueue(
                 CommentEventTypes.COMMENT_UNHIDDEN_V1,
                 CommentEventTypes.COMMENT_UNHIDDEN_V1,
@@ -815,6 +828,12 @@ public class CommentServiceImpl implements CommentService {
     // and the WebSocket SUBSCRIBE interceptor. A null viewer (anonymous) cannot read; post
     // visibility covers block and private-follow rules.
     private void assertCanRead(UUID viewerId, Post post) {
+        // A post that is not published exists for its owner alone, so anyone else reads it as
+        // missing rather than as a post with no comments.
+        if (post.getStatus() != PostStatus.PUBLISHED
+                && (viewerId == null || !viewerId.equals(post.getUserId()))) {
+            throw new AppException(ApiErrorCode.POST_NOT_FOUND);
+        }
         if (viewerId == null || !postVisibilityService.isVisibleTo(viewerId, post)) {
             throw new AppException(ApiErrorCode.POST_FORBIDDEN);
         }
@@ -848,13 +867,28 @@ public class CommentServiceImpl implements CommentService {
         Set<UUID> likedCommentIds = commentViewerStateService.loadLikedCommentIds(viewerId, allIds);
         Set<UUID> reportedCommentIds =
                 commentViewerStateService.loadReportedCommentIds(viewerId, allIds);
+        Map<UUID, List<PostMentionResponse>> mentions =
+                commentMentionService.loadForComments(viewerId, allIds);
         List<CommentResponse> content = new ArrayList<>(all.size());
         pinned.forEach(
                 c ->
                         content.add(
-                                toResponse(c, authors, likedCommentIds, reportedCommentIds)
+                                toResponse(
+                                                c,
+                                                authors,
+                                                likedCommentIds,
+                                                reportedCommentIds,
+                                                mentions)
                                         .asPinned()));
-        page.forEach(c -> content.add(toResponse(c, authors, likedCommentIds, reportedCommentIds)));
+        page.forEach(
+                c ->
+                        content.add(
+                                toResponse(
+                                        c,
+                                        authors,
+                                        likedCommentIds,
+                                        reportedCommentIds,
+                                        mentions)));
         // Cursors describe the newest-first body only. Deriving them from the pinned block would
         // seek the next page to an arbitrary position in the stream.
         Comment first = page.isEmpty() ? null : page.get(0);
@@ -879,12 +913,22 @@ public class CommentServiceImpl implements CommentService {
             Comment comment,
             Map<UUID, UserSummaryResponse> authors,
             Set<UUID> likedCommentIds,
-            Set<UUID> reportedCommentIds) {
+            Set<UUID> reportedCommentIds,
+            Map<UUID, List<PostMentionResponse>> mentions) {
         return mapper.toResponse(
-                comment,
-                authors.get(comment.getUserId()),
-                likedCommentIds.contains(comment.getId()),
-                reportedCommentIds.contains(comment.getId()));
+                        comment,
+                        authors.get(comment.getUserId()),
+                        likedCommentIds.contains(comment.getId()),
+                        reportedCommentIds.contains(comment.getId()))
+                .withMentions(mentions.getOrDefault(comment.getId(), List.of()));
+    }
+
+    // Resolves the stored mentions of a single comment; the create, edit and release paths return
+    // exactly one comment, so the batch loader is called with a singleton id.
+    private List<PostMentionResponse> loadMentions(UUID viewerId, UUID commentId) {
+        return commentMentionService
+                .loadForComments(viewerId, List.of(commentId))
+                .getOrDefault(commentId, List.of());
     }
 
     // Resolves a single author's public summary; the create and edit paths return exactly one
@@ -995,43 +1039,6 @@ public class CommentServiceImpl implements CommentService {
                         comment.getId().toString(),
                         "reason",
                         reason));
-    }
-
-    // A mention the interaction policy does not allow resolves to nothing, whether it is denied by
-    // a block in either direction or hidden by the mentioned account's interaction limit: the
-    // mentioned user must not receive a notification (the harassment channel the stealth block
-    // model exists to close), and the mentioner must not be able to tell resolution was
-    // suppressed rather than the username simply not existing, since that distinction is itself a
-    // disclosure. The filter applies here, at the single source every downstream consumer of
-    // mentionedUserIds reads from - the comment-notification consumer and the live WS fan-out both
-    // inherit it for free rather than needing their own copy of this check. Accounts are
-    // de-duplicated first so one account costs one policy call however its name is spelled.
-    private List<String> resolveMentions(String content, UUID actorId) {
-        Set<String> usernames = new LinkedHashSet<>();
-        Matcher matcher = MENTION.matcher(content);
-        while (matcher.find() && usernames.size() < MAX_MENTIONS) {
-            usernames.add(matcher.group(1));
-        }
-        Set<UUID> mentioned = new LinkedHashSet<>();
-        for (String username : usernames) {
-            commentUserRepository
-                    .findByUsernameAndDeletedAtIsNull(username)
-                    .map(u -> u.getId())
-                    .filter(id -> !id.equals(actorId))
-                    .filter(id -> !blockRepository.existsBetween(actorId, id))
-                    .ifPresent(mentioned::add);
-        }
-        List<String> ids = new java.util.ArrayList<>();
-        for (UUID id : mentioned) {
-            InteractionDecision decision =
-                    interactionPolicy.evaluate(
-                            new InteractionRequest(
-                                    actorId, id, InteractionType.MENTION, null, null, null));
-            if (decision.outcome() == InteractionOutcome.ALLOW) {
-                ids.add(id.toString());
-            }
-        }
-        return ids;
     }
 
     // A block with the post owner is already visible to the actor through the post itself, so it

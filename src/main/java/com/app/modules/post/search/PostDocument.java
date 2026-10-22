@@ -61,4 +61,24 @@ public class PostDocument {
 
     @Field(type = FieldType.Date, name = "created_at", format = DateFormat.date_time)
     private OffsetDateTime createdAt;
+
+    /** When the post first became published; every ordering of search results uses it. */
+    @Field(type = FieldType.Date, name = "published_at", format = DateFormat.date_time)
+    private OffsetDateTime publishedAt;
+
+    @Field(type = FieldType.Keyword, name = "place_id")
+    private String placeId;
+
+    /** The place name when the place is active; absent when it was banned or deleted. */
+    @MultiField(
+            mainField = @Field(type = FieldType.Text, name = "place_name"),
+            otherFields = {@InnerField(suffix = "keyword", type = FieldType.Keyword)})
+    private String placeName;
+
+    /**
+     * The owner and every accepted co-author. A collaborative post stays one document; this list is
+     * how a read finds it by any of its authors.
+     */
+    @Field(type = FieldType.Keyword, name = "author_ids")
+    private List<String> authorIds;
 }

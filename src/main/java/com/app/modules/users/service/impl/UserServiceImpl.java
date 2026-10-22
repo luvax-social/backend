@@ -235,6 +235,12 @@ public class UserServiceImpl implements UserService {
         if (request.messagePermission() != null) {
             settings.setMessagePermission(request.messagePermission());
         }
+        if (request.tagPermission() != null) {
+            settings.setTagPermission(request.tagPermission());
+        }
+        if (request.manualTagApproval() != null) {
+            settings.setManualTagApproval(request.manualTagApproval());
+        }
         if (request.hiddenWordsSystemEnabled() != null) {
             settings.setHiddenWordsSystemEnabled(request.hiddenWordsSystemEnabled());
         }

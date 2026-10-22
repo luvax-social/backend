@@ -162,8 +162,8 @@ class TrendingPreviewIT {
         UUID id = UUID.randomUUID();
         jdbcClient
                 .sql(
-                        "INSERT INTO posts (id, user_id, created_at) VALUES (:id, :userId,"
-                                + " CAST(:createdAt AS TIMESTAMPTZ))")
+                        "INSERT INTO posts (id, user_id, created_at, published_at) VALUES (:id, :userId,"
+                                + " CAST(:createdAt AS TIMESTAMPTZ), CAST(:createdAt AS TIMESTAMPTZ))")
                 .param("id", id)
                 .param("userId", author)
                 .param("createdAt", createdAt)
