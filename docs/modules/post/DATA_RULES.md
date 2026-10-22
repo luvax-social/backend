@@ -201,6 +201,8 @@ The tag, invitation, mention and schedule-failure events are also bound to `post
 - Places have a name and nothing else: no coordinates, no map and no geospatial query; place search is by name only.
 - Deleting a draft does not delete its uploaded objects or `media_assets` rows, because no media cleanup exists.
 - Existing comments are not back-filled into `comment_mentions`, because resolving old text against today's usernames could attach a mention to the wrong person.
+- Tags and invitations added to an archived post are stored but are announced only at the first publication, so the tagged person or invitee is not notified when the post returns; they see the pending state on the post and in their waiting lists.
+- A co-author keeps seeing a post after the owner blocks them, because a co-author is an author of it; every other viewer is hidden from it by a block with any author.
 
 ---
 
