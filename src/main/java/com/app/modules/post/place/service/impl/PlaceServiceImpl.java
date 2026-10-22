@@ -71,8 +71,10 @@ public class PlaceServiceImpl implements PlaceService {
         return findOrCreatePlace(actorId, placeName);
     }
 
+    // The scheduled publisher catches the refusal and returns the post to drafts in the same
+    // transaction, so the refusal must not mark that transaction rollback-only.
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = AppException.class)
     public void assertPublishable(UUID placeId) {
         if (placeId == null) {
             return;
