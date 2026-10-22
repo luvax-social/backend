@@ -43,11 +43,17 @@ MODULES: "OrderedDict[str, list[str]]" = OrderedDict(
                 "post_saves",
                 "post_views",
                 "post_edit_history",
+                "post_collaborators",
+                "post_mentions",
+                "places",
+                "archived_post_locations",
+                "archived_post_user_tags",
+                "archived_post_media_alt_texts",
             ],
         ),
         (
             "COMMENTS (Nested, Adjacency List + root_id + depth)",
-            ["comments", "comment_likes", "comment_write_idempotency"],
+            ["comments", "comment_likes", "comment_write_idempotency", "comment_mentions"],
         ),
         (
             "HASHTAG & TRENDING",
