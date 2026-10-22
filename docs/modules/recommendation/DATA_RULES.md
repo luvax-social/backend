@@ -408,6 +408,24 @@ The account of a `comment_hidden` row is the commenter, and the account of a `co
 A payload that lacks the entity id, a boolean flag or a known reason, an envelope without an actor or an `occurredAt`, and an event type with no entry are all permanent failures that dead-letter at once.
 The reason is checked against the closed set of hidden reasons, and the emoji against the single-emoji rule of the message module, before either is written into the JSON, so a malformed event cannot add structure to a row.
 
+Post creation adds fourteen more entries, all private to the actor and none sent to Gorse.
+The `entity_id` is the post unless noted.
+
+| Event | `event_type` | `metadata` |
+|-------|--------------|------------|
+| `post.published.v1` | `post_publish` | `{"source":"owner"\|"scheduler"}` |
+| `post.scheduled.v1` | `post_schedule` | `{"leadMinutes":n}` |
+| `post.schedule-failed.v1` | `post_schedule_failed` | `{"reason":"..."}` |
+| `post.draft-saved.v1` | `post_draft_save` | none |
+| `post.archived.v1`, `post.unarchived.v1` | `post_archive`, `post_unarchive` | none |
+| `post.tag.created.v1`, `post.tag.approved.v1`, `post.tag.removed.v1` | `post_tag_add`, `post_tag_approve`, `post_tag_remove` | none |
+| `post.collaboration.invited.v1`, `.accepted.v1`, `.declined.v1`, `.left.v1` | `post_collab_invite`, `post_collab_accept`, `post_collab_decline`, `post_collab_leave` | none |
+| `post.mention.created.v1` | `post_mention`, with `entity_type` `user` and the mentioned account as `entity_id` | none |
+
+V5 of the ClickHouse scripts adds the fourteen values to the `Enum8`, ordinals 34 onward, with every earlier ordinal unchanged.
+One more change belongs here: a like, a save, a view, a comment or a not-interested mark can no longer exist for an unpublished post, so Gorse can no longer create an item the application hides, and the Gorse item timestamp is `published_at`.
+The operator rebuild reads only published posts, and running it once clears feedback that owner likes on drafts left behind before the gate existed.
+
 ### Adding a signal
 
 A later event is one entry in `DomainSignalMappings` and one binding in `RecommendationRabbitBindingConfig`.

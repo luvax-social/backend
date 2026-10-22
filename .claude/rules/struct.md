@@ -50,10 +50,10 @@ app/
 │   │   │   └── Application.java    # @SpringBootApplication @ConfigurationPropertiesScan
 │   │   └── resources/
 │   │       ├── clickhouse/
-│   │       │   └── migration/      # V1-V3 ClickHouse analytics schema scripts (application-owned runner)
-│   │       ├── db/migration/       # Flyway V01-V149 SQL migrations (no V144 in this tree)
+│   │       │   └── migration/      # V1-V5 ClickHouse analytics schema scripts (application-owned runner)
+│   │       ├── db/migration/       # Flyway V01-V164 SQL migrations (no V144 in this tree)
 │   │       ├── elasticsearch/
-│   │       │   └── settings/       # hashtags.json, posts.json (Elasticsearch index settings)
+│   │       │   └── settings/       # hashtags.json, places.json, posts.json (Elasticsearch index settings)
 │   │       ├── resilience/
 │   │       │   ├── circuitbreaker/ # resilience4j-dev.yml, resilience4j-prod.yml
 │   │       │   ├── ratelimiter/    # resilience4j-dev.yml, resilience4j-prod.yml
@@ -152,11 +152,11 @@ app/
 | `common/security/user/` | `SecurityMapper`, `UserPrincipal` |
 | `common/security/util/` | `CachedBodyHttpServletRequest`, `IpExtractor`, `SecurityUtils` |
 | `common/security/websocket/` | `JwtHandshakeInterceptor`, `WebSocketSessionRegistry`, `SessionTrackingWebSocketHandlerDecoratorFactory`, `WebSocketRevocationSweepService`, `BrokerSendGuardInterceptor`, `WildcardSubscriptionGuardInterceptor` |
-| `common/seed/` | Seed pipeline (`app.seed.*`), active only under `seed & (dev | prod)` together with `SEED_DATA=true`, and by default refusing a datasource that is not local (`app.seed.require-local-datasource`). `SeedRunner` and `SeedProperties` sit at the package root; `loader/` (`SeedDataLoader`, `SeedContent`, `InteractionControlValidator`) loads and validates the JSON content; `model/` holds the 31 content record types (`UserSeed`, `PersonaSeed`, `PostSeed`, `HashtagSeed`, `CommentPoolSeed`, `CommentChainSeed`, `ConversationSeed`, `MessageSeed`, `ModerationCaseSeed`, `MediaManifestEntry`, and others) that bind `src/main/resources/seed/*.json`; `time/SeedTimeline` and `reset/SeedResetService` are the remaining infrastructure; `writer/` holds the 13 domain writers (`UserSeedWriter`, `MediaSeedWriter`, `SocialGraphSeedWriter`, `PostSeedWriter`, `CommentSeedWriter`, `EngagementSeedWriter`, `StorySeedWriter`, `MessageSeedWriter`, `NotificationSeedWriter`, `ModerationSeedWriter`, `SupportSeedWriter`, `VerificationSeedWriter`, `AnalyticsSeedWriter`), with `InteractionControlConstraints` and `InteractionSignalLedger` as their shared helpers; `outbox/` (`SeedOutboxEmitter`, `SeedOutboxBatchWriter`) replays seeded activity through the real transactional outbox. See `src/main/resources/seed/README.md`. |
+| `common/seed/` | Seed pipeline (`app.seed.*`), active only under `seed & (dev | prod)` together with `SEED_DATA=true`, and by default refusing a datasource that is not local (`app.seed.require-local-datasource`). `SeedRunner` and `SeedProperties` sit at the package root; `loader/` (`SeedDataLoader`, `SeedContent`, `InteractionControlValidator`) loads and validates the JSON content; `model/` holds the 32 content record types (`UserSeed`, `PersonaSeed`, `PostSeed`, `PlaceSeed`, `HashtagSeed`, `CommentPoolSeed`, `CommentChainSeed`, `ConversationSeed`, `MessageSeed`, `ModerationCaseSeed`, `MediaManifestEntry`, and others) that bind `src/main/resources/seed/*.json`; `time/SeedTimeline` and `reset/SeedResetService` are the remaining infrastructure; `writer/` holds the 15 domain writers (`UserSeedWriter`, `MediaSeedWriter`, `SocialGraphSeedWriter`, `PostSeedWriter`, `PostCreationSeedWriter`, `CommentSeedWriter`, `EngagementSeedWriter`, `StorySeedWriter`, `MessageSeedWriter`, `NotificationSeedWriter`, `ModerationSeedWriter`, `PlaceModerationSeedWriter`, `SupportSeedWriter`, `VerificationSeedWriter`, `AnalyticsSeedWriter`), with `InteractionControlConstraints` and `InteractionSignalLedger` as their shared helpers; `outbox/` (`SeedOutboxEmitter`, `SeedOutboxBatchWriter`) replays seeded activity through the real transactional outbox. See `src/main/resources/seed/README.md`. |
 | `common/settings/repository/` | `SystemSettingRepository` |
 | `common/settings/service/` | `SystemSettingService` |
 | `common/settings/service/impl/` | `SystemSettingServiceImpl` |
-| `common/text/` | `TextMatchNormalizer` (the shared normalisation behind Hidden Words matching), `PhraseMatcher`, `Snippets` |
+| `common/text/` | `TextMatchNormalizer` (the shared normalisation behind Hidden Words matching and place names), `PhraseMatcher`, `Snippets`, `MentionParser` (the one mention grammar shared by captions and comments) |
 | `common/turnstile/` | `AuthTurnstileGuard`, `TurnstileVerifier`, `TurnstileProperties`, `TurnstileMetrics`, `TurnstileOutcome`, `TurnstileSurface` |
 | `common/vocabulary/` | Read-only display-vocabulary surface for the API's closed enum sets - report reasons, notification types, and moderation action types - backed by their config tables (`report_reason_configs`, `notification_type_configs`, `moderation_action_configs`) and including disabled rows. `VocabularyController` → `VocabularyServiceImpl` → `VocabularyRepository`, returning a `VocabularyResponse` composed of `ReportReasonVocabularyResponse`, `NotificationTypeVocabularyResponse`, and `ModerationActionVocabularyResponse`. |
 | `common/web/` | `StrictQueryParameterInterceptor`, `StrictQueryParameters` |
@@ -198,7 +198,7 @@ Extra sub-packages (e.g. `oauth2/`, `validation/`, `storage/`) follow the same p
 | `users` | **Implemented** | api, controller, converter, dto/request, dto/response, entity, enums, mapper, repository, service, service/impl |
 | `social` | **Implemented** | api, controller, converter, dto/request, dto/response, entity, enums, event, messaging, policy, policy/impl, repository, service, service/impl, validation |
 | `media` | **Implemented** | api, config, controller, converter, dto/request, dto/response, entity, enums, mapper, messaging, repository, service, service/impl, storage, validation |
-| `post` | **Implemented** | api, config, consumer, controller, converter, dto/request, dto/response, entity, enums, event, live, mapper, messaging, repository, runner, search, service, service/impl, validation |
+| `post` | **Implemented** | api, config, consumer, controller, converter, dto/request, dto/response, entity, enums, event, live, mapper, messaging, place/{api, config, consumer, controller, converter, dto, entity, enums, event, messaging, repository, runner, search, service, service/impl}, repository, runner, search, service, service/impl, validation |
 | `hashtag` | **Implemented** | api, config, consumer, controller, converter, dto/response, entity, enums, event, mapper, messaging, repository, runner, search, service, service/impl |
 | `notification` | **Implemented** | api, config, controller, dto/request, dto/response, entity, entity/converter, entity/enums, live, messaging, repository, service, service/impl |
 | `comment` | **Implemented** | api, config, consumer, controller, dto/request, dto/response, entity, enums, live, mapper, messaging, observability, repository, service, service/impl, util |
@@ -215,15 +215,17 @@ Extra sub-packages (e.g. `oauth2/`, `validation/`, `storage/`) follow the same p
   `email_deliveries` (V96) records every moderation-lane send attempt (account, content-removal, support-answer and verification notices) with the provider message id, while auth mail and the support link mails write no row, and `ModerationMailThrottleImpl` bounds moderation mail to five per recipient per hour.
   See `docs/modules/mail/DATA_RULES.md`.
   Resend is the sole transport in every profile; a non-network `noop` transport exists only for the test phase (Surefire-pinned) and can be selected locally via `APP_MAIL_TRANSPORT=noop` in `.env`, but `MailTransportGuard` refuses it outside the `dev` profile.
-- **`users`**: Public and private user profiles, user settings (including the `message_permission` choice of `everyone`, `following` or `nobody` and the platform Hidden Words toggle), role/status management.
+- **`users`**: Public and private user profiles, user settings (including the `message_permission` choice of `everyone`, `following` or `nobody` and the platform Hidden Words toggle), role/status management. `tag_permission` and `manual_tag_approval` (V161) say who may tag an account and whether tags wait for its review.
   `UserSafetyController` serves the personal Hidden Words list and the interaction limit, both of which the social module owns.
-- **`social`**: Follow graph (public/private accounts with pending follow), block list, follow-event publishing via outbox, `follows.accepted_at`, and the interaction controls.
+- **`social`**: Follow graph (public/private accounts with pending follow), block list, follow-event publishing via outbox, `follows.accepted_at`, and the interaction controls. `TAG` and `COLLABORATION_INVITE` are two more questions the policy answers for the post module, and `UserBlockedEvent` lets that module withdraw pending involvement between a blocked pair.
   `MuteServiceImpl` stores mutes of an account's posts, stories or both, `FeedPreferenceServiceImpl` stores show-fewer requests, `InteractionLimitServiceImpl` stores one temporary limit per account, and `HiddenWordServiceImpl` stores each account's personal entries, caches the platform-wide list in memory, and builds the `PhraseMatcher` the policy applies.
   `policy/` holds `InteractionPolicyService`, one ordered rule chain (block, interaction limit, message permission, pending request, Hidden Words) that decides whether a comment, mention, new conversation or message is allowed, hidden, routed to message requests or refused; the comment and message modules act on its decision, and a block always wins.
   `findFeedSuppressedAuthors` and `findStoryMutedAuthors` give the feeds and the story tray the muted and show-fewer accounts to drop.
   Blocking an account removes the mutes and show-fewer requests between the pair.
 - **`media`**: Pre-signed Cloudflare R2 upload URLs, media asset lifecycle, MIME/metadata/path validation.
 - **`post`**: Post CRUD (image, video, carousel and `text` posts), likes, saves, view recording, post edit history, visibility enforcement, not-interested marks (`PostFeedbackServiceImpl`), the `FeedSurface` that every feed read names so muted and show-fewer authors are dropped per surface, Elasticsearch index sync via outbox.
+  Post creation adds drafts and scheduled posts (`PostPublicationServiceImpl` is the only path to `published`, `ScheduledPostPublisher` publishes due posts), the owner archive and lists (`PostOwnerServiceImpl`), per-media alt text, the places registry in `post/place/` (`PlaceServiceImpl`, `PlaceLifecycleService`, the `place.index.sync` queue), people tags on media items (`PostTagServiceImpl`), co-authors (`PostCollaborationServiceImpl`) and caption mentions stored by user id (`PostMentionServiceImpl`).
+  `PostInvolvementNotifier` turns the tag, invitation, mention and failed schedule events into notifications.
 - **`story`**: 24-hour stories, views and likes, the story tray and story discovery (active stories from suggested accounts the caller does not follow), expiry and cleanup.
   Accounts whose stories the viewer muted leave the tray and discovery.
 - **`message`**: 1-1 direct conversations and messages with message requests.
@@ -232,17 +234,22 @@ Extra sub-packages (e.g. `oauth2/`, `validation/`, `storage/`) follow the same p
   See `docs/modules/message/DATA_RULES.md`.
 - **`hashtag`**: Hashtag creation/normalization, trending computation, Elasticsearch index sync via outbox, trigram-search fallback, and the `active`/`banned`/`deleted` lifecycle that governs what every hashtag surface shows and what every post write path accepts. `HashtagLifecycleService` owns the status transitions, the immediate `hashtag_trending` purge, and the status-spanning administrative reads.
 - **`notification`**: The activity feed. `NotificationAggregationRepository` writes rows and aggregates likes, story views and follows into windowed groups with their members in `notification_actors`; `NotificationFeedRepository` serves the filtered keyset list, the head and the bounded unseen badge under one visibility predicate; `NotificationSeenStateRepository` keeps the per-user seen and previous watermarks. `NotificationItemAssembler` hydrates rows through the owning modules' preview services. `SocialNotificationConsumer` handles the follow, unfollow, request, approve, reject, block and verification events, `AdminNotificationConsumer` the warning notice, and `NotificationLiveFanoutConsumer` pushes typed envelopes to `/topic/notifications.{userId}`. See `docs/modules/notification/DATA_RULES.md`.
+  `PostInvolvementNotifier` writes the five post creation types (`post_tag`, `post_tag_request`, `post_collaboration_invite`, `post_collaboration_accepted`, `scheduled_post_failed`).
 - **`comment`**: Threaded comment CRUD (create with idempotency, edit, soft-delete subtree), likes, moderation, and real-time live fanout via WebSocket (STOMP over SockJS); `CommentNotificationConsumer` handles `comment.created.v1`, `comment.liked.v1` and `comment.unliked.v1` for notifications; `CommentLiveFanoutConsumer` fans out all `comment.*` events to connected WebSocket sessions; `CommentMaintenanceScheduler` performs periodic pruning tasks.
+  Mentions are stored by user id in `comment_mentions` through `CommentMentionServiceImpl` and the shared `MentionParser`.
   A comment that the post owner's Hidden Words or interaction limit filters is saved hidden and shown only to its author; the post owner lists hidden comments and releases them, `hidden` comments are left out of `comment_count` and `reply_count`, and `LegacyBlockedWordsGuard` refuses startup while the retired `app.comment.blocked-words` list is configured.
   Slow mode is the single global `app.comment.slow-mode-seconds` (`CommentProperties.slowModeSeconds`), not a per-post setting.
 - **`report`**: User-submitted content flag lifecycle (submit, list, claim for triage) for posts, comments, users, stories, messages and message reactions; `ReportServiceImpl` enforces self-report prevention, duplicate suppression and entity existence validation, and moves a report only from `pending` to `reviewing`.
+  A `place` report targets the places registry.
   Terminal transitions (resolve and dismiss, with their required resolution note) belong to `AdminServiceImpl.closeReport`, which writes the audit row in the same transaction.
 - **`admin`**: Immutable moderation audit log, atomic moderation actions, the warning and strike discipline ladder, report escalation, the report-anchored moderation view of a reported entity, the administrative hashtag registry, the behavioural activity log read surface, and platform statistics; `AdminServiceImpl` handles ban/unban, suspend/unsuspend, post/comment remove/restore, and report resolve/dismiss, and `AdminHashtagServiceImpl` handles hashtag create/ban/unban/delete - each writing an `admin_actions` row and mutating the target entity in the same transaction. `AdminAuthorizationServiceImpl` holds every actor-and-target rule for both status and role changes. `admin_actions` stays in PostgreSQL as the system of record and is replicated to ClickHouse through the outbox: `AdminActionRecorder` enqueues `admin.action.recorded.v1` in the same transaction as the audit row, PostgreSQL triggers enqueue `admin.action.changed.v1` when a foreign-key `SET NULL` rewrites a row, and `AdminActionReplicationConsumer` fetches the current row and writes it with its `row_version`.
+  `AdminPlaceServiceImpl` bans, unbans and deletes places with a reason on every action.
 `AdminActionListingServiceImpl` serves the audit-log listing from ClickHouse and falls back to PostgreSQL under one cursor contract; lookups by id stay on PostgreSQL.
 `StatsCollectionJob` computes one completed bucket at a time in PostgreSQL and `PlatformStatsCollectionServiceImpl` ships it as one `admin.platform-stats.collected.v1` event; `PlatformStatsIngestConsumer` writes it to ClickHouse, and daily figures are computed at query time.
 `AdminStatsServiceImpl` and `AdminUserEventServiceImpl` are the administrator-only read paths and answer `503 ANALYTICS_UNAVAILABLE` when ClickHouse is unavailable.
 - **`support`**: The support ticket lifecycle, the appeal route a disciplined account reaches without a session, and account verification requests. `SupportTokenServiceImpl` mints the two single-use link families (`support:token:appeal:`, `support:token:confirmation:`) that authorise exactly one ticket against one audit row without ever minting a session; `SupportTicketServiceImpl` enforces the one-open-ticket guard (V107) and the per-client daily cap on the anonymous public form. See `docs/modules/support/DATA_RULES.md`.
 - **`recommendation`**: Owns `user_events`, the personalized ranked feed, and the people-you-may-know suggestions: `SuggestionPrecomputeJob` fills `user_suggestions` (V108), `SuggestionServiceImpl` filters them again at read time, and `suggestion_dismissals` records an account the viewer removed.
+  Fourteen post creation events are recorded as private signals and never sent to Gorse.
 `user_events` lives in ClickHouse (`luvax_analytics.user_events`), not PostgreSQL.
 The feed is backed by the external Gorse recommender, reached over REST through `GorseClient`; `RecommendationFeedServiceImpl` runs a Source → Hydrator → Filter → Scorer → Selector pipeline with a `gorse` circuit breaker and degrades to the popularity ranking then the chronological feed.
 `user_events` has three writers: `UserEventRecorder` produces `session_start`, `search`, and `profile_view` off the request thread with `wait_for_async_insert=0`, dropping rows rather than failing or extending the caller's request; `RecommendationFeedbackConsumer` turns `post.liked.v1`, `post.saved.v1`, `post.viewed.v1`, `comment.created.v1`, `post.shared.v1` and `comment.liked.v1` into idempotent append-only rows and then Gorse feedback, ClickHouse first, and stores the exact Gorse type and value it sent, and also handles `post.not-interested.v1` (sent as `not_interested` negative feedback) and `post.not-interested-undone.v1` (the Gorse tuple is deleted), each guarded by a read of `post_not_interested` so the two converge when delivered out of order; `UserEventImportConsumer` writes `recommendation.user-event.imported.v1` events (the seed's path) and never sends them to Gorse.
@@ -283,7 +290,7 @@ All domain events flow through shared outbox/inbox infrastructure in `common/out
 ### Test Coverage
 
 Generated by `./scripts/regenerate_struct_figures.sh tests`, which counts what `git ls-files`
-reports under `src/test/java` rather than what this table last said; 407 test classes total.
+reports under `src/test/java` rather than what this table last said; 417 test classes total.
 Re-run it and paste the output back here whenever a test class is added, moved or renamed.
 
 | Package | Test Classes |
@@ -329,7 +336,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `common/seed` | `CommentAndEngagementSeedWriterIT`, `DomainWritersSeedWriterIT`, `MediaAndSocialGraphSeedWriterIT`, `PostSeedWriterIT`, `SeedAnalyticsDrainIT`, `SeedDataLoaderRealDataTest`, `SeedDataLoaderTest`, `SeedOutboxEmitterIT`, `SeedProfileConsumerOverrideIT`, `SeedResetServiceIT`, `SeedRunnerDatasourceGuardTest`, `SeedRunnerIT`, `SeedTimelineTest`, `SupportSeedWriterIT`, `UserSeedWriterIT` |
 | `common/seed/writer` | `AnalyticsSeedWriterTest` |
 | `common/settings/service/impl` | `SystemSettingServiceImplTest` |
-| `common/text` | `PhraseMatcherTest`, `SnippetsTest`, `TextMatchNormalizerTest`, `TextMatchVectorParityTest` |
+| `common/text` | `PhraseMatcherTest`, `PlaceNameNormalisationParityIT`, `SnippetsTest`, `TextMatchNormalizerTest`, `TextMatchVectorParityTest` |
 | `common/turnstile` | `AuthTurnstileGuardTest`, `TurnstilePropertiesValidationTest`, `TurnstileVerifierTest` |
 | `common/vocabulary/controller` | `VocabularyControllerIT` |
 | `common/vocabulary/service/impl` | `VocabularyServiceImplTest` |
@@ -355,7 +362,7 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/comment/live` | `CommentLiveBlockFilterIT`, `CommentStompSendAuthIT`, `CommentWebSocketAccountStatusIT`, `CommentWebSocketAuthInterceptorTest`, `CommentWebSocketHandshakeRejectionIT`, `CommentWebSocketLiveDeliveryIT` |
 | `modules/comment/migration` | `CommentHiddenCounterIT` |
 | `modules/comment/repository` | `CommentEditedAtColumnIT`, `CommentKeysetRowLossIT`, `CommentSubtreeDeleteEquivalenceIT`, `CommentTopLikedQueryIT` |
-| `modules/comment/service/impl` | `CommentAuthorEmbeddingIT`, `CommentHiddenSideChannelIT`, `CommentModerationServiceImplTest`, `CommentPinnedTopCommentsIT`, `CommentPolicyWriteIT`, `CommentPreviewServiceImplTest`, `CommentPreviewVisibilityIT`, `CommentServiceImplTest`, `CommentUnhideIT`, `CommentViewerStateIT`, `CommentViewerStateServiceImplTest`, `HiddenWordsNotRetroactiveIT`, `LimitNotRetroactiveIT`, `MentionSuppressionIT` |
+| `modules/comment/service/impl` | `CommentAuthorEmbeddingIT`, `CommentHiddenSideChannelIT`, `CommentMentionServiceImplTest`, `CommentModerationServiceImplTest`, `CommentPinnedTopCommentsIT`, `CommentPolicyWriteIT`, `CommentPreviewServiceImplTest`, `CommentPreviewVisibilityIT`, `CommentServiceImplTest`, `CommentUnhideIT`, `CommentViewerStateIT`, `CommentViewerStateServiceImplTest`, `HiddenWordsNotRetroactiveIT`, `LimitNotRetroactiveIT`, `MentionSuppressionIT` |
 | `modules/hashtag/consumer` | `HashtagIndexSyncConsumerIT`, `HashtagIndexSyncConsumerTest` |
 | `modules/hashtag/controller` | `HashtagControllerIT` |
 | `modules/hashtag/repository` | `HashtagRepositoryIT`, `TrendingPreviewIT` |
@@ -384,12 +391,12 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | `modules/notification/migration` | `NotificationAdminActionForeignKeyIT`, `NotificationOverhaulMigrationIT` |
 | `modules/notification/repository` | `NotificationAggregationRepositoryIT`, `NotificationFeedRepositoryIT`, `NotificationSeenStateRepositoryIT` |
 | `modules/notification/service/impl` | `NotificationItemAssemblerTest`, `NotificationServiceImplTest`, `NotificationTypePolicyTest` |
-| `modules/post/consumer` | `PostIndexSyncConsumerIT`, `PostIndexSyncConsumerTest`, `PostNotificationConsumerIT`, `PostNotificationConsumerTest` |
+| `modules/post/consumer` | `PostIndexSyncConsumerIT`, `PostIndexSyncConsumerTest`, `PostInvolvementNotifierTest`, `PostNotificationConsumerIT`, `PostNotificationConsumerTest` |
 | `modules/post/controller` | `PostBannedHashtagIT`, `PostControllerIT`, `PostNotInterestedControllerIT` |
 | `modules/post/dto/response` | `FeedPostResponseTest` |
 | `modules/post/live` | `PostLikeLiveDeliveryIT`, `PostOnlyWebSocketConfigIT`, `PostWebSocketAuthInterceptorTest` |
 | `modules/post/repository` | `PostKeysetRowLossIT` |
-| `modules/post/service/impl` | `PostAuthorEmbeddingIT`, `PostByHashtagSearchReaderTest`, `PostByHashtagServiceImplTest`, `PostFeedbackServiceImplTest`, `PostLikeEventPublishingIT`, `PostLikeServiceImplTest`, `PostPreviewServiceImplTest`, `PostResponseAssemblerTest`, `PostSaveServiceImplTest`, `PostSearchServiceImplTest`, `PostServiceImplTest`, `PostViewServiceImplTest`, `PostViewerStateIT`, `PostViewerStateServiceImplTest`, `PostVisibilityServiceImplTest` |
+| `modules/post/service/impl` | `PostAuthorEmbeddingIT`, `PostByHashtagSearchReaderTest`, `PostByHashtagServiceImplTest`, `PostCollaborationServiceImplTest`, `PostFeedbackServiceImplTest`, `PostLikeEventPublishingIT`, `PostLikeServiceImplTest`, `PostMentionServiceImplTest`, `PostOwnerServiceImplTest`, `PostPreviewServiceImplTest`, `PostPublicationServiceImplTest`, `PostResponseAssemblerTest`, `PostSaveServiceImplTest`, `PostSchedulePolicyTest`, `PostSearchServiceImplTest`, `PostServiceImplTest`, `PostTagServiceImplTest`, `PostViewServiceImplTest`, `PostViewerStateIT`, `PostViewerStateServiceImplTest`, `PostVisibilityServiceImplTest`, `ScheduledPostPublisherTest` |
 | `modules/post/validation` | `PostTypeFilterTest` |
 | `modules/recommendation/client/impl` | `GorseClientImplTest`, `GorsePurgerConnectionDetailsIT`, `GorsePurgerIT` |
 | `modules/recommendation/config` | `RecommendationPropertiesTest` |
@@ -435,8 +442,8 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 ### Database
 
 - Engine: **PostgreSQL** (docker-compose builds `./docker/postgres` on the `postgres:latest` base)
-- Migration: **Flyway** (`out-of-order: false`); 148 migrations at `src/main/resources/db/migration/`, V01 through V149.
-  V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109, V110, V121, V122, V125, V147 and V149 build or drop their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those twenty-one sidecars are the only ones in the tree.
+- Migration: **Flyway** (`out-of-order: false`); 163 migrations at `src/main/resources/db/migration/`, V01 through V164.
+  V57, V63, V66, V68, V71, V72, V73, V74, V81, V82, V91, V100, V103, V107, V109, V110, V121, V122, V125, V147, V149 and V163 build or drop their indexes `CONCURRENTLY` and carry a `.sql.conf` sidecar setting `executeInTransaction=false`; those twenty-two sidecars are the only ones in the tree.
   Regenerate this paragraph and the table below with `./scripts/regenerate_struct_figures.sh migrations`.
   Ordinary migrations such as V15, V34, V41 and V89 create their indexes inside the migration's transaction, which takes a write lock on the table for the whole build; only a migration with a sidecar builds `CONCURRENTLY`, and new index migrations should.
   V144 is the one number in the range that has no file in this tree; Flyway runs with `out-of-order: false`.
@@ -591,6 +598,21 @@ Re-run it and paste the output back here whenever a test class is added, moved o
 | V147 | add_interaction_control_indexes |
 | V148 | add_message_reactions_conversation_id |
 | V149 | add_message_reactions_conversation_index |
+| V150 | add_post_status_scheduled |
+| V151 | add_post_publication_columns |
+| V152 | limit_post_media_alt_text |
+| V153 | create_places |
+| V154 | add_posts_place_and_migrate_locations |
+| V155 | drop_post_location_columns |
+| V156 | add_place_post_count_recount_function |
+| V157 | add_post_creation_enum_values |
+| V158 | add_post_creation_config_rows |
+| V159 | create_post_collaborators |
+| V160 | rekey_post_user_tags_to_media_items |
+| V161 | add_user_settings_tag_preferences |
+| V162 | create_post_and_comment_mentions |
+| V163 | add_post_creation_indexes |
+| V164 | validate_post_creation_constraints |
 
 - Reference schema: `database/schema.sql` (authoritative final-state; not applied by Flyway)
 - Extensions: `pgcrypto` (UUID gen), `pg_trgm` (fuzzy username search), `btree_gin` (composite GIN indexes)
@@ -603,7 +625,8 @@ means a migration: these are domain primitives, not configuration.
 
 | Enum | Values |
 |------|--------|
-| `admin_action_type` | `ban_user`, `unban_user`, `suspend_user`, `unsuspend_user`, `remove_post`, `restore_post`, `remove_comment`, `restore_comment`, `resolve_report`, `dismiss_report`, `change_user_role`, `warn_user`, `revoke_warning`, `issue_strike`, `revoke_strike`, `escalate_report`, `force_logout`, `create_hashtag`, `edit_hashtag`, `ban_hashtag`, `unban_hashtag`, `delete_hashtag`, `remove_story`, `restore_story`, `remove_message`, `restore_message`, `revoke_session`, `pin_hashtag`, `unpin_hashtag`, `respond_support_ticket`, `reject_support_ticket`, `escalate_support_ticket`, `grant_verification`, `reject_verification`, `revoke_verification`, `create_hidden_word`, `edit_hidden_word`, `delete_hidden_word`, `remove_message_reaction`, `restore_message_reaction` (40 values). Every value has a caller. `revoke_session` ends exactly one session, distinct from `force_logout`, which ends every session on the account. |
+| `admin_action_type` | `ban_user`, `unban_user`, `suspend_user`, `unsuspend_user`, `remove_post`, `restore_post`, `remove_comment`, `restore_comment`, `resolve_report`, `dismiss_report`, `change_user_role`, `warn_user`, `revoke_warning`, `issue_strike`, `revoke_strike`, `escalate_report`, `force_logout`, `create_hashtag`, `edit_hashtag`, `ban_hashtag`, `unban_hashtag`, `delete_hashtag`, `remove_story`, `restore_story`, `remove_message`, `restore_message`, `revoke_session`, `pin_hashtag`, `unpin_hashtag`, `respond_support_ticket`, `reject_support_ticket`, `escalate_support_ticket`, `grant_verification`, `reject_verification`, `revoke_verification`, `create_hidden_word`, `edit_hidden_word`, `delete_hidden_word`, `remove_message_reaction`, `restore_message_reaction`, `ban_place`, `unban_place`, `delete_place` (43 values). Every value has a caller. `revoke_session` ends exactly one session, distinct from `force_logout`, which ends every session on the account. |
+| `collaboration_status` | `invited`, `accepted`, `declined`, `left`, `removed` (5 values). V159. |
 | `conversation_request_status` | `accepted`, `pending`, `declined` (3 values). V145; every conversation that existed before it is `accepted`. |
 | `email_delivery_status` | `pending`, `sent`, `failed`, `throttled`, `skipped` (5 values). |
 | `follow_status` | `pending`, `accepted` (2 values). |
@@ -612,17 +635,20 @@ means a migration: these are domain primitives, not configuration.
 | `message_permission` | `everyone`, `following`, `nobody` (3 values). V135; the `user_settings` column that replaced `allow_message_requests`. |
 | `message_type` | `text`, `image`, `video`, `post_share`, `story_share` (5 values). |
 | `notification_category` | `like`, `comment`, `mention`, `follow`, `story`, `message`, `system` (7 values, V115). Derived from `notification_type` in application code; drives the feed filters. `message` is retired with the `message` type: no producer writes it since direct messages left the feed. |
-| `notification_type` | `like_post`, `like_comment`, `comment_post`, `reply_comment`, `follow`, `follow_request`, `mention_post`, `mention_comment`, `story_view`, `message`, `warning`, `post_removed`, `report_post_removed`, `post_restored`, `report_dismissed`, `support_ticket_update`, `comment_removed`, `story_removed`, `message_removed`, `reaction_removed` (20 values). |
+| `notification_type` | `like_post`, `like_comment`, `comment_post`, `reply_comment`, `follow`, `follow_request`, `mention_post`, `mention_comment`, `story_view`, `message`, `warning`, `post_removed`, `report_post_removed`, `post_restored`, `report_dismissed`, `support_ticket_update`, `comment_removed`, `story_removed`, `message_removed`, `reaction_removed`, `post_tag`, `post_tag_request`, `post_collaboration_invite`, `post_collaboration_accepted`, `scheduled_post_failed` (25 values). |
 | `oauth_provider` | `google`, `facebook`, `apple` (3 values). |
-| `post_status` | `draft`, `published`, `archived`, `removed` (4 values). |
+| `place_status` | `active`, `banned`, `deleted` (3 values). V153; governs what the places registry shows and what a post write accepts, never which posts are visible. |
+| `post_status` | `draft`, `scheduled`, `published`, `archived`, `removed` (5 values). `scheduled` is V150; only `PostPublicationService` moves a post to `published`. |
 | `post_type` | `image`, `video`, `carousel`, `text` (4 values). |
 | `report_reason` | `spam`, `nudity`, `violence`, `hate_speech`, `harassment`, `false_information`, `scam`, `other` (8 values). |
 | `report_status` | `pending`, `reviewing`, `resolved`, `dismissed`, `escalated` (5 values). |
-| `report_type` | `post`, `comment`, `user`, `story`, `message`, `message_reaction` (6 values). |
+| `report_type` | `post`, `comment`, `user`, `story`, `message`, `message_reaction`, `place` (7 values). |
 | `story_type` | `image`, `video` (2 values). |
 | `support_category` | `appeal_ban`, `appeal_suspension`, `appeal_warning_strike`, `appeal_content_removal`, `account_access`, `account_data`, `bug_report`, `safety_concern`, `other`, `verification_request` (10 values). |
 | `support_source` | `authenticated`, `signed_link`, `public_form` (3 values). |
 | `support_ticket_status` | `pending_confirmation`, `open`, `in_progress`, `escalated`, `answered`, `rejected` (6 values). |
+| `tag_permission` | `everyone`, `following`, `nobody` (3 values). V161; the `user_settings` column that says who may tag an account. |
+| `tag_status` | `pending`, `approved` (2 values). V160; a `pending` tag is shown only to the tagged person and the owner. |
 | `user_role` | `user`, `moderator`, `admin` (3 values). |
 | `user_status` | `active`, `suspended`, `deactivated`, `banned` (4 values). |
 | `verification_revocation_actor` | `moderator`, `system` (2 values). |
@@ -693,6 +719,7 @@ The appeal window is thirty days because the notice arrives unannounced and is r
 | `moderation.mail.queue` | `moderation.mail.dlq` | `moderation.mail.dead-letter` |
 | `notification.queue` | `notification.dlq` | `notification.dead-letter` |
 | `hashtag.index.sync` | `hashtag.index.sync.dlq` | `hashtag.index.dead-letter` |
+| `place.index.sync` | `place.index.sync.dlq` | `place.index.dead-letter` |
 | `post.index.sync` | `post.index.sync.dlq` | `post.index.dead-letter` |
 | `comment.notification.queue` | `comment.notification.dlq` | `comment.notification.dead-letter` |
 | `story.notification.queue` | `story.notification.dlq` | `story.notification.dead-letter` |
@@ -703,8 +730,8 @@ The appeal window is thirty days because the notice arrives unannounced and is r
 | `admin.platform-stats.queue` | `admin.platform-stats.dlq` | `admin.platform-stats.dead-letter` |
 | `recommendation.user-event.import.queue` | `recommendation.user-event.import.dlq` | `recommendation.user-event.import.dead-letter` |
 
-That is 13 queues and their 13 dead-letter queues, 26 durable queues in all.
-Seventeen consumer classes each carry one `@RabbitListener` method.
+That is 14 queues and their 14 dead-letter queues, 28 durable queues in all.
+Eighteen consumer classes each carry one `@RabbitListener` method.
 The four analytics listeners (`adminActionReplication`, `platformStatsIngest`, `userEventImport`, `recommendationFeedback`) start with `autoStartup = false` and are started and stopped by `AnalyticsIngestionController`.
 
 `AUDIT_LOG_QUEUE`, `MODERATION_QUEUE` and `SEARCH_INDEX_QUEUE` are name constants only: they are
@@ -725,6 +752,7 @@ never sees them.
 | `notification.queue` | `user.unfollowed.v1`, `user.follow-request.approved.v1`, `user.follow-request.rejected.v1`, `user.blocked.v1` | `NotificationRabbitBindingConfig` |
 | `notification.queue` | `user.verification-changed.v1` | `NotificationRabbitBindingConfig` |
 | `hashtag.index.sync` | `hashtag.index.#` (wildcard) | `HashtagRabbitBindingConfig` |
+| `place.index.sync` | `place.index.#` (wildcard) | `PlaceRabbitBindingConfig` |
 | `post.index.sync` | `post.index.#` (wildcard) | `PostRabbitBindingConfig` |
 | `comment.notification.queue` | `comment.created.v1` | `CommentRabbitBindingConfig` |
 | `comment.notification.queue` | `comment.liked.v1` | `CommentRabbitBindingConfig` |
@@ -847,9 +875,12 @@ It must run with the new backend stopped and before the previous backend image s
 | Document class | Index | `createIndex` | Setting path |
 |----------------|-------|---------------|--------------|
 | `PostDocument` | `posts` | `false` | `/elasticsearch/settings/posts.json` |
+| `PlaceDocument` | `places` | `false` | `/elasticsearch/settings/places.json` |
 | `HashtagDocument` | `hashtags` | `false` | `/elasticsearch/settings/hashtags.json` |
 
-`PostDocument` fields: `id`, `user_id` (Keyword), `caption` (Text + `caption.ngram`), `status` (Keyword), `hashtag_ids` (Keyword list), `created_at` (Date).
+`PostDocument` fields: `id`, `user_id` (Keyword), `caption` (Text + `caption.ngram`), `status` (Keyword), `hashtag_ids` (Keyword list), `created_at` (Date), `published_at` (Date, the ordering field), `place_id` (Keyword), `place_name` (Text + `place_name.ngram`) and `author_ids` (Keyword list: the owner and every accepted co-author).
+
+`PlaceDocument` fields: `id`, `name` (Keyword), `normalized_name` (Keyword + `normalized_name.ngram`), `post_count` (Integer), `created_at` (Date). Only active places are indexed; `PlaceIndexSeedRunner` creates the index and `GET /places/search` falls back to the PostgreSQL trigram index behind the `elasticsearchSearch` breaker.
 
 `HashtagDocument` fields: `id`, `name` (Keyword + `name.ngram`), `post_count` (Integer), `created_at` (Date).
 

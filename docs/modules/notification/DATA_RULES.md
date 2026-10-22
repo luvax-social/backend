@@ -88,7 +88,16 @@ Every write goes through `NotificationService.create(NotificationDraft)`, which 
 | `like_comment` | `CommentNotificationConsumer` (`comment.liked.v1`, `comment.unliked.v1`) | liker | `comment` | post | - | - |
 | `comment_post`, `reply_comment` | `CommentNotificationConsumer` (`comment.created.v1`) | commenter | `comment` | post | - | - |
 | `mention_comment` | `CommentNotificationConsumer` (`comment.created.v1`) | commenter | `comment` | post | - | - |
-| `mention_post` | no producer; seed data only | author | `post` | post | - | - |
+| `mention_post` | `PostInvolvementNotifier` (`post.mention.created.v1`, only when the event says `notify`) | author | `post` | post | - | - |
+| `post_tag` | `PostInvolvementNotifier` (`post.tag.created.v1`, tag already approved) | owner | `post` | post | - | - |
+| `post_tag_request` | `PostInvolvementNotifier` (`post.tag.created.v1`, tag waiting for approval) | owner | `post` | post | - | - |
+| `post_collaboration_invite` | `PostInvolvementNotifier` (`post.collaboration.invited.v1`) | owner | `post` | post | - | - |
+| `post_collaboration_accepted` | `PostInvolvementNotifier` (`post.collaboration.accepted.v1`) | co-author | `post` | post | - | - |
+| `scheduled_post_failed` | `PostInvolvementNotifier` (`post.schedule-failed.v1`) | none | `post` | the draft | the failure reason code | - |
+
+The five new types are produced only after the post is published, never while it is a draft, and each is skipped when the post is no longer in the state the event assumed (an invitation already answered, a tag already removed, a failed schedule whose post is no longer a draft).
+`post_tag`, `post_tag_request`, `post_collaboration_invite` and `post_collaboration_accepted` belong to the `mention` category and follow the recipient's mentions preference only where `notification_type_configs` marks them toggleable: an invitation and a failed schedule are not, because switching them off would hide the only way to learn that a question is waiting or a post did not go out.
+`scheduled_post_failed` is a system notice with no actor; its message is the reason code (`banned_hashtag`, `place_unavailable`, `media_unavailable`, `owner_unavailable`), which the feed returns as the notice reason and the client turns into a sentence.
 | `follow`, `follow_request` | `SocialNotificationConsumer` (`user.followed.v1`, `user.follow-requested.v1`) | follower | none | - | - | - |
 | `story_view` | `StoryNotificationConsumer` (`story.viewed.v1`) | viewer | `story` | - | - | - |
 | `warning` | `AdminNotificationConsumer` (`user.warned.v1`) | none | `warning` | - | - | audit row |

@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 ### Added
+- A post can be saved as a draft or scheduled for a time between one minute and thirty days ahead, and an account holds at most fifty drafts and scheduled posts together.
+- A scheduled post is published by a job that claims due posts without blocking other instances, and a post that can no longer be published returns to drafts with a notification that names the reason.
+- Posts have a publication time that orders the feed, profiles, hashtag and location pages, search and the recommender, so a draft created long ago no longer appears in the past.
+- The owner can list drafts, scheduled posts and archived posts, see how many of each they hold, and unarchive a post without changing where it sits in the feed.
+- Each media item of a post can carry alt text of up to 500 characters, which the owner can edit on a post in any state, and responses return it so a client can fall back to a neutral label.
+- Posts can be tagged at a place from a shared registry that has no coordinates, with place search, a location page and a place report type.
+- An administrator can ban, unban or delete a place with a reason, which writes an audit row, resolves a linked report and never takes a post down.
+- People can be tagged on individual photos, with a setting for who may tag an account and whether tags wait for approval, a list of waiting tags, a tagged tab, and removal by the owner or the tagged person at any time.
+- A post can have up to three co-authors who appear after accepting, count toward their profile and can leave, while the owner keeps editing and deleting.
+- Caption and comment mentions are stored by user id, so a mention keeps pointing at the account it named, and mentioning an account that blocks the author stores nothing.
+- Five new notifications cover being tagged, a tag waiting for approval, a collaboration invitation, an accepted invitation and a scheduled post that went back to drafts.
+- Fourteen new behavioural events record drafts, scheduling, archiving, tags, collaboration and mentions.
+- The development seed now writes places with their moderation history, drafts, scheduled posts, failed schedules, alt text, tags, collaborations, mentions and tag settings, and the notifications and behavioural events those rows imply.
 - The development seed now writes ten reports against message reactions with the moderation decisions on them (six removals, five of them later restored, two dismissals, one open and one under review), thirteen platform Hidden Words audit histories, and a removed-reaction notification for every removal.
 - The development seed now imports the mute, show-fewer, reaction, message request, hidden comment and interaction limit signals of the rows it wrote, and replays each not-interested mark, including the ones that were taken back, to the recommender.
 - The development seed now writes twenty-five message requests (pending, hidden, declined and accepted), twelve reply quotes including three to an unavailable message, and thirty-three reactions, five of them on a deleted or removed message, plus six that were set and removed; a declined request reads to its sender exactly like a pending one.
@@ -383,6 +396,10 @@ Pairs who already followed each other before this release are given one by the u
 - `CHANGELOG_RULE.md` reference in `CLAUDE.md` pre-read list and workflow pipeline comment
 
 ### Changed
+- The location text and coordinates of a post are replaced by the places registry, and every existing label was migrated to a place with the originals archived.
+- A post is visible to a viewer when the viewer may see the owner or any accepted co-author, and a block with a co-author hides it as a block with the owner does.
+- Like, save, view, not-interested, comment and report writes now refuse a post that is not published, for its owner as well.
+- A moderation restore of a post whose place was removed strips the place and records it in the audit row.
 - A new conversation with an account that does not follow the sender and allows messages from everyone is now a pending message request instead of a normal conversation, and the unread total leaves incoming requests out.
 - Blocking an account now also removes the mutes and show-fewer requests between the two accounts in both directions.
 - `posts.comment_count` and a comment's `reply_count` now count only approved comments, so a hidden comment is not counted until its post owner unhides it.
@@ -606,6 +623,8 @@ The audit log records server-derived facts only, and a request that still sends 
 - `.claude/rules/STRUCT.md` rewritten to reflect the actual codebase: correct technology stack, module roster, database schema, infrastructure services, and domain-specific notes
 
 ### Fixed
+- A comment mention of a username that contains a dot, or that differs from the stored name only in case, now resolves and notifies.
+- An owner's like or save on a post that was not published no longer reaches the recommender as feedback for an item the application hides.
 - Settling a message request on a mutual follow no longer depends on the server's default locale when it reads the request status.
 - A requester's reactions on a message request that has not been accepted no longer reach the recipient's live inbox or replace the recipient's reaction preview in the conversation list, and a declined request behaves the same to its requester.
 - The conversation list now finds the newest reaction of each listed conversation through a per-conversation index on `message_reactions.conversation_id` (V148, V149) instead of scanning every reaction made on the platform since that conversation's last message.
@@ -980,6 +999,7 @@ Sessions already open when this ships stay valid; an ordinary logout still ends 
 - Refused live STOMP subscriptions to wildcard destinations (`*`, `?`, `#`, URI-template braces), which previously passed every per-module subscription guard and delivered other accounts' notification, inbox, message and comment frames.
 
 ### Tests
+- Unit and integration tests cover the publication routine, the scheduled publisher, schedule limits, tags, collaboration, mentions, the owner lists, the notifier, place name parity between Java and SQL, and the keyset queries with co-authored posts.
 - A ClickHouse test now compares every `UserEventType` name and ordinal with the `user_events.event_type` column after the shipped migrations, so the enum and the column cannot drift apart unnoticed.
 - The comment sort fixture stamps its six comments a minute apart, so the newest-first listing test no longer depends on the database clock advancing between requests.
 - Comment preview integration coverage now checks moderation visibility and blocks in both directions.

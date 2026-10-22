@@ -78,7 +78,9 @@ V143 refuses to run while any existing row is not `approved`, with a message nam
 | A repeat create within the slow-mode window is rejected | `CommentServiceImpl` — throws `COMMENT_SLOW_MODE_ACTIVE` (429); disabled when `slowModeSeconds` is 0 |
 | An idempotency key reused with a different request payload is rejected | throws `COMMENT_IDEMPOTENCY_CONFLICT` (409) |
 | Flat reply lists filter by `root_id`; no `WITH RECURSIVE` CTE is used | `CommentRepository` |
-| At most 10 `@mention` usernames are resolved per comment | `CommentServiceImpl` — `MENTION` pattern `@([a-zA-Z0-9_]{1,30})`, `MAX_MENTIONS = 10` |
+| At most 10 `@mention` usernames are resolved per comment | `CommentMentionServiceImpl`, through `MentionParser`: a handle is letters, digits, underscore and dot up to 30 characters, starts at an `@` that does not follow a handle character, drops trailing dots, and matches usernames case-insensitively |
+| A resolved mention is stored in `comment_mentions` by user id (V162), so it keeps pointing at the account it named and an unstored `@name` renders as plain text; an account that disappears takes its rows with it, and existing comments are not back-filled | `CommentMentionServiceImpl`, `comment_mentions` (`comment_id`, `mentioned_user_id`, `handle`, `created_at`) |
+| A comment cannot be written on, read from or reported against a post that is not published; the owner's own draft answers as not found | `CommentServiceImpl.assertCanRead` |
 | Mention usernames resolve only to non soft-deleted users | `CommentUserRepository.findByUsernameAndDeletedAtIsNull` |
 | Commenting on a post generates a `comment_post` notification for the post owner | `CommentNotificationConsumer`, from `comment.created.v1` |
 | Replying to a comment generates a `reply_comment` notification for the parent comment owner | `CommentNotificationConsumer`, from `comment.created.v1` |
