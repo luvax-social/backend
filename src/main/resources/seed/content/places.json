@@ -1,0 +1,29 @@
+{
+  "places": [
+    { "name": "Da Nang Beach", "status": "active", "history": "none", "status_note": null },
+    { "name": "Hanoi Old Quarter", "status": "active", "history": "none", "status_note": null },
+    { "name": "Saigon Central Post Office", "status": "active", "history": "none", "status_note": null },
+    { "name": "Ha Long Bay", "status": "active", "history": "none", "status_note": null },
+    { "name": "Hoi An Ancient Town", "status": "active", "history": "none", "status_note": null },
+    { "name": "Ba Na Hills", "status": "active", "history": "none", "status_note": null },
+    { "name": "Cat Ba Island", "status": "active", "history": "none", "status_note": null },
+    { "name": "Sapa Rice Terraces", "status": "active", "history": "none", "status_note": null },
+    { "name": "Dalat Flower Park", "status": "active", "history": "none", "status_note": null },
+    { "name": "Nha Trang Bay", "status": "active", "history": "none", "status_note": null },
+    { "name": "Moonlight Rooftop Bar", "status": "active", "history": "unbanned", "status_note": "Banned for advertising a different venue, restored after the name was corrected" },
+    { "name": "Lakeside Night Market", "status": "active", "history": "unbanned", "status_note": "Banned during a spam wave, restored after review found it genuine" },
+    { "name": "Old Fort Viewpoint", "status": "active", "history": "unbanned", "status_note": "Banned in error while a duplicate was being cleaned up" },
+    { "name": "Riverside Food Court", "status": "active", "history": "unbanned", "status_note": "Banned for misleading reports, restored when the reports were withdrawn" },
+    { "name": "Harbour Street Cafe", "status": "active", "history": "unbanned", "status_note": "Banned while its owner was verified, restored after verification" },
+    { "name": "Pirate Copy Market", "status": "banned", "history": "none", "status_note": "Names a venue that sells counterfeit goods" },
+    { "name": "Hidden Casino Lounge", "status": "banned", "history": "none", "status_note": "Promotes illegal gambling" },
+    { "name": "Fake Pharmacy Row", "status": "banned", "history": "none", "status_note": "Used to advertise unlicensed medicine" },
+    { "name": "Illegal Racing Strip", "status": "banned", "history": "none", "status_note": "Promotes street racing" },
+    { "name": "Counterfeit Alley", "status": "banned", "history": "none", "status_note": "Names a venue that sells counterfeit goods" },
+    { "name": "Test Place", "status": "deleted", "history": "none", "status_note": "Test entry, not a real location" },
+    { "name": "asdf Location", "status": "deleted", "history": "none", "status_note": "Keyboard mashing, not a real location" },
+    { "name": "Spam Place Promo", "status": "deleted", "history": "none", "status_note": "Promotional text used as a place name" },
+    { "name": "My House (address removed)", "status": "deleted", "history": "none", "status_note": "Exposes a private home address" },
+    { "name": "Click Here For Followers", "status": "deleted", "history": "none", "status_note": "Follower-selling spam used as a place name" }
+  ]
+}

@@ -33,7 +33,8 @@ public class PostPreviewRepository {
             String blurhash,
             String mediaType,
             Integer width,
-            Integer height) {}
+            Integer height,
+            String altText) {}
 
     /** One row per existing post, in one statement; the first media item by carousel position. */
     public List<PostPreviewRow> findPreviewRows(Collection<UUID> postIds) {
@@ -45,9 +46,9 @@ public class PostPreviewRepository {
                                 + " p.deleted_at IS NOT NULL AS deleted,"
                                 + " p.status_before_moderation IS NOT NULL AS moderated,"
                                 + " m.cdn_url, m.blurhash, m.media_type::text AS media_type,"
-                                + " m.width, m.height FROM posts p LEFT JOIN LATERAL"
+                                + " m.width, m.height, m.alt_text FROM posts p LEFT JOIN LATERAL"
                                 + " (SELECT ma.cdn_url, ma.blurhash, ma.media_type, ma.width,"
-                                + " ma.height FROM post_media pm"
+                                + " ma.height, pm.alt_text FROM post_media pm"
                                 + " JOIN media_assets ma ON ma.id = pm.media_asset_id"
                                 + " WHERE pm.post_id = p.id ORDER BY pm.position LIMIT 1) m ON TRUE"
                                 + " WHERE p.id IN (:ids)")
@@ -64,7 +65,8 @@ public class PostPreviewRepository {
                                         rs.getString("blurhash"),
                                         rs.getString("media_type"),
                                         rs.getObject("width", Integer.class),
-                                        rs.getObject("height", Integer.class)))
+                                        rs.getObject("height", Integer.class),
+                                        rs.getString("alt_text")))
                 .list();
     }
 }

@@ -85,6 +85,9 @@ class ClickHouseMigrationRunnerIT {
         try (Connection admin = ClickHouseTestSupport.adminConnection(clickhouse);
                 Statement statement = admin.createStatement()) {
             statement.execute("DROP TABLE IF EXISTS luvax_analytics.schema_migrations");
+            // Dropped too, so every test replays the shipped scripts onto a table that is not
+            // already at a later enum version, which a script that rewrites the list cannot narrow.
+            statement.execute("DROP TABLE IF EXISTS luvax_analytics.user_events");
             statement.execute("DROP TABLE IF EXISTS luvax_analytics.runner_probe_a");
             statement.execute("DROP TABLE IF EXISTS luvax_analytics.runner_probe_b");
         }
@@ -324,9 +327,12 @@ class ClickHouseMigrationRunnerIT {
                 .isEqualTo(2);
     }
 
+    // Only the latest enum script can be applied again: each one rewrites the whole value list, so
+    // an
+    // earlier one would narrow the column the later one widened, which ClickHouse refuses for a
+    // key.
     @Test
-    void migrate_interactionControlEnumScript_isSafeToRunAgainAfterAnInterruptedRun()
-            throws Exception {
+    void migrate_latestEnumScript_isSafeToRunAgainAfterAnInterruptedRun() throws Exception {
         ClickHouseMigrationRunner shipped =
                 new ClickHouseMigrationRunner(
                         migrator,
@@ -334,23 +340,23 @@ class ClickHouseMigrationRunnerIT {
                         ClickHouseMigrationRunner.DEFAULT_LOCATION,
                         Duration.ofSeconds(30));
         shipped.migrate();
-        String checksum = historyChecksum(4);
+        String checksum = historyChecksum(5);
 
         // The history row is written after the last statement, so a crash in between leaves the
         // statements applied and no row; deleting the row reproduces exactly that state.
         try (Connection admin = ClickHouseTestSupport.adminConnection(clickhouse);
                 Statement statement = admin.createStatement()) {
             statement.execute(
-                    "ALTER TABLE luvax_analytics.schema_migrations DELETE WHERE version = 4"
+                    "ALTER TABLE luvax_analytics.schema_migrations DELETE WHERE version = 5"
                             + " SETTINGS mutations_sync = 2");
         }
-        assertThat(count("SELECT count() FROM luvax_analytics.schema_migrations WHERE version = 4"))
+        assertThat(count("SELECT count() FROM luvax_analytics.schema_migrations WHERE version = 5"))
                 .isZero();
 
         List<ClickHouseMigrationScript> reapplied = shipped.migrate();
 
-        assertThat(reapplied).extracting(ClickHouseMigrationScript::version).containsExactly(4);
-        assertThat(historyChecksum(4)).isEqualTo(checksum);
+        assertThat(reapplied).extracting(ClickHouseMigrationScript::version).containsExactly(5);
+        assertThat(historyChecksum(5)).isEqualTo(checksum);
         assertThat(shipped.migrate()).isEmpty();
     }
 

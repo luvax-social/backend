@@ -48,6 +48,24 @@ public final class ApiConstants {
         public static final String ME_HIDDEN_WORDS = "/me/hidden-words";
         public static final String ME_HIDDEN_WORD_BY_ID = "/me/hidden-words/{entryId}";
         public static final String ME_INTERACTION_LIMITS = "/me/interaction-limits";
+        // The routes below are served by the post module, which has no mapping on this root, so
+        // they are absolute, the same way Hashtags.POSTS is.
+        public static final String ME_POSTS = ROOT + "/me/posts";
+        public static final String ME_POST_COUNTS = ROOT + "/me/posts/counts";
+        public static final String ME_PENDING_TAGS = ROOT + "/me/tags/pending";
+        public static final String ME_COLLABORATION_INVITES = ROOT + "/me/collaboration-invites";
+        public static final String TAGGED_POSTS = ROOT + "/{userId}/tagged-posts";
+    }
+
+    public static final class Places {
+        private Places() {}
+
+        public static final String ROOT = API_V1 + "/places";
+        public static final String SEARCH = "/search";
+        public static final String BY_ID = "/{placeId}";
+        // Absolute rather than relative: the handler lives in the post module, like the
+        // posts-by-hashtag read.
+        public static final String POSTS = ROOT + "/{placeId}/posts";
     }
 
     public static final class Posts {
@@ -69,6 +87,16 @@ public final class ApiConstants {
         public static final String HIDDEN_COMMENTS = "/{postId}/comments/hidden";
         public static final String FEED = "/feed";
         public static final String USER_POSTS = "/user/{userId}";
+        public static final String CONTENT = "/{postId}/content";
+        public static final String ALT_TEXT = "/{postId}/media/{postMediaId}/alt-text";
+        public static final String PLACE = "/{postId}/place";
+        public static final String TAGS = "/{postId}/tags";
+        public static final String TAG_BY_ID = "/{postId}/tags/{tagId}";
+        public static final String TAG_APPROVE = "/{postId}/tags/{tagId}/approve";
+        public static final String COLLABORATORS = "/{postId}/collaborators";
+        public static final String COLLABORATION = "/{postId}/collaboration";
+        public static final String COLLABORATION_ACCEPT = "/{postId}/collaboration/accept";
+        public static final String COLLABORATION_DECLINE = "/{postId}/collaboration/decline";
     }
 
     public static final class Comments {
@@ -323,6 +351,11 @@ public final class ApiConstants {
         public static final String HASHTAG_SEARCH = "/hashtags/search";
         public static final String HASHTAG_BY_ID = "/hashtags/{hashtagId}";
         public static final String HASHTAG_PIN = "/hashtags/{hashtagId}/pin";
+        public static final String PLACES = "/places";
+        // Declared before PLACE_BY_ID for the same reason as HASHTAG_SEARCH: the literal segment
+        // wins over the path variable.
+        public static final String PLACE_SEARCH = "/places/search";
+        public static final String PLACE_BY_ID = "/places/{placeId}";
         // Administrator-only like the hashtag registry above, and for the same reason: it sits
         // outside the "/users/**" sub-tree, so the broader "/api/v1/admin/**" matcher applies and
         // admits a moderator, which the class-level @PreAuthorize on the controller then narrows.

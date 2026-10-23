@@ -10,7 +10,9 @@ import com.app.modules.hashtag.dto.response.HashtagSummaryResponse;
 import com.app.modules.media.entity.MediaAsset;
 import com.app.modules.post.dto.response.FeedPostResponse;
 import com.app.modules.post.dto.response.PostEditHistoryResponse;
+import com.app.modules.post.dto.response.PostExtras;
 import com.app.modules.post.dto.response.PostMediaResponse;
+import com.app.modules.post.dto.response.PostMediaTagResponse;
 import com.app.modules.post.dto.response.PostResponse;
 import com.app.modules.post.entity.Post;
 import com.app.modules.post.entity.PostEditHistory;
@@ -35,18 +37,26 @@ public interface PostMapper {
      * @param hasReported whether the requesting viewer has already reported this post,
      *     batch-resolved by the service
      * @param hashtags the post's listable hashtags, batch-resolved by the service
+     * @param extras the place, mentions, co-authors and owner-only schedule, batch-resolved by the
+     *     service
      * @return the post response with media, the embedded author, viewer state, and hashtags
      */
     @Mapping(source = "post.id", target = "id")
     @Mapping(source = "post.status", target = "status")
     @Mapping(source = "post.createdAt", target = "createdAt")
     @Mapping(source = "post.updatedAt", target = "updatedAt")
+    @Mapping(source = "post.publishedAt", target = "publishedAt")
     @Mapping(source = "media", target = "media")
     @Mapping(source = "author", target = "author")
     @Mapping(source = "isLiked", target = "isLiked")
     @Mapping(source = "isSaved", target = "isSaved")
     @Mapping(source = "hasReported", target = "hasReported")
     @Mapping(source = "hashtags", target = "hashtags")
+    @Mapping(source = "extras.place", target = "place")
+    @Mapping(source = "extras.mentions", target = "mentions")
+    @Mapping(source = "extras.collaborators", target = "collaborators")
+    @Mapping(source = "extras.viewerCollaboration", target = "viewerCollaboration")
+    @Mapping(source = "extras.scheduledAt", target = "scheduledAt")
     PostResponse toResponse(
             Post post,
             List<PostMediaResponse> media,
@@ -54,7 +64,8 @@ public interface PostMapper {
             boolean isLiked,
             boolean isSaved,
             boolean hasReported,
-            List<HashtagSummaryResponse> hashtags);
+            List<HashtagSummaryResponse> hashtags,
+            PostExtras extras);
 
     /**
      * Builds the feed-specific post response from the entity, the separately hydrated media items,
@@ -71,6 +82,7 @@ public interface PostMapper {
      * @param hasReported whether the requesting viewer has already reported this post,
      *     batch-resolved by the service
      * @param hashtags the post's visible hashtags, batch-resolved by the service
+     * @param extras the place, mentions and co-authors, batch-resolved by the service
      * @return the feed post response with media, the embedded author, viewer state, hashtags, and
      *     ranking score reserved as null
      */
@@ -78,12 +90,17 @@ public interface PostMapper {
     @Mapping(source = "post.status", target = "status")
     @Mapping(source = "post.createdAt", target = "createdAt")
     @Mapping(source = "post.updatedAt", target = "updatedAt")
+    @Mapping(source = "post.publishedAt", target = "publishedAt")
     @Mapping(source = "media", target = "media")
     @Mapping(source = "author", target = "author")
     @Mapping(source = "isLiked", target = "isLiked")
     @Mapping(source = "isSaved", target = "isSaved")
     @Mapping(source = "hasReported", target = "hasReported")
     @Mapping(source = "hashtags", target = "hashtags")
+    @Mapping(source = "extras.place", target = "place")
+    @Mapping(source = "extras.mentions", target = "mentions")
+    @Mapping(source = "extras.collaborators", target = "collaborators")
+    @Mapping(source = "extras.viewerCollaboration", target = "viewerCollaboration")
     @Mapping(target = "rankingScore", ignore = true)
     FeedPostResponse toFeedResponse(
             Post post,
@@ -92,13 +109,15 @@ public interface PostMapper {
             boolean isLiked,
             boolean isSaved,
             boolean hasReported,
-            List<HashtagSummaryResponse> hashtags);
+            List<HashtagSummaryResponse> hashtags,
+            PostExtras extras);
 
     /**
      * Combines a post media row with its referenced media asset for rendering.
      *
      * @param postMedia the ordered media row
      * @param asset the media module asset providing CDN URL and dimensions
+     * @param tags the tags on this item that the viewer may see
      * @return the merged media response
      */
     @Mapping(source = "postMedia.id", target = "id")
@@ -110,7 +129,9 @@ public interface PostMapper {
     @Mapping(source = "asset.width", target = "width")
     @Mapping(source = "asset.height", target = "height")
     @Mapping(source = "asset.blurhash", target = "blurhash")
-    PostMediaResponse toMediaResponse(PostMedia postMedia, MediaAsset asset);
+    @Mapping(source = "tags", target = "tags")
+    PostMediaResponse toMediaResponse(
+            PostMedia postMedia, MediaAsset asset, List<PostMediaTagResponse> tags);
 
     /**
      * Builds a caption edit history entry with the editor's public summary embedded.
@@ -130,6 +151,8 @@ public interface PostMapper {
      *
      * @param post the source post
      * @param hashtagIds string-form hashtag ids resolved from {@code post_hashtags}
+     * @param placeName the post's place name when its place is active, otherwise null
+     * @param authorIds string-form ids of the owner and every accepted co-author
      * @return the indexable document
      */
     @Mapping(target = "id", expression = "java(post.getId().toString())")
@@ -140,5 +163,12 @@ public interface PostMapper {
     @Mapping(source = "hashtagIds", target = "hashtagIds")
     @Mapping(source = "post.caption", target = "caption")
     @Mapping(source = "post.createdAt", target = "createdAt")
-    PostDocument toDocument(Post post, List<String> hashtagIds);
+    @Mapping(source = "post.publishedAt", target = "publishedAt")
+    @Mapping(
+            target = "placeId",
+            expression = "java(post.getPlaceId() == null ? null : post.getPlaceId().toString())")
+    @Mapping(source = "placeName", target = "placeName")
+    @Mapping(source = "authorIds", target = "authorIds")
+    PostDocument toDocument(
+            Post post, List<String> hashtagIds, String placeName, List<String> authorIds);
 }

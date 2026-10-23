@@ -96,7 +96,7 @@ public class PostByHashtagSearchReader {
                         // Newest first rather than relevance: every document matches the term
                         // filter equally, so a relevance sort would be an arbitrary order that
                         // shifts between segment merges and silently reshuffles pages.
-                        .withSort(Sort.by(Sort.Direction.DESC, "createdAt"))
+                        .withSort(Sort.by(Sort.Direction.DESC, "publishedAt"))
                         .withPageable(new OffsetPageable(offset, limit + 1))
                         .build();
         SearchHits<PostDocument> hits =

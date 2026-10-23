@@ -1,14 +1,15 @@
 package com.app.modules.post.dto.response;
 
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.hashtag.dto.response.HashtagSummaryResponse;
+import com.app.modules.post.enums.CollaborationStatus;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.enums.PostType;
+import com.app.modules.post.place.dto.response.PlaceSummaryResponse;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -21,7 +22,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
                 "Post entry in a feed, with engagement counters and an optional ranking score")
 public record FeedPostResponse(
         @Schema(description = "Post identifier.") UUID id,
-        @Schema(description = "Post author.") UserSummaryResponse author,
+        @Schema(description = "Post author, the owner who can edit and delete it.")
+                UserSummaryResponse author,
         @Schema(description = "Post caption.", nullable = true) String caption,
         @Schema(description = "Post type.") PostType postType,
         @Schema(description = "Lifecycle status.") PostStatus status,
@@ -43,10 +45,12 @@ public record FeedPostResponse(
                 boolean hasReported,
         @Schema(description = "Number of views; updated by a background job and may lag.")
                 int viewCount,
-        @Schema(description = "Free-form location label.", nullable = true) String locationName,
-        @Schema(description = "Latitude in decimal degrees.", nullable = true) BigDecimal latitude,
-        @Schema(description = "Longitude in decimal degrees.", nullable = true)
-                BigDecimal longitude,
+        @Schema(
+                        description =
+                                "The place the post is tagged at; null when it has none or an"
+                                        + " administrator removed it.",
+                        nullable = true)
+                PlaceSummaryResponse place,
         @Schema(description = "Ordered media items.") List<PostMediaResponse> media,
         @Schema(
                         description =
@@ -55,8 +59,21 @@ public record FeedPostResponse(
                                         + " component renders a feed post and a profile post"
                                         + " identically.")
                 List<HashtagSummaryResponse> hashtags,
+        @Schema(description = "Mentions stored for the caption, by user id.")
+                List<PostMentionResponse> mentions,
+        @Schema(description = "Co-authors who accepted; every author appears on the card.")
+                List<PostCollaboratorResponse> collaborators,
+        @Schema(
+                        description = "The viewer's own invitation or co-authorship, or null.",
+                        nullable = true)
+                CollaborationStatus viewerCollaboration,
         @Schema(description = "Creation timestamp.") OffsetDateTime createdAt,
         @Schema(description = "Last update timestamp.") OffsetDateTime updatedAt,
+        @Schema(
+                        description =
+                                "When the post first became published; the feed orders by this.",
+                        nullable = true)
+                OffsetDateTime publishedAt,
         @Schema(
                         description =
                                 "Ranking score assigned by the recommendation feed; null in the"
@@ -84,13 +101,15 @@ public record FeedPostResponse(
                 isSaved,
                 hasReported,
                 viewCount,
-                locationName,
-                latitude,
-                longitude,
+                place,
                 media,
                 hashtags,
+                mentions,
+                collaborators,
+                viewerCollaboration,
                 createdAt,
                 updatedAt,
+                publishedAt,
                 score);
     }
 }

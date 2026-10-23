@@ -169,6 +169,112 @@ public class RecommendationRabbitBindingConfig {
                 MessageEventTypes.MESSAGE_REACTION_CHANGED_V1);
     }
 
+    @Bean
+    Binding postPublishedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_PUBLISHED_V1);
+    }
+
+    @Bean
+    Binding postScheduledSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_SCHEDULED_V1);
+    }
+
+    @Bean
+    Binding postScheduleFailedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_SCHEDULE_FAILED_V1);
+    }
+
+    @Bean
+    Binding postDraftSavedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_DRAFT_SAVED_V1);
+    }
+
+    @Bean
+    Binding postArchivedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_ARCHIVED_V1);
+    }
+
+    @Bean
+    Binding postUnarchivedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_UNARCHIVED_V1);
+    }
+
+    @Bean
+    Binding postTagCreatedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_TAG_CREATED_V1);
+    }
+
+    @Bean
+    Binding postTagApprovedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_TAG_APPROVED_V1);
+    }
+
+    @Bean
+    Binding postTagRemovedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_TAG_REMOVED_V1);
+    }
+
+    @Bean
+    Binding postCollaborationInvitedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue,
+                socialEventsExchange,
+                PostEventTypes.POST_COLLABORATION_INVITED_V1);
+    }
+
+    @Bean
+    Binding postCollaborationAcceptedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue,
+                socialEventsExchange,
+                PostEventTypes.POST_COLLABORATION_ACCEPTED_V1);
+    }
+
+    @Bean
+    Binding postCollaborationDeclinedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue,
+                socialEventsExchange,
+                PostEventTypes.POST_COLLABORATION_DECLINED_V1);
+    }
+
+    @Bean
+    Binding postCollaborationLeftSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue,
+                socialEventsExchange,
+                PostEventTypes.POST_COLLABORATION_LEFT_V1);
+    }
+
+    @Bean
+    Binding postMentionCreatedSignalBinding(
+            Queue userEventImportQueue, TopicExchange socialEventsExchange) {
+        return signalBinding(
+                userEventImportQueue, socialEventsExchange, PostEventTypes.POST_MENTION_CREATED_V1);
+    }
+
     private static Binding signalBinding(Queue queue, TopicExchange exchange, String routingKey) {
         return BindingBuilder.bind(queue).to(exchange).with(routingKey);
     }

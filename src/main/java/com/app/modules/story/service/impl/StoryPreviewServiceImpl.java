@@ -72,6 +72,6 @@ public class StoryPreviewServiceImpl implements StoryPreviewService {
             return null;
         }
         return new PreviewMediaResponse(
-                row.cdnUrl(), row.blurhash(), row.mediaType(), row.width(), row.height());
+                row.cdnUrl(), row.blurhash(), row.mediaType(), row.width(), row.height(), null);
     }
 }

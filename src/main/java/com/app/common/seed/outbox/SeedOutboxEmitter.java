@@ -142,6 +142,7 @@ public class SeedOutboxEmitter {
     public record EmissionCounts(
             int postIndex,
             int hashtagIndex,
+            int placeIndex,
             int likes,
             int saves,
             int comments,
@@ -152,6 +153,7 @@ public class SeedOutboxEmitter {
         public int total() {
             return postIndex
                     + hashtagIndex
+                    + placeIndex
                     + likes
                     + saves
                     + comments
@@ -230,6 +232,10 @@ public class SeedOutboxEmitter {
 
         emitBatched(posts, batchWriter::emitPostIndexBatch);
         emitBatched(hashtagIds, batchWriter::emitHashtagIndexBatch);
+        // Every place, whatever its status: the consumer decides between indexing and dropping
+        // the document from the row, so a banned or deleted place is cleared rather than skipped.
+        List<UUID> placeIds = fetchAllPlaceIds();
+        emitBatched(placeIds, batchWriter::emitPlaceIndexBatch);
         emitBatched(likes, batchWriter::emitLikeBatch);
         emitBatched(saves, batchWriter::emitSaveBatch);
         emitBatched(comments, batchWriter::emitCommentBatch);
@@ -253,6 +259,7 @@ public class SeedOutboxEmitter {
                 new EmissionCounts(
                         posts.size(),
                         hashtagIds.size(),
+                        placeIds.size(),
                         likes.size(),
                         saves.size(),
                         comments.size(),
@@ -261,11 +268,12 @@ public class SeedOutboxEmitter {
                         notInterestedEvents,
                         adminActions.size());
         log.info(
-                "[seed] outbox full volume emitted: postIndex={}, hashtagIndex={}, likes={}, saves={},"
-                        + " comments={}, views={}, shares={}, notInterested={}, adminActions={},"
-                        + " total={}",
+                "[seed] outbox full volume emitted: postIndex={}, hashtagIndex={}, placeIndex={},"
+                        + " likes={}, saves={}, comments={}, views={}, shares={}, notInterested={},"
+                        + " adminActions={}, total={}",
                 counts.postIndex(),
                 counts.hashtagIndex(),
+                counts.placeIndex(),
                 counts.likes(),
                 counts.saves(),
                 counts.comments(),
@@ -522,6 +530,11 @@ public class SeedOutboxEmitter {
 
     private List<UUID> fetchAllHashtagIds() {
         return jdbc.query("SELECT id FROM hashtags", (rs, rowNum) -> (UUID) rs.getObject("id"));
+    }
+
+    private List<UUID> fetchAllPlaceIds() {
+        return jdbc.query(
+                "SELECT id FROM places ORDER BY id", (rs, rowNum) -> (UUID) rs.getObject("id"));
     }
 
     private List<ReactionRow> fetchPostLikes() {

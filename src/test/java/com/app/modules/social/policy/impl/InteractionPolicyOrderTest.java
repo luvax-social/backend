@@ -57,6 +57,7 @@ class InteractionPolicyOrderTest {
                         new BlockRule(socialService),
                         new LimitRule(limitRepository, followRepository),
                         new MessagePermissionRule(privacySettings, followRepository),
+                        new TagPermissionRule(privacySettings, followRepository),
                         new PendingRequestRule(),
                         new HiddenWordsRule(hiddenWordService),
                         Clock.fixed(NOW, ZoneOffset.UTC));

@@ -436,9 +436,12 @@ class OpenApiContractIT {
         // report_reason_configs row is disabled or absent, POST_BANNED_HASHTAG on the three
         // post write paths that publish a caption, and HIDDEN_WORD_LIMIT_REACHED when a personal
         // hidden words list is full. All five are requests the server understood and refused on
-        // their content. A 422 documented for anything else (e.g. generic
-        // bean-validation failure, which the server answers with 400) is a contract defect, not a
-        // valid outcome.
+        // their content. The post creation work adds the edits of a post's content, place, tags and
+        // co-authors, which refuse an unavailable place, a tag the tagged person does not allow, or
+        // a limit on tags or co-authors, the draft cap on creating a post, and a place name that
+        // belongs to a place an administrator removed. A 422 documented for
+        // anything else (e.g. generic bean-validation failure, which the server answers with 400)
+        // is a contract defect, not a valid outcome.
         Set<String> allowed422 =
                 Set.of(
                         "POST /api/v1/posts/{postId}/comments",
@@ -448,6 +451,11 @@ class OpenApiContractIT {
                         "POST /api/v1/posts",
                         "PATCH /api/v1/posts/{postId}",
                         "PATCH /api/v1/posts/{postId}/status",
+                        "PUT /api/v1/posts/{postId}/content",
+                        "PUT /api/v1/posts/{postId}/place",
+                        "PUT /api/v1/posts/{postId}/tags",
+                        "PUT /api/v1/posts/{postId}/collaborators",
+                        "POST /api/v1/places",
                         "POST /api/v1/users/me/hidden-words");
 
         List<String> offenders = new ArrayList<>();
@@ -517,8 +525,11 @@ class OpenApiContractIT {
         record Expectation(String schema, String field) {}
         List<Expectation> expectations =
                 List.of(
-                        new Expectation("PostResponse", "locationName"),
-                        new Expectation("PostResponse", "latitude"),
+                        new Expectation("PostResponse", "place"),
+                        new Expectation("PostResponse", "publishedAt"),
+                        new Expectation("PostResponse", "scheduledAt"),
+                        new Expectation("PostMediaResponse", "altText"),
+                        new Expectation("PreviewMediaResponse", "altText"),
                         new Expectation("NotificationItemResponse", "readAt"),
                         new Expectation("NotificationItemResponse", "preview"),
                         new Expectation("NotificationPageResponse", "head"),

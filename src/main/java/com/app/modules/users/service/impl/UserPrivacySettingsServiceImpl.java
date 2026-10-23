@@ -35,6 +35,13 @@ public class UserPrivacySettingsServiceImpl implements UserPrivacySettingsServic
         return settingsOf(userId).getMessagePermission();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public TagSettings tagSettingsOf(UUID userId) {
+        UserSettings settings = settingsOf(userId);
+        return new TagSettings(settings.getTagPermission(), settings.isManualTagApproval());
+    }
+
     // A missing row is a broken invariant on the target's side, and these readers sit on another
     // account's comment or message path, so throwing would fail an actor who did nothing wrong. The
     // defaults come from a freshly built entity, which carries the same values as the column

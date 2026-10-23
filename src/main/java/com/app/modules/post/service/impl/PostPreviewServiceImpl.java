@@ -40,15 +40,20 @@ public class PostPreviewServiceImpl implements PostPreviewService {
         }
         Set<UUID> requested = Set.copyOf(postIds);
         List<PostPreviewRow> rows = postPreviewRepository.findPreviewRows(requested);
-        Set<UUID> visibleOwners =
-                postVisibilityService.filterVisibleOwnerIds(
-                        viewerId, rows.stream().map(PostPreviewRow::ownerId).distinct().toList());
+        // Evaluated per post rather than per owner, because a block with a co-author hides a post
+        // whose owner the viewer may otherwise see.
+        Map<UUID, UUID> ownerByPostId = new HashMap<>();
+        for (PostPreviewRow row : rows) {
+            ownerByPostId.put(row.id(), row.ownerId());
+        }
+        Set<UUID> visiblePosts =
+                postVisibilityService.filterVisiblePostIds(viewerId, ownerByPostId);
         for (PostPreviewRow row : rows) {
             boolean available =
                     !row.deleted()
                             && !row.moderated()
                             && isOpenableStatus(row, viewerId)
-                            && visibleOwners.contains(row.ownerId());
+                            && visiblePosts.contains(row.id());
             previews.put(
                     row.id(),
                     available
@@ -72,6 +77,11 @@ public class PostPreviewServiceImpl implements PostPreviewService {
             return null;
         }
         return new PreviewMediaResponse(
-                row.cdnUrl(), row.blurhash(), row.mediaType(), row.width(), row.height());
+                row.cdnUrl(),
+                row.blurhash(),
+                row.mediaType(),
+                row.width(),
+                row.height(),
+                row.altText());
     }
 }

@@ -262,8 +262,10 @@ public class PostLikeServiceImpl implements PostLikeService {
                 postRepository
                         .findByIdAndDeletedAtIsNull(postId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
-        // Unpublished posts surface as not-found to avoid leaking their existence.
-        if (post.getStatus() != PostStatus.PUBLISHED && !viewerId.equals(post.getUserId())) {
+        // Only a published post can be liked, by anyone including its owner. A draft, a scheduled
+        // or an archived post surfaces as not-found, both to avoid leaking its existence and
+        // because a like on it would reach the recommender before the post is public.
+        if (post.getStatus() != PostStatus.PUBLISHED) {
             throw new AppException(ApiErrorCode.POST_NOT_FOUND);
         }
         if (!postVisibilityService.isVisibleTo(viewerId, post)) {

@@ -49,6 +49,7 @@ public class AdminReportTargetRepository {
             case STORY -> findStory(entityId);
             case MESSAGE -> findMessage(entityId);
             case MESSAGE_REACTION -> findMessageReaction(entityId);
+            case PLACE -> findPlace(entityId);
         };
     }
 
@@ -242,6 +243,36 @@ public class AdminReportTargetRepository {
                                         rs.getBoolean("removed"),
                                         rs.getObject("reacted_at", java.time.OffsetDateTime.class),
                                         rs.getString("emoji")))
+                .optional();
+    }
+
+    // The reviewed text is the place name and its status is shown as the entity status. The creator
+    // is the owner so the review can show who first wrote the name; a place whose creator is gone
+    // reads with no owner, and one an administrator already removed reads as removed.
+    private Optional<AdminReportTargetResponse> findPlace(UUID entityId) {
+        return jdbcClient
+                .sql(
+                        """
+						SELECT pl.id, pl.created_by, u.username, pl.name, pl.status::text AS status,
+							pl.status <> 'active' AS removed, pl.created_at
+						FROM places pl
+						LEFT JOIN users u ON u.id = pl.created_by
+						WHERE pl.id = :entityId
+						""")
+                .param("entityId", entityId)
+                .query(
+                        (rs, row) ->
+                                new AdminReportTargetResponse(
+                                        ReportType.PLACE,
+                                        rs.getObject("id", UUID.class),
+                                        rs.getObject("created_by", UUID.class),
+                                        rs.getString("username"),
+                                        rs.getString("status"),
+                                        rs.getString("name"),
+                                        List.of(),
+                                        rs.getBoolean("removed"),
+                                        rs.getObject("created_at", java.time.OffsetDateTime.class),
+                                        null))
                 .optional();
     }
 }

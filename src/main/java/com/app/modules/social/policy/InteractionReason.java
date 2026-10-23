@@ -17,6 +17,8 @@ public enum InteractionReason {
     NOT_FOLLOWED_REQUEST,
     HIDDEN_WORD,
     AWAITING_ACCEPTANCE,
+    // A tag the tagged account reviews first, because its manual approval setting is on.
+    APPROVAL_REQUIRED,
     // Reserved: a declined request answers AWAITING_ACCEPTANCE so the requester cannot tell
     REQUEST_DECLINED
 }

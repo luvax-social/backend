@@ -305,7 +305,7 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
                                                     post.hidden(),
                                                     List.of(),
                                                     labels.getOrDefault(post.id(), List.of()),
-                                                    post.createdAt(),
+                                                    post.timestamp(),
                                                     null))
                             .toList();
             observe(run, () -> gorse(() -> voidCall(() -> gorseClient.upsertItems(items))));
@@ -373,7 +373,8 @@ public class GorseRebuildServiceImpl implements GorseRebuildService {
     // again. PostgreSQL holds the preference itself, and is read only when the batch has one.
     private SelectedFeedback select(List<UUID> userIds, List<FeedbackTotal> totals) {
         Set<UUID> knownPosts =
-                source.findExistingPostIds(totals.stream().map(FeedbackTotal::itemId).toList());
+                source.findEverPublishedPostIds(
+                        totals.stream().map(FeedbackTotal::itemId).toList());
         boolean hasNegative =
                 totals.stream()
                         .anyMatch(

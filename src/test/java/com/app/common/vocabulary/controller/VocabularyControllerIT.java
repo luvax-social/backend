@@ -202,7 +202,14 @@ class VocabularyControllerIT {
         assertThat(reason.get("isEnabled")).isEqualTo(true);
         assertThat(reason.get("sortOrder")).isEqualTo(4);
         assertThat(reason.get("appliesTo"))
-                .isEqualTo(List.of("post", "comment", "story", "message", "message_reaction"));
+                .isEqualTo(
+                        List.of(
+                                "post",
+                                "comment",
+                                "story",
+                                "message",
+                                "message_reaction",
+                                "place"));
     }
 
     @Test

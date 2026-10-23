@@ -39,6 +39,9 @@ app:
   hashtag:
     consumer:
       enabled: true
+  place:
+    consumer:
+      enabled: true
   # PostLiveFanoutConsumer and the /ws/posts endpoint registered by PostWebSocketConfig are both
   # gated on app.post.live.enabled, which defaults to false in application.yaml. Absent here, the
   # endpoint was permitted by SecurityConfig and reachable while nothing fanned out to it. This is

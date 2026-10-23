@@ -108,6 +108,8 @@ class SeedRunnerIT {
                         null,
                         null,
                         null,
+                        null,
+                        null,
                         null);
 
         assertThatThrownBy(seedRunner::assertEnumCoverage)
@@ -123,6 +125,8 @@ class SeedRunnerIT {
         SeedRunner seedRunner =
                 new SeedRunner(
                         jdbcTemplate,
+                        null,
+                        null,
                         null,
                         null,
                         null,

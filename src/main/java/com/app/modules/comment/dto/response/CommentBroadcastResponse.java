@@ -1,9 +1,11 @@
 package com.app.modules.comment.dto.response;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import com.app.common.response.UserSummaryResponse;
+import com.app.modules.post.dto.response.PostMentionResponse;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -54,4 +56,9 @@ public record CommentBroadcastResponse(
                                         + " here.",
                         example = "2026-08-11T11:52:41.512961Z",
                         nullable = true)
-                OffsetDateTime editedAt) {}
+                OffsetDateTime editedAt,
+        @Schema(
+                        description =
+                                "Mentions stored for the comment, identical for every subscriber."
+                                        + " Link an @handle only when it is listed here.")
+                List<PostMentionResponse> mentions) {}

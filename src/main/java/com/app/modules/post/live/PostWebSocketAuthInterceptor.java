@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import com.app.common.security.user.UserPrincipal;
 import com.app.common.security.websocket.JwtHandshakeInterceptor;
 import com.app.modules.post.entity.Post;
+import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.repository.PostRepository;
 import com.app.modules.post.service.PostVisibilityService;
 
@@ -73,8 +74,10 @@ public class PostWebSocketAuthInterceptor implements ChannelInterceptor {
     private void checkVisibility(Message<?> message, StompHeaderAccessor accessor, UUID postId) {
         UUID viewerId = resolveViewer(accessor);
         Post post = postRepository.findById(postId).orElse(null);
+        // Only a published post has live like events; any other status answers as a missing post.
         if (viewerId == null
                 || post == null
+                || post.getStatus() != PostStatus.PUBLISHED
                 || !postVisibilityService.isVisibleTo(viewerId, post)) {
             throw new MessageDeliveryException(message, "Subscription not permitted");
         }

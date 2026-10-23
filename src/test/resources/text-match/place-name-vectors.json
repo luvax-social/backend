@@ -1,0 +1,19 @@
+[
+  {"raw": "Da Nang", "name": "da nang"},
+  {"raw": "  da   nang  ", "name": "da nang"},
+  {"raw": "Đà Nẵng", "name": "da nang"},
+  {"raw": "ĐÀ NẴNG", "name": "da nang"},
+  {"raw": "Hồ Hoàn Kiếm", "name": "ho hoan kiem"},
+  {"raw": "B4 Cafe", "name": "b4 cafe"},
+  {"raw": "Ba Cafe", "name": "ba cafe"},
+  {"raw": "St. Mary's Church", "name": "st mary s church"},
+  {"raw": "Café Münster", "name": "cafe munster"},
+  {"raw": "Café", "name": "cafe"},
+  {"raw": "Place—One", "name": "place one"},
+  {"raw": "a_b", "name": "a b"},
+  {"raw": "123 Main St", "name": "123 main st"},
+  {"raw": "Nhà hàng Ngon #1", "name": "nha hang ngon 1"},
+  {"raw": "$hit h3ll0", "name": "hit h3ll0"},
+  {"raw": "!!!", "name": ""},
+  {"raw": "   ", "name": ""}
+]

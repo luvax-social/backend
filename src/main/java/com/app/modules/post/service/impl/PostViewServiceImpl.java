@@ -42,7 +42,7 @@ public class PostViewServiceImpl implements PostViewService {
                         .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
         // Unpublished posts surface as not-found to avoid leaking their existence, matching every
         // other single-post lookup in this module.
-        if (post.getStatus() != PostStatus.PUBLISHED && !viewerId.equals(post.getUserId())) {
+        if (post.getStatus() != PostStatus.PUBLISHED) {
             throw new AppException(ApiErrorCode.POST_NOT_FOUND);
         }
         if (!postVisibilityService.isVisibleTo(viewerId, post)) {

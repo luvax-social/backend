@@ -20,6 +20,8 @@ class BlockRule implements InteractionRule {
             EnumSet.of(
                     InteractionType.COMMENT,
                     InteractionType.MENTION,
+                    InteractionType.TAG,
+                    InteractionType.COLLABORATION_INVITE,
                     InteractionType.MESSAGE_INITIATE,
                     InteractionType.MESSAGE_SEND);
 

@@ -40,6 +40,7 @@ import com.app.modules.social.repository.InteractionLimitRepository;
 import com.app.modules.social.service.HiddenWordService;
 import com.app.modules.social.service.SocialService;
 import com.app.modules.users.enums.MessagePermission;
+import com.app.modules.users.enums.TagPermission;
 import com.app.modules.users.service.UserPrivacySettingsService;
 
 @ExtendWith(MockitoExtension.class)
@@ -67,6 +68,7 @@ class InteractionPolicyServiceImplTest {
                         new BlockRule(socialService),
                         new LimitRule(limitRepository, followRepository),
                         new MessagePermissionRule(privacySettings, followRepository),
+                        new TagPermissionRule(privacySettings, followRepository),
                         new PendingRequestRule(),
                         new HiddenWordsRule(hiddenWordService),
                         Clock.fixed(NOW, ZoneOffset.UTC));
@@ -445,9 +447,6 @@ class InteractionPolicyServiceImplTest {
 
     @Test
     void reservedTypes_areRefused() {
-        assertThatThrownBy(() -> service.evaluate(request(InteractionType.TAG)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("TAG");
         assertThatThrownBy(() -> service.evaluate(request(InteractionType.STORY_REPLY)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("interaction not enabled: STORY_REPLY");
@@ -455,6 +454,100 @@ class InteractionPolicyServiceImplTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("interaction not enabled: STORY_RESPONSE");
         verifyNoInteractions(socialService);
+    }
+
+    @Test
+    void tag_defaultSettings_allows() {
+        tagSettings(TagPermission.EVERYONE, false);
+
+        assertThat(service.evaluate(request(InteractionType.TAG)))
+                .isEqualTo(decision(InteractionOutcome.ALLOW, InteractionReason.NONE));
+    }
+
+    @Test
+    void tag_blockedEitherDirection_deniesWithoutReadingSettings() {
+        when(socialService.isBlockedBetween(actor, target)).thenReturn(true);
+
+        assertThat(service.evaluate(request(InteractionType.TAG)))
+                .isEqualTo(denied(InteractionReason.BLOCKED));
+        verifyNoInteractions(privacySettings);
+    }
+
+    @Test
+    void tag_targetAllowsNobody_denies() {
+        tagSettings(TagPermission.NOBODY, false);
+
+        assertThat(service.evaluate(request(InteractionType.TAG)))
+                .isEqualTo(denied(InteractionReason.PERMISSION_NOBODY));
+    }
+
+    @Test
+    void tag_followingOnlyAndTargetDoesNotFollowActor_denies() {
+        tagSettings(TagPermission.FOLLOWING, false);
+
+        assertThat(service.evaluate(request(InteractionType.TAG)))
+                .isEqualTo(denied(InteractionReason.PERMISSION_FOLLOWING_ONLY));
+    }
+
+    @Test
+    void tag_followingOnlyAndTargetFollowsActor_allows() {
+        tagSettings(TagPermission.FOLLOWING, false);
+        recipientFollowsActor();
+
+        assertThat(service.evaluate(request(InteractionType.TAG)))
+                .isEqualTo(decision(InteractionOutcome.ALLOW, InteractionReason.NONE));
+    }
+
+    @Test
+    void tag_manualApproval_routesToRequests() {
+        tagSettings(TagPermission.EVERYONE, true);
+
+        assertThat(service.evaluate(request(InteractionType.TAG)))
+                .isEqualTo(
+                        decision(
+                                InteractionOutcome.ROUTE_TO_REQUESTS,
+                                InteractionReason.APPROVAL_REQUIRED));
+    }
+
+    @Test
+    void tag_limitedNonFollower_allowBecomesHiddenRequest() {
+        tagSettings(TagPermission.EVERYONE, false);
+        limit(true, false);
+
+        assertThat(service.evaluate(request(InteractionType.TAG)))
+                .isEqualTo(
+                        decision(
+                                InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS,
+                                InteractionReason.LIMITED_NON_FOLLOWER));
+    }
+
+    @Test
+    void tag_limitedNonFollowerWithManualApproval_isHiddenRequest() {
+        tagSettings(TagPermission.EVERYONE, true);
+        limit(true, false);
+
+        assertThat(service.evaluate(request(InteractionType.TAG)).outcome())
+                .isEqualTo(InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS);
+    }
+
+    @Test
+    void collaborationInvite_blocked_denies() {
+        when(socialService.isBlockedBetween(actor, target)).thenReturn(true);
+
+        assertThat(service.evaluate(request(InteractionType.COLLABORATION_INVITE)))
+                .isEqualTo(denied(InteractionReason.BLOCKED));
+    }
+
+    @Test
+    void collaborationInvite_notBlocked_allowsWithoutReadingSettingsOrLimits() {
+        assertThat(service.evaluate(request(InteractionType.COLLABORATION_INVITE)).outcome())
+                .isEqualTo(InteractionOutcome.ALLOW);
+        verifyNoInteractions(privacySettings, limitRepository);
+    }
+
+    private void tagSettings(TagPermission permission, boolean manualApproval) {
+        when(privacySettings.tagSettingsOf(target))
+                .thenReturn(new UserPrivacySettingsService.TagSettings(permission, manualApproval));
     }
 
     private InteractionRequest comment(String content) {

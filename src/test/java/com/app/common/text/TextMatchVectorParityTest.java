@@ -20,10 +20,24 @@ class TextMatchVectorParityTest {
     private static final Path FRONTEND_COPY =
             Path.of("..", "frontend", "tests", "unit", "fixtures", "text-match-vectors.json");
 
+    private static final Path BACKEND_PLACE_COPY =
+            Path.of("src", "test", "resources", "text-match", "place-name-vectors.json");
+    private static final Path FRONTEND_PLACE_COPY =
+            Path.of("..", "frontend", "tests", "unit", "fixtures", "place-name-vectors.json");
+
     @Test
     void vectors_backendCopy_isByteIdenticalToTheFrontendCopy() throws IOException {
         assumeTrue(Files.exists(FRONTEND_COPY), "frontend checkout not present beside backend");
 
         assertThat(Files.readAllBytes(BACKEND_COPY)).isEqualTo(Files.readAllBytes(FRONTEND_COPY));
+    }
+
+    @Test
+    void placeNameVectors_backendCopy_isByteIdenticalToTheFrontendCopy() throws IOException {
+        assumeTrue(
+                Files.exists(FRONTEND_PLACE_COPY), "frontend checkout not present beside backend");
+
+        assertThat(Files.readAllBytes(BACKEND_PLACE_COPY))
+                .isEqualTo(Files.readAllBytes(FRONTEND_PLACE_COPY));
     }
 }

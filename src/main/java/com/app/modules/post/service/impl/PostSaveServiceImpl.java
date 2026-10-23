@@ -66,8 +66,9 @@ public class PostSaveServiceImpl implements PostSaveService {
                 postRepository
                         .findByIdAndDeletedAtIsNull(postId)
                         .orElseThrow(() -> new AppException(ApiErrorCode.POST_NOT_FOUND));
-        // Unpublished posts surface as not-found to avoid leaking their existence.
-        if (post.getStatus() != PostStatus.PUBLISHED && !userId.equals(post.getUserId())) {
+        // Only a published post can be saved, by anyone including its owner; anything else
+        // surfaces as not-found.
+        if (post.getStatus() != PostStatus.PUBLISHED) {
             throw new AppException(ApiErrorCode.POST_NOT_FOUND);
         }
         if (!postVisibilityService.isVisibleTo(userId, post)) {

@@ -282,6 +282,19 @@ public interface SocialService {
             UUID viewerId, Collection<UUID> candidateAuthorIds, FeedSurface surface);
 
     /**
+     * Every author the viewer's own preferences keep out of a feed, with no candidate set.
+     *
+     * <p>For a feed whose posts can have more than one author: a post is hidden when any of its
+     * authors is in this set, and the co-authors of a post are not known before the query runs. The
+     * rules are those of {@link #findFeedSuppressedAuthors}.
+     *
+     * @param viewerId the viewer whose preferences are read
+     * @param surface the feed the result is for
+     * @return the authors to drop; empty when the viewer has no matching preference
+     */
+    Set<UUID> findAllFeedSuppressedAuthors(UUID viewerId, FeedSurface surface);
+
+    /**
      * The accounts whose stories the viewer muted.
      *
      * <p>Read for the story tray, which subtracts them from the accounts it queries. Story

@@ -30,6 +30,8 @@ import com.app.common.seed.writer.MediaSeedWriter;
 import com.app.common.seed.writer.MessageSeedWriter;
 import com.app.common.seed.writer.ModerationSeedWriter;
 import com.app.common.seed.writer.NotificationSeedWriter;
+import com.app.common.seed.writer.PlaceModerationSeedWriter;
+import com.app.common.seed.writer.PostCreationSeedWriter;
 import com.app.common.seed.writer.PostSeedWriter;
 import com.app.common.seed.writer.SocialGraphSeedWriter;
 import com.app.common.seed.writer.StorySeedWriter;
@@ -88,7 +90,11 @@ public class SeedRunner {
                     new EnumColumn("admin_actions", "action_type", "admin_action_type"),
                     new EnumColumn("user_settings", "message_permission", "message_permission"),
                     new EnumColumn(
-                            "conversations", "request_status", "conversation_request_status"));
+                            "conversations", "request_status", "conversation_request_status"),
+                    new EnumColumn("places", "status", "place_status"),
+                    new EnumColumn("user_settings", "tag_permission", "tag_permission"),
+                    new EnumColumn("post_user_tags", "status", "tag_status"),
+                    new EnumColumn("post_collaborators", "status", "collaboration_status"));
 
     private static final int MIN_ROWS_PER_ENUM_VALUE = 5;
 
@@ -112,6 +118,8 @@ public class SeedRunner {
     private final UserSeedWriter userSeedWriter;
     private final MediaSeedWriter mediaSeedWriter;
     private final PostSeedWriter postSeedWriter;
+    private final PostCreationSeedWriter postCreationSeedWriter;
+    private final PlaceModerationSeedWriter placeModerationSeedWriter;
     private final CommentSeedWriter commentSeedWriter;
     private final EngagementSeedWriter engagementSeedWriter;
     private final SocialGraphSeedWriter socialGraphSeedWriter;
@@ -271,12 +279,16 @@ public class SeedRunner {
                 commentSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
         engagementSeedWriter.write(content, usersByUsername, postIdBySeedId, commentIds, timeline);
         socialGraphSeedWriter.write(content, usersByUsername, timeline);
+        // After the social graph: a tag, an invitation and a mention each follow the follow and
+        // block relationships the graph writer produced.
+        postCreationSeedWriter.write(content, usersByUsername, timeline);
         storySeedWriter.write(content, usersByUsername, timeline);
         messageSeedWriter.write(
                 content, usersByUsername, mediaByCompositeKey, postIdBySeedId, timeline);
         // Must run before NotificationSeedWriter: warning notifications are read back from
         // user_warnings, which this call is what populates.
         moderationSeedWriter.write(content, usersByUsername, postIdBySeedId, timeline);
+        placeModerationSeedWriter.write(content, timeline);
         // Returns the verification ticket ids, because a badge granted through the request flow
         // anchors to the ticket that produced it.
         Map<String, UUID> verificationTicketIds =

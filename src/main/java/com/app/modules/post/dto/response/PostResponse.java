@@ -1,14 +1,15 @@
 package com.app.modules.post.dto.response;
 
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.hashtag.dto.response.HashtagSummaryResponse;
+import com.app.modules.post.enums.CollaborationStatus;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.enums.PostType;
+import com.app.modules.post.place.dto.response.PlaceSummaryResponse;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -16,7 +17,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(description = "Post with ordered media and engagement counters")
 public record PostResponse(
         @Schema(description = "Post identifier.") UUID id,
-        @Schema(description = "Post author.") UserSummaryResponse author,
+        @Schema(description = "Post author, the owner who can edit and delete it.")
+                UserSummaryResponse author,
         @Schema(description = "Post caption.", nullable = true) String caption,
         @Schema(description = "Post type.") PostType postType,
         @Schema(description = "Lifecycle status.") PostStatus status,
@@ -38,10 +40,13 @@ public record PostResponse(
                 boolean hasReported,
         @Schema(description = "Number of views; updated by a background job and may lag.")
                 int viewCount,
-        @Schema(description = "Free-form location label.", nullable = true) String locationName,
-        @Schema(description = "Latitude in decimal degrees.", nullable = true) BigDecimal latitude,
-        @Schema(description = "Longitude in decimal degrees.", nullable = true)
-                BigDecimal longitude,
+        @Schema(
+                        description =
+                                "The place the post is tagged at. Null when the post has none, and"
+                                        + " also when an administrator removed the place, so a"
+                                        + " removed place shows on no surface.",
+                        nullable = true)
+                PlaceSummaryResponse place,
         @Schema(description = "Ordered media items.") List<PostMediaResponse> media,
         @Schema(
                         description =
@@ -50,10 +55,34 @@ public record PostResponse(
                                         + " caption keeps its literal #tag text, so a client"
                                         + " renders that text without linking it. A banned hashtag"
                                         + " is still listed: banning hides the tag's own surfaces,"
-                                        + " not the posts that used it. Empty for a post whose"
-                                        + " caption carries no tag, and for any post that is not"
+                                        + " not the posts that used it. Empty for a post that is not"
                                         + " published, because associations exist only while a post"
                                         + " is published.")
                 List<HashtagSummaryResponse> hashtags,
+        @Schema(
+                        description =
+                                "Mentions stored for the caption. Link an @handle only when it is"
+                                        + " listed here, using the username given.")
+                List<PostMentionResponse> mentions,
+        @Schema(
+                        description =
+                                "Co-authors who accepted, and for the owner or the invitee the"
+                                        + " invitations still waiting.")
+                List<PostCollaboratorResponse> collaborators,
+        @Schema(
+                        description =
+                                "The viewer's own invitation or co-authorship on this post, or null.",
+                        nullable = true)
+                CollaborationStatus viewerCollaboration,
         @Schema(description = "Creation timestamp.") OffsetDateTime createdAt,
-        @Schema(description = "Last update timestamp.") OffsetDateTime updatedAt) {}
+        @Schema(description = "Last update timestamp.") OffsetDateTime updatedAt,
+        @Schema(
+                        description =
+                                "When the post first became published; null while it has never been"
+                                        + " published. Every ordering of posts uses this.",
+                        nullable = true)
+                OffsetDateTime publishedAt,
+        @Schema(
+                        description = "When a scheduled post is due; present only for the owner.",
+                        nullable = true)
+                OffsetDateTime scheduledAt) {}

@@ -29,6 +29,7 @@ import com.app.modules.users.dto.response.UserSettingsResponse;
 import com.app.modules.users.entity.User;
 import com.app.modules.users.entity.UserSettings;
 import com.app.modules.users.enums.MessagePermission;
+import com.app.modules.users.enums.TagPermission;
 import com.app.modules.users.mapper.UserMapper;
 import com.app.modules.users.repository.UserRepository;
 import com.app.modules.users.repository.UserSettingsRepository;
@@ -396,7 +397,9 @@ class UserServiceImplTest {
                         false,
                         MessagePermission.NOBODY,
                         false,
-                        false));
+                        false,
+                        TagPermission.NOBODY,
+                        true));
 
         assertThat(settings.isNotifyLikes()).isFalse();
         assertThat(settings.isNotifyComments()).isFalse();
@@ -407,6 +410,8 @@ class UserServiceImplTest {
         assertThat(settings.isAllowStoryReplies()).isFalse();
         assertThat(settings.getMessagePermission()).isEqualTo(MessagePermission.NOBODY);
         assertThat(settings.isHiddenWordsSystemEnabled()).isFalse();
+        assertThat(settings.getTagPermission()).isEqualTo(TagPermission.NOBODY);
+        assertThat(settings.isManualTagApproval()).isTrue();
         verify(settingsRepository).save(settings);
     }
 
@@ -420,12 +425,14 @@ class UserServiceImplTest {
         service.updateMySettings(
                 id,
                 new UpdateSettingsRequest(
-                        null, null, null, null, null, null, null, null, null, null));
+                        null, null, null, null, null, null, null, null, null, null, null, null));
 
         assertThat(settings.isNotifyLikes()).isTrue();
         assertThat(settings.isNotifyComments()).isTrue();
         assertThat(settings.getMessagePermission()).isEqualTo(MessagePermission.FOLLOWING);
         assertThat(settings.isHiddenWordsSystemEnabled()).isTrue();
+        assertThat(settings.getTagPermission()).isEqualTo(TagPermission.EVERYONE);
+        assertThat(settings.isManualTagApproval()).isFalse();
         verify(settingsRepository).save(settings);
     }
 
@@ -516,6 +523,8 @@ class UserServiceImplTest {
                 MessagePermission.EVERYONE,
                 true,
                 true,
+                TagPermission.EVERYONE,
+                false,
                 null);
     }
 }

@@ -1,11 +1,10 @@
 package com.app.modules.post.dto.request;
 
-import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
-import jakarta.validation.constraints.DecimalMax;
-import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
@@ -19,7 +18,8 @@ public record CreatePostRequest(
         @Schema(
                         description =
                                 "Post caption (max 2200 characters); #tokens are extracted as"
-                                        + " hashtags at publish time",
+                                        + " hashtags at publish time and @names are stored as"
+                                        + " mentions",
                         example = "Sunset at the beach #sunset #beach")
                 @Size(max = 2200)
                 String caption,
@@ -31,26 +31,53 @@ public record CreatePostRequest(
                 PostType postType,
         @Schema(
                         description =
-                                "Media asset ids owned by the author, in carousel order."
-                                        + " Required for image, video, and carousel posts;"
-                                        + " must be null or empty for text posts.",
+                                "Legacy form of media: asset ids owned by the author, in carousel"
+                                        + " order, with no alt text. Send either this or media,"
+                                        + " never both.",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 @Size(max = 10)
                 List<UUID> mediaIds,
         @Schema(
                         description =
-                                "Initial status; only draft or published are accepted and the"
-                                        + " default is published",
+                                "Media items in carousel order, each with its alt text. Required for"
+                                        + " image, video, and carousel posts; must be null or empty"
+                                        + " for text posts. Send either this or mediaIds.",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                @Size(max = 10)
+                @Valid
+                List<PostMediaInput> media,
+        @Schema(
+                        description =
+                                "Initial status: draft, scheduled or published. The default is"
+                                        + " published.",
                         example = "published")
                 PostStatus status,
-        @Schema(description = "Free-form location label", example = "Da Nang, Vietnam")
-                @Size(max = 255)
-                String locationName,
-        @Schema(description = "Latitude in decimal degrees", example = "16.054407")
-                @DecimalMin("-90")
-                @DecimalMax("90")
-                BigDecimal latitude,
-        @Schema(description = "Longitude in decimal degrees", example = "108.202164")
-                @DecimalMin("-180")
-                @DecimalMax("180")
-                BigDecimal longitude) {}
+        @Schema(
+                        description =
+                                "When a scheduled post is published. Required for scheduled and"
+                                        + " refused for any other status. Floored to the minute and"
+                                        + " between one minute and thirty days from now.",
+                        nullable = true)
+                OffsetDateTime scheduledAt,
+        @Schema(description = "Id of an existing place to tag the post at", nullable = true)
+                UUID placeId,
+        @Schema(
+                        description =
+                                "Name of a place to tag the post at, created when new. Used when"
+                                        + " placeId is absent.",
+                        example = "Da Nang",
+                        nullable = true)
+                @Size(max = 100)
+                String placeName,
+        @Schema(description = "People tagged on the media items", nullable = true)
+                @Size(max = 200)
+                @Valid
+                List<PostTagInput> tags,
+        @Schema(
+                        description =
+                                "Accounts invited to co-author the post, at most three. They are"
+                                        + " told when the post is published and appear only after"
+                                        + " accepting.",
+                        nullable = true)
+                @Size(max = 3)
+                List<UUID> collaboratorIds) {}

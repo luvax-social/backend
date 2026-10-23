@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum PostStatus {
     DRAFT,
+    SCHEDULED,
     PUBLISHED,
     ARCHIVED,
     REMOVED;

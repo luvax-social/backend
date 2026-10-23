@@ -103,7 +103,7 @@ FROM pg_constraint con JOIN pg_class rel ON rel.oid=con.conrelid JOIN pg_namespa
 WHERE n.nspname='public' AND rel.relname<>'flyway_schema_history' ORDER BY 1;
 SELECT 'INDEX|'||tablename||'|'||regexp_replace(indexdef,' INDEX [a-z_0-9]+ ',' INDEX ')
 FROM pg_indexes WHERE schemaname='public' AND tablename<>'flyway_schema_history' ORDER BY 1;
-SELECT 'ENUM|'||t.typname||'|'||e.enumlabel||'|'||e.enumsortorder
+SELECT 'ENUM|'||t.typname||'|'||e.enumlabel||'|'||row_number() OVER (PARTITION BY t.typname ORDER BY e.enumsortorder)
 FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid JOIN pg_namespace n ON n.oid=t.typnamespace
 WHERE n.nspname='public' ORDER BY t.typname, e.enumsortorder;
 SELECT 'TRIGGER|'||c.relname||'|'||pg_get_triggerdef(tg.oid)

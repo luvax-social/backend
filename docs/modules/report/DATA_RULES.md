@@ -29,7 +29,8 @@ This table cannot be rebuilt from any other source if lost.
 
 | Rule | Enforced By |
 |------|-------------|
-| `report_type` must be one of `'post'`, `'comment'`, `'user'`, `'story'`, `'message'`, `'message_reaction'` | `report_type` enum |
+| `report_type` must be one of `'post'`, `'comment'`, `'user'`, `'story'`, `'message'`, `'message_reaction'`, `'place'` | `report_type` enum |
+| A `place` report's `entity_id` is `places.id`; only an active place can be reported, a banned or deleted place answers `REPORT_TARGET_NOT_FOUND`, and a place has no owner in the account sense, so the account that first created the name stands in as its owner and is the only one barred from reporting it; a missing creator resolves to the nil UUID, which equals no reporter. A `post` report targets a published post only | `ReportTargetRepositoryImpl.findOwnerId` |
 | A `message_reaction` report's `entity_id` is `message_reactions.id`. The reporter must be a participant who still has the conversation (`left_at IS NULL`), the reaction and its message must carry no tombstone, and no block may exist between reporter and reactor in either direction; anything else answers `REPORT_TARGET_NOT_FOUND` so a block stays silent, and reporting one's own reaction answers `REPORT_SELF_NOT_ALLOWED` | `ReportTargetRepositoryImpl.findOwnerId`, `ReportServiceImpl.persistReport` |
 | The moderation view of a reported reaction (`GET /admin/reports/{reportId}/target`) carries the emoji, the reactor as owner and a snippet of the message it sits on, and reads as removed once the reaction or its message is tombstoned | `AdminReportTargetRepository.findMessageReaction` |
 | `report_reason` must be one of the 8 values in `report_reason` enum | `report_reason` enum |

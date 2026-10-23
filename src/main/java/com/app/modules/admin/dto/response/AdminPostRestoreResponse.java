@@ -25,6 +25,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param remainingBannedHashtags normalized names the caption still carries that are not associated
  *     with the post because an administrator has banned them; empty when the caption names no
  *     banned tag, which is the normal case and also every restore whose result is not published
+ * @param strippedPlace name of the place the restore dropped because an administrator banned or
+ *     deleted it while the post was removed; null when the post kept its place or had none
  */
 @Schema(description = "Outcome of restoring a post removed by moderation")
 public record AdminPostRestoreResponse(
@@ -38,4 +40,12 @@ public record AdminPostRestoreResponse(
                                         + " one call changed, so repeating a restore returns the"
                                         + " same names. Empty when the caption names no banned"
                                         + " tag.")
-                List<String> remainingBannedHashtags) {}
+                List<String> remainingBannedHashtags,
+        @Schema(
+                        description =
+                                "Name of the place the restore dropped because an administrator"
+                                        + " banned or deleted it while the post was removed, so the"
+                                        + " post came back without it. Null when the post kept its"
+                                        + " place or had none.",
+                        nullable = true)
+                String strippedPlace) {}

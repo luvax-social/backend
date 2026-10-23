@@ -48,6 +48,7 @@ class PostNotificationConsumerTest {
     @Mock private ProcessedMessageService processedMessageService;
     @Mock private NotificationService notificationService;
     @Mock private PostLikeRepository postLikeRepository;
+    @Mock private PostInvolvementNotifier involvementNotifier;
     @Mock private Channel channel;
 
     private PostNotificationConsumer consumer;
@@ -64,6 +65,7 @@ class PostNotificationConsumerTest {
                         notificationService,
                         retryProperties,
                         postLikeRepository,
+                        involvementNotifier,
                         millis -> {});
     }
 
@@ -136,6 +138,21 @@ class PostNotificationConsumerTest {
 
         verify(channel).basicNack(1L, false, false);
         verify(processedMessageService, never()).processOnce(any(), any(), any(), any());
+    }
+
+    @Test
+    void consume_involvementEventWithoutOwnerOrLikerKeys_isHandedToTheNotifier() throws Exception {
+        runHandlers();
+        Map<String, Object> data = Map.of("postId", POST.toString(), "inviteeId", LIKER.toString());
+        when(involvementNotifier.dispatch(PostEventTypes.POST_COLLABORATION_INVITED_V1, data))
+                .thenReturn(true);
+
+        consumer.consume(
+                message(envelope(PostEventTypes.POST_COLLABORATION_INVITED_V1, data)), channel);
+
+        verify(involvementNotifier).dispatch(PostEventTypes.POST_COLLABORATION_INVITED_V1, data);
+        verify(channel).basicAck(1L, false);
+        verify(channel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
     }
 
     @Test

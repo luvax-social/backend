@@ -29,7 +29,7 @@ All counters are maintained exclusively by PostgreSQL triggers (introduced in Fl
 |---------|-------|---------|--------------|
 | `follower_count` | `users` | `trg_follow_counts` | `follows` |
 | `following_count` | `users` | `trg_follow_counts` | `follows` |
-| `post_count` | `users` | `trg_post_count` | `posts` |
+| `post_count` | `users` | `trg_post_count`, `trg_post_authors_count` and `trg_post_collaborator_count` (V159) | `posts` the user owns, and `posts` the user co-authors through accepted `post_collaborators` rows |
 | `like_count` | `posts` | `trg_post_like_count` | `post_likes` |
 | `comment_count` | `posts` | `trg_post_comment_count` | `comments` |
 | `save_count` | `posts` | `trg_post_save_count` | `post_saves` |
@@ -39,6 +39,7 @@ All counters are maintained exclusively by PostgreSQL triggers (introduced in Fl
 | `view_count` | `stories` | `trg_story_view_count` | `story_views` |
 | `like_count` | `stories` | `trg_story_like_count` (V49) | `story_likes` |
 | `actor_count` | `notifications` | `trg_notification_actor_count` (V117) | `notification_actors` |
+| `post_count` | `places` | `trg_place_post_count` (V154) | `posts` (published, not deleted, at the place) |
 
 If a counter appears stale, the correct action is to recalculate from the source join table — not to patch the counter directly.
 
@@ -131,6 +132,8 @@ The enforcement they call for is already in place, so adding that flow will not 
 | `deleted_at` | Application code | Set to `NOW()` on soft delete; `NULL` to restore |
 | `admin_removed_at` | Application code | Set when a moderator removes `messages`, `comments`, `stories` or `message_reactions` rows; `NULL` to restore |
 | `accepted_at` | Trigger `trg_follow_accepted_at` (V134) | Set when a follow becomes accepted; null while pending; do not set in application code |
+| `posts.published_at` | Trigger `trg_posts_published_at` (V151) | Set to `NOW()` the first time a post becomes published and never cleared; an explicit value on insert is respected so the seed can backdate. Every ordering of posts uses `(published_at, id)`, so a draft created long ago does not appear in the past |
+| `posts.scheduled_at` | Application code | The time a scheduled post is due, floored to the minute; kept when a scheduled post is removed by moderation so a restore can tell whether it has passed |
 | `request_resolved_at` | Application code | Set when a message request is accepted or declined |
 
 Tables with `updated_at` triggers: `users` (`trg_users_updated_at`), `posts` (`trg_posts_updated_at`), `comments` (`trg_comments_updated_at`), `conversations` (`trg_conversations_updated_at`), `user_mutes` (`trg_user_mutes_updated_at`), `interaction_limits` (`trg_interaction_limits_updated_at`), `hidden_words` (`trg_hidden_words_updated_at`).
@@ -209,6 +212,19 @@ Post search sets it because it returns nothing at all.
 An entry must contain 1 to 64 raw characters and 1 to 6 tokens after normalisation.
 Each user may have at most 200 personal entries.
 Reject entries with the same normalised form using `HIDDEN_WORD_DUPLICATE`.
+
+### Place name normalisation
+
+The places registry deduplicates on a second key, `places.normalized_name`, which shares steps 1 to 3 above and then differs on purpose.
+
+1. Normalise text to Unicode NFD, then remove every code point in `\p{M}`.
+2. Map `đ` and `Đ` to `d`, then lowercase with the root locale.
+3. Keep maximal runs of `[\p{L}\p{N}]` and join them with one space, treating everything else as a separator.
+4. Never map digits or symbols to letters, because that would merge distinct names such as `B4 Cafe` and `Ba Cafe`.
+
+A name must be 2 to 100 raw characters, contain no control character, and normalise to a non-empty key.
+`TextMatchNormalizer.normalizeName` implements the contract in Java and `fn_normalise_place_name` (V153) in SQL, where the V154 data migration needs it.
+`PlaceNameNormalisationParityIT` pins both to `src/test/resources/text-match/place-name-vectors.json`, and the frontend mirror in `src/utils/textMatch.ts` reads the same vectors.
 
 ---
 

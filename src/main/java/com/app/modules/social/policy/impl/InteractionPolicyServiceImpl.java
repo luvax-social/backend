@@ -33,12 +33,14 @@ public class InteractionPolicyServiceImpl implements InteractionPolicyService {
             BlockRule blockRule,
             LimitRule limitRule,
             MessagePermissionRule messagePermissionRule,
+            TagPermissionRule tagPermissionRule,
             PendingRequestRule pendingRequestRule,
             HiddenWordsRule hiddenWordsRule) {
         this(
                 blockRule,
                 limitRule,
                 messagePermissionRule,
+                tagPermissionRule,
                 pendingRequestRule,
                 hiddenWordsRule,
                 Clock.systemUTC());
@@ -48,6 +50,7 @@ public class InteractionPolicyServiceImpl implements InteractionPolicyService {
             BlockRule blockRule,
             LimitRule limitRule,
             MessagePermissionRule messagePermissionRule,
+            TagPermissionRule tagPermissionRule,
             PendingRequestRule pendingRequestRule,
             HiddenWordsRule hiddenWordsRule,
             Clock clock) {
@@ -58,6 +61,7 @@ public class InteractionPolicyServiceImpl implements InteractionPolicyService {
                         blockRule,
                         limitRule,
                         messagePermissionRule,
+                        tagPermissionRule,
                         pendingRequestRule,
                         hiddenWordsRule);
         this.clock = clock;
@@ -124,8 +128,15 @@ public class InteractionPolicyServiceImpl implements InteractionPolicyService {
 
     private static InteractionOutcome hide(InteractionType type, InteractionOutcome base) {
         return switch (base) {
+            // A limited tag is neither shown as allowed nor refused: it waits for the tagged
+            // account's approval and that account is not told, which is the hidden form of the
+            // request outcome.
             case ALLOW ->
-                    HIDDEN_WHEN_ALLOWED.contains(type) ? InteractionOutcome.ALLOW_HIDDEN : base;
+                    type == InteractionType.TAG
+                            ? InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS
+                            : HIDDEN_WHEN_ALLOWED.contains(type)
+                                    ? InteractionOutcome.ALLOW_HIDDEN
+                                    : base;
             case ROUTE_TO_REQUESTS -> InteractionOutcome.ROUTE_TO_HIDDEN_REQUESTS;
             default -> base;
         };

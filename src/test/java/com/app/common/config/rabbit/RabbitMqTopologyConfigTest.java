@@ -36,6 +36,16 @@ class RabbitMqTopologyConfigTest {
                     .withUserConfiguration(
                             RabbitMqTopologyConfig.class, AuthMailRabbitBindingConfig.class);
 
+    // Signals that are recorded for analytics and also announced to the person they involve, so
+    // they reach the post notification queue as well as the import queue.
+    private static final Set<String> NOTIFYING_SIGNALS =
+            Set.of(
+                    PostEventTypes.POST_SCHEDULE_FAILED_V1,
+                    PostEventTypes.POST_TAG_CREATED_V1,
+                    PostEventTypes.POST_COLLABORATION_INVITED_V1,
+                    PostEventTypes.POST_COLLABORATION_ACCEPTED_V1,
+                    PostEventTypes.POST_MENTION_CREATED_V1);
+
     @Test
     void topology_contextLoads_declaresAllDeclaredQueues() {
         contextRunner.run(
@@ -57,6 +67,8 @@ class RabbitMqTopologyConfigTest {
                                     RabbitMqTopologyConfig.HASHTAG_INDEX_SYNC_DEAD_LETTER_QUEUE,
                                     RabbitMqTopologyConfig.POST_INDEX_SYNC_QUEUE,
                                     RabbitMqTopologyConfig.POST_INDEX_SYNC_DEAD_LETTER_QUEUE,
+                                    RabbitMqTopologyConfig.PLACE_INDEX_SYNC_QUEUE,
+                                    RabbitMqTopologyConfig.PLACE_INDEX_SYNC_DEAD_LETTER_QUEUE,
                                     RabbitMqTopologyConfig.COMMENT_NOTIFICATION_QUEUE,
                                     RabbitMqTopologyConfig.COMMENT_NOTIFICATION_DEAD_LETTER_QUEUE,
                                     RabbitMqTopologyConfig.STORY_NOTIFICATION_QUEUE,
@@ -148,14 +160,14 @@ class RabbitMqTopologyConfigTest {
                     assertThat(context.getBeansOfType(Binding.class).values())
                             .noneMatch(binding -> futureQueues.contains(binding.getDestination()));
                     // Active bindings: mail, moderation.mail, notification, hashtag.index,
-                    // post.index, comment.notification, story.notification,
+                    // post.index, place.index, comment.notification, story.notification,
                     // recommendation.feedback, post.notification, admin.notification and
                     // admin.action.replication, admin.platform-stats and
                     // recommendation.user-event.import dead-letter bindings plus
                     // the comment live, message
                     // live, notification live,
                     // and post live exchange-to-exchange bindings.
-                    assertThat(context.getBeansOfType(Binding.class)).hasSize(17);
+                    assertThat(context.getBeansOfType(Binding.class)).hasSize(18);
                 });
     }
 
@@ -187,7 +199,9 @@ class RabbitMqTopologyConfigTest {
         // A mute, a show-fewer request and a not-interested mark are private to the viewer who made
         // them, so none of their routing keys may reach a queue that turns events into
         // notifications. The check matches every binding pattern against each key, so a wildcard
-        // added later is caught as well as an exact key.
+        // added later is caught as well as an exact key. The post creation events that tell
+        // another person something, a tag, an invitation to co-author, a mention and a failed
+        // schedule, are the deliberate exceptions and are listed in NOTIFYING_SIGNALS.
         new ApplicationContextRunner()
                 .withUserConfiguration(
                         RabbitMqTopologyConfig.class,
@@ -210,7 +224,8 @@ class RabbitMqTopologyConfigTest {
                                             RabbitMqTopologyConfig.STORY_NOTIFICATION_QUEUE,
                                             RabbitMqTopologyConfig.ADMIN_NOTIFICATION_QUEUE);
                             // Every key the import table maps is an analytics signal that no
-                            // notification may be built from, so a mapping added later is
+                            // notification may be built from, except the ones that are also
+                            // announced to the person involved, so a mapping added later is
                             // covered without editing this list.
                             List<String> eventKeys =
                                     Stream.concat(
@@ -226,6 +241,7 @@ class RabbitMqTopologyConfigTest {
                                                     DomainSignalMappings.BY_EVENT_TYPE
                                                             .keySet()
                                                             .stream())
+                                            .filter(key -> !NOTIFYING_SIGNALS.contains(key))
                                             .distinct()
                                             .toList();
 
@@ -298,10 +314,18 @@ class RabbitMqTopologyConfigTest {
                                                                         eventKey))
                                                 .map(Binding::getDestination)
                                                 .collect(Collectors.toSet());
-                                assertThat(receivers)
-                                        .as("queues that receive %s", eventKey)
-                                        .containsExactly(
-                                                RabbitMqTopologyConfig.USER_EVENT_IMPORT_QUEUE);
+                                if (NOTIFYING_SIGNALS.contains(eventKey)) {
+                                    assertThat(receivers)
+                                            .as("queues that receive %s", eventKey)
+                                            .containsExactlyInAnyOrder(
+                                                    RabbitMqTopologyConfig.USER_EVENT_IMPORT_QUEUE,
+                                                    RabbitMqTopologyConfig.POST_NOTIFICATION_QUEUE);
+                                } else {
+                                    assertThat(receivers)
+                                            .as("queues that receive %s", eventKey)
+                                            .containsExactly(
+                                                    RabbitMqTopologyConfig.USER_EVENT_IMPORT_QUEUE);
+                                }
                             }
                         });
     }

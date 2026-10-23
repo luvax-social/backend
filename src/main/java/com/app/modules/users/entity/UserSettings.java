@@ -12,7 +12,9 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import com.app.modules.users.converter.MessagePermissionConverter;
+import com.app.modules.users.converter.TagPermissionConverter;
 import com.app.modules.users.enums.MessagePermission;
+import com.app.modules.users.enums.TagPermission;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -86,6 +88,17 @@ public class UserSettings {
     @Column(name = "hidden_words_system_enabled", nullable = false)
     @Builder.Default
     private boolean hiddenWordsSystemEnabled = true;
+
+    /** Who may tag this account in a post; decided by the interaction policy, never by callers. */
+    @Convert(converter = TagPermissionConverter.class)
+    @Column(name = "tag_permission", nullable = false, columnDefinition = "tag_permission")
+    @Builder.Default
+    private TagPermission tagPermission = TagPermission.EVERYONE;
+
+    /** True when a tag of this account waits for its approval before it is shown. */
+    @Column(name = "manual_tag_approval", nullable = false)
+    @Builder.Default
+    private boolean manualTagApproval = false;
 
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)

@@ -32,6 +32,10 @@ public final class CursorScope {
     public static final String ADMIN_CONTENT_COMMENTS = "admcc";
     public static final String ADMIN_HASHTAGS = "admh";
     public static final String ADMIN_HASHTAG_SEARCH = "admhs";
+    // Same pairing as the hashtag registry: the listing and the search apply different predicates
+    // over one keyset ordering, so each gets its own tag.
+    public static final String ADMIN_PLACES = "admpl";
+    public static final String ADMIN_PLACE_SEARCH = "admpls";
     // One tag for the listing and its optional search term: unlike the hashtag pair, both walk the
     // same keyset ordering over the same table, so a position from one is valid in the other.
     public static final String ADMIN_HIDDEN_WORDS = "admhw";
@@ -47,6 +51,14 @@ public final class CursorScope {
     public static final String POST_LIKERS = "lik";
     public static final String POST_LIKED_POSTS = "lkd";
     public static final String POST_SAVES = "sav";
+    // One tag per owner listing: drafts, scheduled posts and the archive are different result sets
+    // over similar orderings, so a cursor from one must not be replayable on another.
+    public static final String OWNER_POSTS_DRAFT = "ownd";
+    public static final String OWNER_POSTS_SCHEDULED = "owns";
+    public static final String OWNER_POSTS_ARCHIVED = "owna";
+    public static final String TAGGED_POSTS = "tgd";
+    public static final String TAG_REQUESTS = "tgr";
+    public static final String COLLABORATION_INVITES = "clb";
     public static final String REPORTS = "rpt";
     // A moderator's report listing is narrowed to the open statuses, so its cursor is
     // tagged separately. Sharing REPORTS would let a moderator replay an

@@ -237,9 +237,25 @@ app:
       job-initial-delay: ${HASHTAG_TRENDING_JOB_INITIAL_DELAY:PT5M}
     seed:
       enabled: ${HASHTAG_SEED_ENABLED:true}
+  place:
+    consumer:
+      enabled: ${PLACE_CONSUMER_ENABLED:false}
+    seed:
+      enabled: ${PLACE_SEED_ENABLED:true}
   post:
     consumer:
       enabled: ${POST_CONSUMER_ENABLED:false}
+    # The scheduled publisher: how often it looks for due posts and how many it claims per pass.
+    # A post due now is published within one interval, which is what keeps the one-minute promise.
+    scheduled-publish:
+      enabled: ${APP_POST_SCHEDULED_PUBLISH_ENABLED:false}
+      initial-delay: ${APP_POST_SCHEDULED_PUBLISH_INITIAL_DELAY:PT20S}
+      fixed-delay: ${APP_POST_SCHEDULED_PUBLISH_FIXED_DELAY:PT30S}
+      batch-size: ${APP_POST_SCHEDULED_PUBLISH_BATCH_SIZE:50}
+    # Rewrites every published document of the posts index from PostgreSQL. It also runs once on
+    # its own when the live mapping lacks a field this release added, so no operator step is needed.
+    index:
+      backfill: ${APP_POST_INDEX_BACKFILL:false}
     # PostNotificationConsumer: post likes into like notifications. Separate from the index-sync
     # consumer above because the seed profile must hold this one off while keeping that one.
     notification-consumer:
@@ -380,6 +396,13 @@ app:
       interval: ${WEBSOCKET_REVOCATION_INTERVAL:PT30S}
   rate-limit:
     endpoint-rules:
+      # Creating a place by typing its name. A place is shared text other people see on their
+      # posts, so the bound is per caller and an hour long: thirty new names is far more than
+      # anyone tags honestly, and the fold on case, accents and spacing already makes re-typing an
+      # existing name free of any new row.
+      "[/api/v1/places]":
+        max-attempts: 30
+        window-seconds: 3600
       # Authenticated ticket creation and the caller's own ticket reads. Every other support
       # path already carried a per-caller Redis rule; this sub-tree carried only the JVM-wide
       # Resilience4j backstop, which is a global circuit rather than a per-caller bound, so one

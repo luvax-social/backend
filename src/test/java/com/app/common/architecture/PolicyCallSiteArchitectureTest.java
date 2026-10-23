@@ -14,16 +14,20 @@ import org.springframework.asm.ClassVisitor;
 import org.springframework.asm.MethodVisitor;
 import org.springframework.asm.Opcodes;
 
+import com.app.modules.comment.service.impl.CommentMentionServiceImpl;
 import com.app.modules.comment.service.impl.CommentServiceImpl;
 import com.app.modules.message.service.impl.ConversationServiceImpl;
 import com.app.modules.message.service.impl.MessageServiceImpl;
+import com.app.modules.post.service.impl.PostCollaborationServiceImpl;
+import com.app.modules.post.service.impl.PostMentionServiceImpl;
+import com.app.modules.post.service.impl.PostTagServiceImpl;
 import com.app.modules.social.policy.InteractionPolicyService;
 import com.app.modules.social.service.SocialService;
 
 /**
- * Pins the rule that a comment, a conversation start and a message send reach the block check
- * through {@link InteractionPolicyService} and never through a direct {@code
- * SocialService.isBlockedBetween} call.
+ * Pins the rule that a comment, a conversation start, a message send, a mention, a people tag and a
+ * collaboration invitation reach the block check through {@link InteractionPolicyService} and never
+ * through a direct {@code SocialService.isBlockedBetween} call.
  *
  * <p>A direct call would answer "blocked or not" without the limit, message permission, pending
  * request and hidden word rules that decide the rest, and a later change could add such a call
@@ -35,8 +39,12 @@ class PolicyCallSiteArchitectureTest {
     private static final List<Class<?>> POLICY_GOVERNED_SERVICES =
             List.of(
                     CommentServiceImpl.class,
+                    CommentMentionServiceImpl.class,
                     ConversationServiceImpl.class,
-                    MessageServiceImpl.class);
+                    MessageServiceImpl.class,
+                    PostCollaborationServiceImpl.class,
+                    PostMentionServiceImpl.class,
+                    PostTagServiceImpl.class);
 
     private static final String SOCIAL_SERVICE = internalName(SocialService.class);
 

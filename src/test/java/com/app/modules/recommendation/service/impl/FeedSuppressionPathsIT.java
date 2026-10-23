@@ -469,12 +469,15 @@ class FeedSuppressionPathsIT {
     // Newer posts get a smaller minutesAgo, so a higher number is older.
     private UUID post(UUID author, int minutesAgo) {
         UUID id = UUID.randomUUID();
+        // published_at orders every list, so it is backdated with created_at.
         jdbc.update(
-                "INSERT INTO posts (id, user_id, caption, post_type, status, created_at)"
+                "INSERT INTO posts (id, user_id, caption, post_type, status, created_at,"
+                        + " published_at)"
                         + " VALUES (?, ?, 'caption', CAST('text' AS post_type),"
-                        + " CAST('published' AS post_status), ?)",
+                        + " CAST('published' AS post_status), ?, ?)",
                 id,
                 author,
+                BASE.minusMinutes(minutesAgo),
                 BASE.minusMinutes(minutesAgo));
         return id;
     }

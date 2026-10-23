@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import com.app.common.analytics.AnalyticsStoreTruncator;
 import com.app.common.seed.writer.InteractionSignalLedger;
 import com.app.modules.hashtag.search.HashtagDocument;
+import com.app.modules.post.place.search.PlaceDocument;
 import com.app.modules.post.search.PostDocument;
 import com.app.modules.recommendation.client.GorsePurgeException;
 import com.app.modules.recommendation.client.GorsePurger;
@@ -86,7 +87,10 @@ public class SeedResetService {
         "post_hashtags",
         "post_categories",
         "post_user_tags",
+        "post_collaborators",
+        "post_mentions",
         "post_edit_history",
+        "comment_mentions",
         "comments",
         "user_hidden_words",
         "hidden_words",
@@ -117,6 +121,7 @@ public class SeedResetService {
         "hashtags",
         "categories",
         "posts",
+        "places",
         "media_assets",
         "processed_messages",
         "outbox_events",
@@ -221,6 +226,7 @@ public class SeedResetService {
     private void resetSearchIndexes() {
         recreateIndex(PostDocument.class);
         recreateIndex(HashtagDocument.class);
+        recreateIndex(PlaceDocument.class);
     }
 
     private void recreateIndex(Class<?> documentType) {

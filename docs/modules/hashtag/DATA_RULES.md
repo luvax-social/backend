@@ -67,6 +67,11 @@ These tables cannot be rebuilt from any other source if lost.
 - Failure to normalize before insert will result in duplicate hashtags differing only by case, bypassing the uniqueness guarantee.
 - Rule owner: `HashtagService` — normalize to lowercase before `findByName` or `save`.
 
+### B2. The Place Page Follows This Pattern
+
+The places registry (`post/DATA_RULES.md`, "Places registry") copies this module's shape on purpose: an `active`, `banned`, `deleted` lifecycle that is a state rather than a removal, an administrative registry with a reason on every action, an index that holds only what is usable, and a detail page that answers one unavailable state for every way a name can be gone.
+Banning a place, like banning a hashtag, changes what the registry's own surfaces show and what new writes accept, and never which posts are visible.
+
 ### C. Scope Simplifications
 
 - `hashtag_trending` is populated by a periodic batch job; trending data may be minutes or hours stale.

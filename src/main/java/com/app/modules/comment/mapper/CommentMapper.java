@@ -29,6 +29,7 @@ public interface CommentMapper {
     @Mapping(source = "isLiked", target = "isLiked")
     @Mapping(source = "hasReported", target = "hasReported")
     @Mapping(target = "pinned", constant = "false")
+    @Mapping(target = "mentions", expression = "java(java.util.List.of())")
     CommentResponse toResponse(
             Comment comment, UserSummaryResponse author, boolean isLiked, boolean hasReported);
 

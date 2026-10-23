@@ -48,6 +48,7 @@ import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.event.PostIndexUpsertEvent;
 import com.app.modules.post.messaging.PostEventTypes;
 import com.app.modules.post.repository.PostRepository;
+import com.app.modules.post.search.PostDocumentFactory;
 import com.app.modules.post.search.PostSearchRepository;
 import com.app.modules.recommendation.client.GorseClient;
 import com.app.modules.recommendation.client.dto.GorseItem;
@@ -68,6 +69,7 @@ class PostIndexSyncConsumerTest {
     @Mock private PostRepository postRepository;
     @Mock private ObjectMapper objectMapper;
     @Mock private HashtagService hashtagService;
+    @Mock private PostDocumentFactory postDocumentFactory;
     @Mock private GorseClient gorseClient;
     @Mock private Channel channel;
 
@@ -90,6 +92,7 @@ class PostIndexSyncConsumerTest {
                         postSearchRepository,
                         postRepository,
                         hashtagService,
+                        postDocumentFactory,
                         gorseClient,
                         objectMapper,
                         sleptMillis::add);
@@ -345,6 +348,7 @@ class PostIndexSyncConsumerTest {
                 USER_ID,
                 "published",
                 List.of(),
-                OffsetDateTime.now(ZoneOffset.UTC));
+                OffsetDateTime.now(ZoneOffset.UTC),
+                null);
     }
 }

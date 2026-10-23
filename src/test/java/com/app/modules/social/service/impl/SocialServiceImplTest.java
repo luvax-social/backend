@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import com.app.common.enums.ApiErrorCode;
@@ -63,6 +64,7 @@ class SocialServiceImplTest {
     @Mock private DirectConversationProvisioner directConversationProvisioner;
     @Mock private UserMuteRepository userMuteRepository;
     @Mock private AccountShowFewerRepository accountShowFewerRepository;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     private SocialServiceImpl service;
 
@@ -78,7 +80,8 @@ class SocialServiceImplTest {
                         reportedTargetService,
                         directConversationProvisioner,
                         userMuteRepository,
-                        accountShowFewerRepository);
+                        accountShowFewerRepository,
+                        eventPublisher);
     }
 
     @Test

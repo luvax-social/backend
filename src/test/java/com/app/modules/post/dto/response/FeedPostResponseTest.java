@@ -3,7 +3,6 @@ package com.app.modules.post.dto.response;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.lang.reflect.RecordComponent;
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -12,8 +11,10 @@ import org.junit.jupiter.api.Test;
 
 import com.app.common.response.UserSummaryResponse;
 import com.app.modules.hashtag.dto.response.HashtagSummaryResponse;
+import com.app.modules.post.enums.CollaborationStatus;
 import com.app.modules.post.enums.PostStatus;
 import com.app.modules.post.enums.PostType;
+import com.app.modules.post.place.dto.response.PlaceSummaryResponse;
 
 class FeedPostResponseTest {
 
@@ -71,16 +72,23 @@ class FeedPostResponseTest {
                 false,
                 true,
                 4,
-                "location",
-                new BigDecimal("10.5"),
-                new BigDecimal("20.5"),
+                new PlaceSummaryResponse(
+                        UUID.fromString("00000000-0000-0000-0000-0000000000a4"), "Da Nang"),
                 List.of(),
                 List.of(
                         new HashtagSummaryResponse(
                                 UUID.fromString("00000000-0000-0000-0000-0000000000a3"),
                                 "hashtag")),
+                List.of(
+                        new PostMentionResponse(
+                                "jane.doe",
+                                UUID.fromString("00000000-0000-0000-0000-0000000000a5"),
+                                "jane.doe")),
+                List.of(),
+                CollaborationStatus.INVITED,
                 OffsetDateTime.parse("2026-01-01T00:00:00Z"),
                 OffsetDateTime.parse("2026-01-02T00:00:00Z"),
+                OffsetDateTime.parse("2026-01-03T00:00:00Z"),
                 null);
     }
 
@@ -98,13 +106,15 @@ class FeedPostResponseTest {
                 source.isSaved(),
                 source.hasReported(),
                 source.viewCount(),
-                source.locationName(),
-                source.latitude(),
-                source.longitude(),
+                source.place(),
                 source.media(),
                 source.hashtags(),
+                source.mentions(),
+                source.collaborators(),
+                source.viewerCollaboration(),
                 source.createdAt(),
                 source.updatedAt(),
+                source.publishedAt(),
                 score);
     }
 }

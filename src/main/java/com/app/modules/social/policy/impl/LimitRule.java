@@ -29,6 +29,7 @@ class LimitRule implements InteractionRule {
             EnumSet.of(
                     InteractionType.COMMENT,
                     InteractionType.MENTION,
+                    InteractionType.TAG,
                     InteractionType.MESSAGE_INITIATE,
                     InteractionType.MESSAGE_SEND);
 
