@@ -1,0 +1,216 @@
+# CodeRabbit review configuration for the backend.
+# Reference: https://docs.coderabbit.ai/reference/configuration
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+tone_instructions: >-
+  Professional and concise. Cite the file and line, state the concrete failure scenario, and skip
+  style points that Spotless or the compiler already enforce.
+early_access: false
+enable_free_tier: true
+
+reviews:
+  # chill keeps the inline comments to defects a maintainer would act on, so the review-and-fix
+  # loop converges instead of chasing nitpicks.
+  profile: chill
+  # The review requests changes while findings are open and approves once they are resolved,
+  # which is the signal an author or agent uses to know the pull request is ready to finalise.
+  request_changes_workflow: true
+  high_level_summary: true
+  review_status: true
+  review_details: false
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: false
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  poem: false
+  in_progress_fortune: false
+  # Labels and reviewers are already managed by the pr-size workflow and CODEOWNERS.
+  suggested_labels: false
+  auto_apply_labels: false
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+  # Adds a copy-paste instruction block to each finding so a coding agent can apply the fix.
+  enable_prompt_for_ai_agents: true
+  abort_on_close: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    # Fix commits pushed during review must be re-reviewed, so the pause is turned off.
+    auto_pause_after_reviewed_commits: 0
+    base_branches:
+      - "^develop$"
+      - "^main$"
+    ignore_title_keywords:
+      - "wip"
+      - "do not merge"
+    ignore_usernames:
+      - "dependabot[bot]"
+      - "renovate[bot]"
+
+  # Generated, binary and fixture content is verified by its own tooling and only adds noise here.
+  path_filters:
+    - "!database/schema.sql"
+    - "!src/main/resources/seed/content/**"
+    - "!src/test/resources/seed-fixtures/**"
+    - "!**/*.png"
+    - "!**/*.jpg"
+    - "!**/*.jpeg"
+    - "!**/*.svg"
+    - "!**/*.lock"
+    - "!target/**"
+    - "!.workspace/**"
+
+  path_instructions:
+    - path: "src/main/java/**/controller/**"
+      instructions: |
+        Controllers delegate to a service and nothing else: no repository calls, no business rules,
+        no @Transactional. Every response is wrapped in ApiResponse<T> (CursorPageResponse<T> or
+        PageResponse<T> for lists). Every handler has Javadoc stating the HTTP action, what it
+        accepts, what it returns and its auth requirement. Check that authorization is enforced for
+        the acting account and that a refusal caused by a block answers as not found.
+    - path: "src/main/java/**/service/impl/**"
+      instructions: |
+        @Transactional belongs on service implementation methods only, never on interfaces or
+        controllers, and a REQUIRES_NEW propagation must carry a comment explaining the isolation
+        reason. Check that a thrown AppException inside a joined transaction does not mark it
+        rollback-only when the caller catches it. Domain events are enqueued through the outbox in
+        the same transaction as the write. Application code never writes a denormalised counter;
+        PostgreSQL triggers own them. Queries on soft-deleted tables include deleted_at IS NULL and
+        the moderation tombstone where one exists.
+    - path: "src/main/java/**/consumer/**"
+      instructions: |
+        Consumers are idempotent through ProcessedMessageService.processOnce, use manual
+        acknowledgement with bounded retry, and send permanent failures to the dead-letter queue
+        without requeue. Validate the envelope against the event types the queue is bound to, since
+        one queue can carry several event types with different payload keys.
+    - path: "src/main/java/**"
+      instructions: |
+        Java 21 with virtual threads. Comments are English and explain why, never what; no section
+        dividers, no commented-out code, no TODO without an issue reference, no System.out or
+        printStackTrace. Public service interface methods, @RestController handlers, @Entity,
+        @Configuration classes and response records carry Javadoc. Primary keys are UUIDs generated
+        by the database and created_at/updated_at are never set in application code. Flag
+        user-controlled input reaching SQL, logs or paths without validation, secrets in code, and
+        N+1 query patterns on list endpoints.
+    - path: "src/main/resources/db/migration/**"
+      instructions: |
+        An applied migration is immutable because Flyway validates checksums; flag any edit to an
+        existing version. A migration that creates or drops an index must use CONCURRENTLY and ship
+        a matching .sql.conf sidecar setting executeInTransaction=false. A migration that deletes or
+        overwrites existing rows must copy them into an archive table first. ALTER TYPE ... ADD VALUE
+        sits alone in its file. Constraints on large tables are added NOT VALID and validated in a
+        later migration. Counters get a trigger and a CHECK (column >= 0). File names follow
+        V{n}__{description}.sql with the next free number, and database/schema.sql must be
+        regenerated for the same change.
+    - path: "src/main/resources/**/*.{yml,yaml}"
+      instructions: |
+        Configuration values that differ per environment come from environment variables with a
+        safe default, secrets are never committed, and a new property is documented in
+        .env.example.
+    - path: "src/test/**"
+      instructions: |
+        Unit tests end in Test, integration tests in IT, and method names follow
+        {method}_{condition}_{outcome}. Integration tests use Testcontainers PostgreSQL through
+        TestContainerImages, never H2 and never an image literal. No @Transactional on
+        @SpringBootTest classes, no Thread.sleep, no @InjectMocks (construct the implementation),
+        no legacy @MockBean (use @MockitoBean), and no @Disabled without an issue reference. Check
+        that a test asserts the behaviour named in its title and would fail without the change.
+    - path: "docs/**"
+      instructions: |
+        Documentation is written for a future maintainer who has not seen the conversation: one
+        sentence per line, no em dash, no references to prompts, tasks or untracked local files.
+        DATA_RULES.md files must stay consistent with the code and migrations they describe.
+    - path: ".github/workflows/**"
+      instructions: |
+        Pin third-party actions to a version, grant the narrowest permissions the job needs, and
+        never echo secrets. Flag pull_request_target jobs that check out untrusted code.
+    - path: "**/Dockerfile"
+      instructions: |
+        Pin base image tags, run as a non-root user, and avoid copying secrets or .env files into
+        the image.
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: warning
+      requirements: >-
+        Conventional Commits form type(scope): subject with a lowercase subject, a type from
+        feat, fix, refactor, test, chore, docs, perf or ci, a scope from the repository
+        allowlist, and at most 80 characters. The title must describe the change itself, not a
+        task number or an internal label.
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      - name: "Index migrations are concurrent"
+        mode: error
+        instructions: |
+          Fail when a new or changed file under src/main/resources/db/migration creates or drops an
+          index without CONCURRENTLY, or does so without a sibling .sql.conf file that sets
+          executeInTransaction=false. Pass when the pull request adds no index statement.
+      - name: "Counters are trigger maintained"
+        mode: error
+        instructions: |
+          Fail when Java code under src/main/java increments, decrements or assigns one of the
+          denormalised counters (follower_count, following_count, post_count, like_count,
+          comment_count, save_count, reply_count, view_count on stories, actor_count) outside a
+          read. Pass otherwise.
+      - name: "No attribution in commits"
+        mode: warning
+        instructions: |
+          Fail when a commit message in the pull request contains a Co-Authored-By trailer, a
+          "Generated with" footer or an agent signature, or when a commit message has a body.
+          Pass when every commit is a single conventional line.
+
+  tools:
+    gitleaks:
+      enabled: true
+    osvScanner:
+      enabled: true
+    actionlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    hadolint:
+      enabled: true
+    yamllint:
+      enabled: true
+    # The repository writes Markdown one sentence per line and Spotless owns Java formatting.
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+    checkov:
+      enabled: false
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CLAUDE.md"
+      - "AGENTS.md"
+      - ".claude/rules/*.md"
+      - "docs/modules/GLOBAL_RULES.md"
+      - "docs/modules/*/DATA_RULES.md"
+  learnings:
+    scope: local
+  pull_requests:
+    scope: local
