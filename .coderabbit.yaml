@@ -16,6 +16,8 @@ reviews:
   # The review requests changes while findings are open and approves once they are resolved,
   # which is the signal an author or agent uses to know the pull request is ready to finalise.
   request_changes_workflow: true
+  # The author's own approval never counts, so the review stays a second pair of eyes.
+  allow_author_approval: false
   high_level_summary: true
   review_status: true
   review_details: false
@@ -49,9 +51,6 @@ reviews:
     ignore_title_keywords:
       - "wip"
       - "do not merge"
-    ignore_usernames:
-      - "dependabot[bot]"
-      - "renovate[bot]"
 
   # Generated, binary and fixture content is verified by its own tooling and only adds noise here.
   path_filters:
