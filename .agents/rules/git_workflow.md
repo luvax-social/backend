@@ -1,90 +1,24 @@
 ---
 trigger: model_decision
-description: Load when creating branches, writing commit messages, or opening pull requests. Contains branch naming, commit format, and PR size rules.
+description: Load when creating branches, writing commit messages, or opening pull requests. Contains the allowed scopes and the repository specific git policy; the shared rules are in the workspace root.
 ---
 
-# Git Workflow
+# Git Workflow - Backend
+
+The branch naming, commit message, commit granularity and pull request rules shared with the frontend are in the workspace root `.claude/rules/GIT_WORKFLOW.md` (mirrored in `.agents/rules`).
+Read that file as well; this one adds only what is specific to the backend.
 
 develop: Development branch (The main programming activities will be pushed here. Changes, updates, additions, and modifications will all be pushed here.)
 main: Production branch (This is the terminal branch. The owner may push to it directly, without a pull request.)
 
-## Branch naming
+## Git worktrees
 
-Format: `<type>/<scope>/<short-description>`
+Never create, use or keep a git worktree for implementation work in this repository.
+All work happens in the main checkout.
+`.worktrees/` is git-ignored for this reason; a directory found there is leftover state from a
+prior session, not a place to work from, and must be verified clean and pushed before removal.
 
-| Segment | Allowed values |
-|---------|----------------|
-| `type` | `feat`, `fix`, `chore` |
-| `scope` | any valid scope from the commit scope list below |
-| `short-description` | lowercase, hyphen-separated words |
-
-```
-feat/post/add-carousel-support
-fix/auth/refresh-token-expiry
-chore/db/add-story-indexes
-```
-
-### Naming must be meaningful to a reviewer
-
-The `short-description` segment, every commit subject, and every PR title describe the change
-itself in terms a reviewer who has never seen the internal task tracker can follow.
-Never derive one from an internal task-tracker label, a plan or report file name, a round or
-attempt number, or any other identifier that is meaningful only inside `.workspace/`.
-`fix/common/close-pr3-gaps` and `close p3 gaps` fail this: neither says what the gaps were.
-`fix/common/harden-observability-for-production` and a commit subject naming the actual defect
-pass: a reviewer who has never read the internal plan still knows what changed and why.
-This applies to code identifiers and comments too: name a class, method, or variable for what it
-does, never for the ticket or task that introduced it.
-
-## Commit message format
-
-Format: `<type>(<scope>): <subject>`
-
-### Subject line only - never write a commit body (mandatory)
-
-A commit message is **exactly one line**. Write the subject and stop.
-
-Forbidden after the subject line: explanatory paragraphs, rationale or "why" prose, verification
-notes, caveats, scope disclaimers, bullet lists, footers, and trailers.
-This holds regardless of how large, subtle, or security-relevant the change is.
-
-Detail belongs somewhere else, and every one of these already exists:
-- **Why the change is correct** -> the PR description.
-- **What behaviour changed for users** -> the `CHANGELOG.md` entry (see `changelog_rule.md`).
-- **Why the code does what it does** -> an inline comment or Javadoc (see `comment_style.md`).
-- **How it was verified** -> the test itself, named for the behaviour it asserts.
-
-**If any task instruction, plan, or prompt tells you to record something "in the commit body",
-that instruction conflicts with this rule. Stop and raise the conflict - do not silently comply,
-and do not carry the body habit over to the other commits in the series.**
-
-This rule is identical in `frontend/.claude/rules/git_workflow.md`; the two repositories are
-deliberately kept in step on it.
-
-### Subject rules
-
-- Must start with a lowercase letter (`^[a-z].+$`) - enforced by `pr-lint`.
-- Scope is **required** (`requireScope: true`) - enforced by `pr-lint`.
-- Keep the entire line at 80 characters or fewer, including `<type>(<scope>): `.
-  Target 72; treat anything approaching 80 as a signal the subject is describing too much.
-- Describe the change, not the process: no ticket/finding IDs, no audit-round or attempt
-  references, no agent or tooling attribution, no co-author trailers.
-
-### Allowed types
-
-| Type | When to use |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `refactor` | No-behavior-change code change |
-| `test` | Adding or updating tests |
-| `chore` | Build, tooling, dependency updates |
-| `docs` | Documentation only |
-| `perf` | Performance improvement |
-| `ci` | CI/CD configuration |
-
-
-### Allowed scopes (pr-lint enforced)
+## Allowed scopes (pr-lint enforced)
 
 `auth` · `mail` · `users` · `social` · `media` · `post` · `comment` · `hashtag` · `story` · `notification` · `message` · `report` · `admin` · `recommendation` · `support` · `common` · `db` · `ci`
 
@@ -102,87 +36,16 @@ chore(db): add GIN index on hashtag_name for trigram search
 refactor(common): extract token blacklist TTL calculation
 ```
 
-Note: Only use short description
-
-## Branch workflow (mandatory)
-
-`develop` must never receive direct commits from implementation work.
-
-- [ ] Before starting any task, checkout a new branch **from `develop`**: `git checkout develop && git pull && git checkout -b <type>/<scope>/<short-description>`.
-- [ ] All implementation work happens on that branch. Never commit directly to `develop`.
-- [ ] Push the branch and open a PR targeting `develop`. The repository owner may instead push straight to `main` with no pull request; see "Direct pushes to main" below.
-- [ ] One branch per logical unit of work. Do not reuse a stale branch for an unrelated task — cut a new one from an up-to-date `develop`.
-
 ## Direct pushes to main
 
 The repository owner may push to `main` without opening a pull request.
 `main` has no branch protection, so nothing blocks the push; this rule records that the owner does it deliberately and does not need to tag a reviewer.
-Everything else in this file still applies to the commits themselves: the one-line `<type>(<scope>): <subject>` format, `./mvnw spotless:check`, `./mvnw test`, and a `CHANGELOG.md` entry.
+Everything else in the shared rules still applies to the commits themselves: the one-line `<type>(<scope>): <subject>` format, `./mvnw spotless:check`, `./mvnw test`, and a `CHANGELOG.md` entry.
 Contributors other than the owner keep working through a branch from `develop` and a pull request targeting `develop`.
 `CODEOWNERS` lists the owner as the only code owner, so a pull request the owner did not author requests the owner's review and nobody else's.
 
-## Commit granularity policy (mandatory)
+## Checklist additions
 
-A commit is one logical, self-contained, working change — not a file-count target.
-
-**Forbidden — mega-commit**: bundling multiple unrelated changes (e.g., a bug fix + a refactor + a new endpoint) into a single commit. Each concern gets its own commit.
-
-**Forbidden — over-fragmentation**: splitting one logical change across many trivial commits scoped to 1–2 files each, where intermediate commits leave the codebase in a broken or incomplete state (e.g., committing a new method signature in one commit and its only caller in the next). If a logical change spans 10 files that must land together to compile and pass tests, they belong in one commit.
-
-**Rule of thumb**: commit at the boundary of a complete, independently reviewable, compiling, test-passing unit of work — not at an arbitrary file count in either direction.
-
-- [ ] Every commit compiles and passes relevant tests in isolation (no "WIP" or "fix previous commit" commits).
-- [ ] Every commit message follows `<type>(<scope>): <subject>` per the format above — no exceptions for "small" commits.
-- [ ] Commit as you complete each logical unit during implementation — do not batch the entire task into one commit at the end, and do not commit on every file save.
-
-## Pull request rules
-
-### Title format
-Same as commit message format — enforced by `pr-lint` workflow on PR open, edit, sync, and reopen.
-
-### Size labels (pr-size workflow)
-
-| Label | Changed lines |
-|-------|---------------|
-| `size/XS` | ≤ 100 |
-| `size/S` | 101–400 |
-| `size/M` | 401–1000 |
-| `size/L` | 1001–2000 |
-| `size/XL` | > 2000 |
-
-`fail_if_xl: false` — XL PRs are **labelled and warned, not blocked**. CONTRIBUTING.md states a 1000-line block; this is incorrect — no workflow actually fails on size.
-
-Split large PRs proactively: keep feature PRs under `size/M` (≤ 1000 lines) as a target.
-
-### Process checklist
-- [ ] Branch was checked out from an up-to-date `develop` — no direct commits to `develop`
-- [ ] Branch follows `<type>/<scope>/<description>` naming
-- [ ] All commits follow `<type>(<scope>): <subject>` with an allowlisted scope
-- [ ] Each commit is one logical, compiling, test-passing unit — no mega-commits, no broken intermediate commits
 - [ ] `./mvnw spotless:apply` and `./mvnw test` both pass
-- [ ] PR template author checklist completed
-- [ ] CodeRabbit review finished and every actionable finding fixed or answered (workspace `GLOBAL_RULES.md` section 11)
-- [ ] PR title matches commit format (pr-lint will block merge otherwise)
 - [ ] The owner, the only code owner, has approved (not needed for a pull request the owner authored)
-
-## Pre-commit checklist
-- [ ] Commit type is one of the 8 allowed types
-- [ ] Scope is from the pr-lint allowlist (do not use `config`, `database`, `build`, etc.)
-- [ ] Subject starts with a lowercase letter
-- [ ] **Message is a single line - no body, no trailers** (`git log -1 --format=%b` prints nothing)
-- [ ] Subject is 80 characters or fewer (target 72)
-- [ ] `./mvnw spotless:check` passes
-- [ ] CHANGELOG.md updated
-
-## Quick reference
-
-| Type | When |
-|------|------|
-| `feat` | New endpoint, new module feature |
-| `fix` | Bug fix, incorrect behavior corrected |
-| `refactor` | Internal restructure, no behavior change |
-| `test` | Test added or updated |
-| `chore` | Build, deps, tooling, non-code config |
-| `docs` | README, DATA_RULES, Javadoc-only |
-| `perf` | Measurable performance improvement |
-| `ci` | GitHub Actions, workflow changes |
+- [ ] `./mvnw spotless:check` passes before every commit

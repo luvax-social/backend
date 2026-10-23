@@ -24,7 +24,7 @@ User roles: `user`, `moderator`, `admin`. Architecture: **Modular Monolith**.
 ```text
 app/
 ├── .agents/
-│   ├── rules/                      # base.md, changelog_rule.md, comment_style.md, doc_first.md,
+│   ├── rules/                      # base.md, comment_style.md, doc_first.md,
 │   │                               # git_workflow.md, struct.md, testing.md, workspace.md
 │   └── skills/                     # Skill definitions
 ├── .github/

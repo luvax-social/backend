@@ -34,7 +34,7 @@ Before asking the task owner to re-decide something architectural, check this lo
 
 ## Recording a new decision
 
-Appending a new confirmed architecture decision to `docs/modules/DECISIONS.md` is the final step of any task that produced one — not optional, in the same spirit as `changelog_rule.md`'s requirement to update `CHANGELOG.md`. A decision confirmed during a task but never logged is a decision that will be re-asked and possibly re-answered differently in the next session.
+Appending a new confirmed architecture decision to `docs/modules/DECISIONS.md` is the final step of any task that produced one — not optional, in the same spirit as the shared `CHANGELOG_RULE.md`'s requirement to update `CHANGELOG.md`. A decision confirmed during a task but never logged is a decision that will be re-asked and possibly re-answered differently in the next session.
 
 ## Initial seed content
 
